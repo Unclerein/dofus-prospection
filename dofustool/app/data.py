@@ -234,7 +234,7 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
 def hdv_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict | None:
     """Dernières annonces HDV connues de l'item : lots pour une ressource, exemplaires pour un équipement."""
     rows = conn.execute(
-        "SELECT p1, p10, p100, p1000, effects, captured_at FROM hdv_listings WHERE item_id = ? ORDER BY p1", (item_id,)
+        "SELECT p1, p10, p100, p1000, effects, captured_at FROM hdv_current WHERE item_id = ? ORDER BY p1", (item_id,)
     ).fetchall()
     if not rows:
         return None

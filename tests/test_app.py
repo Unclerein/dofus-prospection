@@ -97,13 +97,28 @@ def app_db(tmp_path, monkeypatch):
     db.save_market_history(c, 3, GRAIN_DAY, [(day - d * 86400, 150 + d, 10 + d) for d in range(12)], now)
     db.save_market_history(c, 3, GRAIN_HOUR, [(int(now) // 3600 * 3600 - h * 3600, 170 + h, 3) for h in range(20)], now)
     db.set_status(c, decode_alert="test d'alerte", decode_alert_ts=now)
+    # Un équipement avec ses annonces et ses caractéristiques de base, pour la page Forgemagie.
+    c.execute("INSERT INTO items VALUES (500, 'Anneau test', 1, 'Anneau', 60, 1, 0, 0)")
+    c.executemany("INSERT INTO effects VALUES (?, ?)", [(111, "PA"), (125, "Vitalité"), (123, "Chance")])
+    c.executemany("INSERT INTO item_effects VALUES (500, ?, ?, ?)", [(111, 1, 1), (125, 201, 250)])
+    c.execute("INSERT INTO item_effects_fetched VALUES (500, ?)", (now,))
+    c.executemany(
+        "INSERT INTO hdv_listings VALUES (500, ?, ?, 0, 0, 0, ?, ?, ?)",
+        [
+            (1, 50_000, "[[111, 1], [125, 210]]", now, now),
+            (2, 90_000, "[[111, 1], [125, 250]]", now, now),
+            (3, 400_000, "[[111, 1], [125, 240], [123, 15]]", now, now),
+            (4, 30_000, "[[111, 1]]", now, now),
+            (5, 70_000, "[[111, 1], [125, 230]]", now - 86400, now - 86400),
+        ],
+    )
     c.commit()
     c.close()
     monkeypatch.setenv("DOFUSTOOL_DB", str(path))
     return path
 
 
-@pytest.mark.parametrize("page", ["Crafts", "Tendances", "Fiche objet", "État"])
+@pytest.mark.parametrize("page", ["Crafts", "Forgemagie", "Tendances", "Fiche objet", "État"])
 def test_app_pages_render_without_error(app_db, page):
     from streamlit.testing.v1 import AppTest
 

@@ -112,7 +112,7 @@ class PriceBook:
             templates.setdefault(item_id, {})[effect_id] = (low, high)
         self._hdv: dict[int, tuple[float, str, float]] = {}
         for item_id, p1, p10, p100, p1000, effects, captured_at in conn.execute(
-            "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_listings WHERE captured_at >= ?",
+            "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_current WHERE captured_at >= ?",
             (oldest,),
         ):
             price = unit_price((p1, p10, p100, p1000))

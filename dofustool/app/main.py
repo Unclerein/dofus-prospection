@@ -9,10 +9,11 @@ import streamlit as st
 from dofustool import config, db
 from dofustool.analysis.crafts import CRAFT
 from dofustool.analysis.trends import OVER, UNDER
-from dofustool.app import data
+from dofustool.analysis.forgemagie import Filter, base_lines, perfect_filter
+from dofustool.app import data, forge
 
 DB_PATH = Path(os.environ.get("DOFUSTOOL_DB", db.MARKET_PATH))
-PAGES = ["Crafts", "Tendances", "Fiche objet", "État"]
+PAGES = ["Crafts", "Forgemagie", "Tendances", "Fiche objet", "État"]
 
 KAMAS = st.column_config.NumberColumn(format="localized")
 PERCENT = st.column_config.NumberColumn(format="%.0f %%")
@@ -49,6 +50,7 @@ def data_version() -> tuple:
         stamp = conn.execute(
             "SELECT (SELECT COUNT(*) FROM snapshots), (SELECT MAX(captured_at) FROM market_history), "
             "(SELECT MAX(captured_at) FROM hdv_listings), (SELECT COUNT(*) FROM item_effects_fetched), "
+            "(SELECT COUNT(*) FROM hdv_listings), "
             "(SELECT value FROM static_meta WHERE key = 'imported_at'), "
             "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
             " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
@@ -289,6 +291,169 @@ def page_item(state: dict) -> None:
         selectable_table(detail["used_in"], "used-in", {"Prix de vente": KAMAS, "Marge": KAMAS})
 
 
+def signed(value: float | None) -> str:
+    return "—" if value is None else f"{value:+,.0f}".replace(",", " ") + " kamas"
+
+
+def forge_item(conn, state: dict, item_id: int, names: dict[int, str]) -> None:
+    ws = state["ws"]
+    template = forge.load_template(conn, item_id)
+    if template is None:
+        st.warning(
+            "Caractéristiques de base inconnues pour cet objet : exos, overs et jets ne peuvent pas être lus. "
+            "Lance « python -m dofustool.staticdata.effects » (le raccourci le fait à la fermeture du jeu)."
+        )
+        return
+    listings = forge.read_listings(conn, item_id, template)
+    lines = base_lines(template)
+    exos = forge.exo_counts(listings)
+    saved = db.load_fm_filter(conn, item_id)
+
+    def key(name: str) -> str:
+        return f"fm-{item_id}-{name}"
+
+    # Les critères enregistrés initialisent les réglages à la première ouverture de l'objet.
+    initial = Filter.from_config(saved)
+    for effect_id in lines:
+        st.session_state.setdefault(key(effect_id), initial.minimums.get(effect_id, 0))
+    exo_choices = [None, 0, *exos]
+    if st.session_state.get(key("exo"), initial.exo) not in exo_choices:
+        exo_choices.append(st.session_state.get(key("exo"), initial.exo))
+    st.session_state.setdefault(key("exo"), initial.exo)
+    st.session_state.setdefault(key("exo-min"), initial.exo_min)
+
+    def apply(flt: Filter) -> None:
+        for effect_id in lines:
+            st.session_state[key(effect_id)] = flt.minimums.get(effect_id, 0)
+        st.session_state[key("exo")] = flt.exo
+        st.session_state[key("exo-min")] = flt.exo_min
+
+    with st.container(border=True):
+        st.markdown("**Critères** — réglés ligne par ligne, enregistrés pour cet objet.")
+        columns = st.columns(4)
+        for index, (effect_id, (low, high)) in enumerate(lines.items()):
+            seen = max((entry[1].values.get(effect_id, 0) for entry in listings), default=high)
+            base = f"{low}" if low == high else f"{low} à {high}"
+            columns[index % 4].number_input(
+                f"{names.get(effect_id, f'effet {effect_id}')} ≥",
+                min_value=0, max_value=max(high, seen), step=1, key=key(effect_id), help=f"De base : {base}.",
+            )  # fmt: skip
+        c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+
+        def exo_label(choice: int | None) -> str:
+            if choice is None:
+                return "Peu importe"
+            if choice == 0:
+                return "Aucun exo"
+            return f"{names.get(choice, f'effet {choice}')} ({exos.get(choice, 0)} annonce(s))"
+
+        c1.selectbox("Exo", exo_choices, format_func=exo_label, key=key("exo"))
+        c2.number_input(
+            "Valeur minimale de l'exo", min_value=1, step=1, key=key("exo-min"),
+            disabled=not st.session_state[key("exo")],
+        )  # fmt: skip
+        c3.button("Jets parfaits", on_click=apply, args=(perfect_filter(template),), key=key("perfect"),
+                  help="Toutes les lignes de base au maximum, sans exo.")  # fmt: skip
+        c4.button("Réinitialiser", on_click=apply, args=(Filter({}),), key=key("reset"))
+
+    flt = Filter(
+        {effect_id: st.session_state[key(effect_id)] for effect_id in lines if st.session_state[key(effect_id)] > 0},
+        st.session_state[key("exo")],
+        st.session_state[key("exo-min")],
+    )
+    if flt.to_config() != Filter.from_config(saved).to_config():
+        db.save_fm_filter(conn, item_id, flt.to_config())
+
+    s = forge.summarize(ws, item_id, listings, flt)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Coût de craft", kamas(s["craft_cost"]))
+    c1.caption("Le moins cher entre achat et craft de chaque ingrédient." if s["craft_cost"] is not None else "Pas de recette, ou prix manquant.")
+    c2.metric("Moins cher en vente", kamas(s["cheapest_price"]))
+    c2.caption(f"{s['count']} annonces. Celui-ci : {s['cheapest_label']}.")
+    c3.metric("Moins cher de base", kamas(s["plain_price"]))
+    c3.caption(f"{s['plain_count']} annonce(s) sans exo, over ni ligne manquante.")
+    c4.metric("Fabriquer pour revendre de base", signed(s["craft_margin"]))
+    c4.caption("Prix de base net de taxe, moins le coût de craft.")
+    if s["cheapest_missing"]:
+        lost = ", ".join(names.get(i, f"effet {i}") for i in s["cheapest_missing"])
+        st.warning(f"L'exemplaire le moins cher a perdu une ligne de base : {lost}. Il n'est pas comparable à un craft.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Annonces qui correspondent", s["match_count"])
+    c2.metric("Moins cher selon tes critères", kamas(s["match_price"]))
+    c2.caption(f"Médiane : {kamas(s['match_median'])}." if s["match_median"] is not None else "Aucune annonce.")
+    c3.metric("Prime sur un exemplaire de base", signed(s["premium_vs_plain"]))
+    c3.caption("Écart de prix affiché, avant le coût des runes.")
+    c4.metric("Gain sur un craft", signed(s["premium_vs_craft"]))
+    c4.caption("Prix net de taxe moins le coût de craft, avant le coût des runes.")
+
+    frame = forge.listings_frame([entry for entry in listings if flt.matches(entry[1])], template, names)
+    st.dataframe(
+        frame, hide_index=True, width="stretch",
+        column_config={"Prix": KAMAS, "Vue depuis": st.column_config.DatetimeColumn(format="DD/MM HH:mm")},
+    )  # fmt: skip
+    st.caption("Ce sont des prix demandés, pas des ventes. Un type d'exo rare peut n'avoir qu'une ou deux annonces.")
+
+    gone = forge.gone_frame(conn, item_id, template, names)
+    with st.expander(f"Annonces disparues depuis une visite précédente ({len(gone)})"):
+        if gone.empty:
+            st.caption("Aucune pour l'instant. Rouvre cet objet à l'HDV un autre jour : les annonces vendues ou retirées apparaîtront ici.")
+        else:
+            st.caption("Vendues ou retirées par leur vendeur : les données ne permettent pas de distinguer les deux.")
+            dates = st.column_config.DatetimeColumn(format="DD/MM HH:mm")
+            st.dataframe(gone, hide_index=True, width="stretch",
+                         column_config={"Prix": KAMAS, "Vue depuis": dates, "Vue pour la dernière fois": dates})  # fmt: skip
+
+
+def page_forge(state: dict) -> None:
+    st.title("Forgemagie")
+    conn = db.connect(DB_PATH)
+    try:
+        options = forge.equipment_options(conn)
+        if not options:
+            st.info("Aucune annonce d'équipement connue : ouvre la fiche d'achat d'un équipement à l'HDV pendant une capture.")
+            return
+        names = forge.effect_names(conn)
+        by_item, overall = st.tabs(["Par objet", "Classement général"])
+        with by_item:
+            ids = list(options)
+            if st.session_state.get("forge_item") not in options:
+                st.session_state["forge_item"] = ids[0]
+            item_id = st.selectbox("Équipement", ids, format_func=options.get, key="forge_item")
+            forge_item(conn, state, item_id, names)
+        with overall:
+            exos = forge.all_exo_counts(conn)
+            c1, c2 = st.columns([2, 3])
+            criterion = c1.radio("Critère comparé", [forge.SAVED, forge.PERFECT, forge.EXO], horizontal=True)
+            exo = None
+            if criterion == forge.EXO:
+                exo = c2.selectbox(
+                    "Exo", list(exos), format_func=lambda i: f"{names.get(i, f'effet {i}')} ({exos[i]} annonce(s))"
+                )
+            frame = forge.ranking(conn, state["ws"], criterion, exo)
+            st.caption(
+                f"{len(frame)} équipements dont les annonces sont connues. Le classement se remplit à mesure que tu "
+                "ouvres des objets à l'HDV. « Prime sur la base » : écart de prix affiché entre le moins cher "
+                "répondant au critère et le moins cher de base, avant le coût des runes."
+            )
+            frame = frame.sort_values("Prime sur la base", ascending=False, na_position="last")
+            money = ["Coût de craft", "Moins cher", "Moins cher de base", "Marge du craft", "Moins cher selon critère",
+                     "Prime sur la base", "Gain sur le craft"]  # fmt: skip
+            event = st.dataframe(
+                frame.drop(columns=["item_id"]), hide_index=True, width="stretch",
+                column_config={name: KAMAS for name in money}, on_select="rerun", selection_mode="single-row",
+                key="forge-ranking",
+            )  # fmt: skip
+            if event.selection.rows:
+                row = frame.iloc[event.selection.rows[0]]
+                st.button(
+                    f"Régler les critères de : {row['Objet']}", key="forge-open",
+                    on_click=lambda i=int(row["item_id"]): st.session_state.update(forge_item=i),
+                )  # fmt: skip
+    finally:
+        conn.close()
+
+
 def page_status(state: dict) -> None:
     s, now = state["status"], time.time()
     st.title("État")
@@ -352,7 +517,14 @@ def main() -> None:
             st.rerun()
     if state["status"]["decode_alert"] and page != "État":
         st.error("Alerte de décodage : voir la page État.")
-    {"Crafts": page_crafts, "Tendances": page_trends, "Fiche objet": page_item, "État": page_status}[page](state)
+    pages = {
+        "Crafts": page_crafts,
+        "Forgemagie": page_forge,
+        "Tendances": page_trends,
+        "Fiche objet": page_item,
+        "État": page_status,
+    }
+    pages[page](state)
 
 
 main()

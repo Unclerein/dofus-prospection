@@ -89,7 +89,9 @@ CREATE TABLE IF NOT EXISTS market_history (
     captured_at REAL NOT NULL,
     PRIMARY KEY (item_id, period, bucket_ts)
 ) WITHOUT ROWID;
--- Dernier état connu des annonces HDV d'un item (remplacé à chaque consultation).
+-- Annonces HDV : une ligne par annonce, avec la première et la dernière consultation où elle
+-- a été vue (captured_at). Une annonce absente de la dernière consultation de son item a été
+-- vendue ou retirée ; elle est gardée comme historique.
 CREATE TABLE IF NOT EXISTS hdv_listings (
     item_id     INTEGER NOT NULL,
     uid         INTEGER NOT NULL,
@@ -99,8 +101,19 @@ CREATE TABLE IF NOT EXISTS hdv_listings (
     p1000       INTEGER NOT NULL,
     effects     TEXT NOT NULL,
     captured_at REAL NOT NULL,
+    first_seen  REAL,
     PRIMARY KEY (item_id, uid)
 ) WITHOUT ROWID;
+-- Annonces encore en vente lors de la dernière consultation de chaque item.
+CREATE VIEW IF NOT EXISTS hdv_current AS
+    SELECT h.* FROM hdv_listings h
+    JOIN (SELECT item_id, MAX(captured_at) AS seen FROM hdv_listings GROUP BY item_id) l
+      ON l.item_id = h.item_id AND h.captured_at = l.seen;
+-- Filtres de forgemagie réglés dans le dashboard, par item.
+CREATE TABLE IF NOT EXISTS fm_filters (
+    item_id INTEGER PRIMARY KEY,
+    config  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -117,6 +130,10 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(last_sales)")}
     if columns and "sold_at" not in columns:
         conn.execute("DROP TABLE last_sales")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(hdv_listings)")}
+    if columns and "first_seen" not in columns:
+        conn.execute("ALTER TABLE hdv_listings ADD COLUMN first_seen REAL")
+        conn.execute("UPDATE hdv_listings SET first_seen = captured_at")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
     if columns and "category_id" not in columns:  # renseignée au prochain import des données statiques
         conn.execute("ALTER TABLE items ADD COLUMN category_id INTEGER")
@@ -185,16 +202,37 @@ def save_market_history(
 
 
 def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None:
-    """Remplace les annonces connues d'un item par celles d'un message décodé (messages.hdv_listings)."""
+    """Enregistre les annonces d'un message décodé (messages.hdv_listings).
+
+    Une annonce déjà connue garde sa date de première vue ; les annonces absentes du message
+    restent en base avec leur ancienne date : la vue hdv_current ne les montre plus.
+    """
     with conn:
-        conn.execute("DELETE FROM hdv_listings WHERE item_id = ?", (hdv.item_id,))
         conn.executemany(
-            "INSERT OR REPLACE INTO hdv_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO hdv_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (item_id, uid) DO UPDATE SET "
+            " first_seen = MIN(first_seen, excluded.first_seen), "
+            " p1 = CASE WHEN excluded.captured_at >= captured_at THEN excluded.p1 ELSE p1 END, "
+            " p10 = CASE WHEN excluded.captured_at >= captured_at THEN excluded.p10 ELSE p10 END, "
+            " p100 = CASE WHEN excluded.captured_at >= captured_at THEN excluded.p100 ELSE p100 END, "
+            " p1000 = CASE WHEN excluded.captured_at >= captured_at THEN excluded.p1000 ELSE p1000 END, "
+            " effects = CASE WHEN excluded.captured_at >= captured_at THEN excluded.effects ELSE effects END, "
+            " captured_at = MAX(captured_at, excluded.captured_at)",
             (
-                (hdv.item_id, l.uid, *l.prices, json.dumps([list(e) for e in l.effects]), captured_at)
+                (hdv.item_id, l.uid, *l.prices, json.dumps([list(e) for e in l.effects]), captured_at, captured_at)
                 for l in hdv.listings
             ),
         )
+
+
+def load_fm_filter(conn: sqlite3.Connection, item_id: int) -> dict:
+    row = conn.execute("SELECT config FROM fm_filters WHERE item_id = ?", (item_id,)).fetchone()
+    return json.loads(row[0]) if row else {}
+
+
+def save_fm_filter(conn: sqlite3.Connection, item_id: int, config: dict) -> None:
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO fm_filters VALUES (?, ?)", (item_id, json.dumps(config)))
 
 
 def set_status(conn: sqlite3.Connection, **values: object) -> None:

@@ -1,9 +1,10 @@
+import itertools
 from pathlib import Path
 
 import pytest
 
 from dofustool import db
-from dofustool.analysis.forgemagie import classify
+from dofustool.analysis.forgemagie import Filter, classify, perfect_filter
 from dofustool.analysis.prices import AVG_PRICE, HDV, HDV_PLAIN, LAST_SALE, MEDIAN_24H, PriceBook, unit_price, weighted_median
 from dofustool.analysis.trends import compute_trends
 from dofustool.app import data
@@ -85,15 +86,40 @@ def test_real_fixture_ble():
 
 def test_classify_exo_over_plain():
     template = {PA: (1, 1), VITA: (201, 250), 116: (-1, -1)}
-    assert classify([(PA, 1), (VITA, 230)], template).label == "de base"
+    base = classify([(PA, 1), (VITA, 230), (116, 1)], template)
+    assert base.label == "de base" and base.plain and base.quality == pytest.approx(29 / 49)
     assert classify([(PA, 1), (VITA, 230), (MODIFIED, None)], template).label == "forgemagé"
+    perfect = classify([(PA, 1), (VITA, 250)], template)
+    assert perfect.perfect and perfect.plain and perfect.label == "jets parfaits"
     exo = classify([(PA, 1), (VITA, 230), (CHANCE, 10)], template)
     assert exo.exo == (CHANCE,) and exo.label == "exo" and not exo.plain
     over = classify([(PA, 1), (VITA, 265)], template)
-    assert over.over == (VITA,) and over.label == "over"
-    both = classify([(PA, 2), (CHANCE, 5)], template)
+    assert over.over == (VITA,) and over.label == "over" and over.quality == 1
+    both = classify([(PA, 2), (VITA, 210), (CHANCE, 5)], template)
     assert both.label == "exo + over"
-    assert classify([(116, 1)], template).plain  # un malus de base n'est jamais un over
+    # Ligne de base absente ou à 0 : l'exemplaire est abîmé, pas comparable à un craft.
+    broken = classify([(PA, 1)], template)
+    assert broken.missing == (VITA,) and broken.label == "ligne manquante" and not broken.plain
+    assert classify([(PA, 1), (VITA, 0)], template).missing == (VITA,)
+    # Un malus de base n'est ni un over ni une ligne manquante ; une ligne fixe n'a pas de « jet ».
+    assert classify([(PA, 1), (VITA, 201), (116, 5)], template).plain
+    fixed = classify([(PA, 1)], {PA: (1, 1)})
+    assert fixed.quality is None and fixed.label == "de base" and not fixed.perfect
+
+
+def test_filter_line_by_line_and_exo():
+    template = {PA: (1, 1), VITA: (201, 250)}
+    low = classify([(PA, 1), (VITA, 205)], template)
+    high = classify([(PA, 1), (VITA, 250)], template)
+    exo = classify([(PA, 1), (VITA, 240), (CHANCE, 12)], template)
+    assert all(Filter({}).matches(x) for x in (low, high, exo))
+    assert [Filter({VITA: 240}).matches(x) for x in (low, high, exo)] == [False, True, True]
+    assert [Filter({}, exo=0).matches(x) for x in (low, high, exo)] == [True, True, False]
+    assert [Filter({}, exo=CHANCE).matches(x) for x in (low, high, exo)] == [False, False, True]
+    assert not Filter({}, exo=CHANCE, exo_min=15).matches(exo)
+    assert [perfect_filter(template).matches(x) for x in (low, high, exo)] == [False, True, False]
+    saved = Filter({VITA: 240}, exo=CHANCE, exo_min=10)
+    assert Filter.from_config(saved.to_config()) == saved and Filter.from_config({}) == Filter({})
 
 
 def test_dofusdb_effects_parsing():
@@ -126,8 +152,12 @@ def conn():
     c.close()
 
 
-def save(conn, body, at=NOW - 60):
-    db.save_hdv_listings(conn, hdv_listings.parse(body, MAPPING), at)
+_clock = itertools.count()
+
+
+def save(conn, body):
+    """Chaque appel simule une nouvelle consultation, un peu plus tard que la précédente."""
+    db.save_hdv_listings(conn, hdv_listings.parse(body, MAPPING), NOW - 60 + next(_clock) * 0.01)
 
 
 def book(conn, now=NOW):
@@ -183,7 +213,9 @@ def test_equipment_reference_ignores_exo_and_single_sales(conn):
     # Que des exos en vente : on retombe sur la médiane.
     save(conn, message(2469, listing(2469, 9, [40_000, 0, 0, 0], [(VITA, 5), (PA, 1)])))
     assert book(conn).get(2469).source == MEDIAN_24H
-    assert conn.execute("SELECT COUNT(*) FROM hdv_listings WHERE item_id = 2469").fetchone()[0] == 1  # liste remplacée
+    # Les annonces disparues restent en historique, hors de la liste courante.
+    assert conn.execute("SELECT COUNT(*) FROM hdv_current WHERE item_id = 2469").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM hdv_listings WHERE item_id = 2469").fetchone()[0] == 6
 
 
 def test_missing_items_and_dashboard_detail(conn):

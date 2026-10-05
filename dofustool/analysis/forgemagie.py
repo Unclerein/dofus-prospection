@@ -1,9 +1,12 @@
-"""Repérage des exos et des overs de forgemagie sur un exemplaire d'équipement.
+"""Lecture de la forgemagie d'un exemplaire d'équipement, par comparaison avec l'objet de base.
 
-  - exo  : une caractéristique que l'objet de base ne possède pas ;
-  - over : une caractéristique de base poussée au-delà de son maximum naturel.
+  - exo            : une caractéristique que l'objet de base ne possède pas ;
+  - over           : une caractéristique de base poussée au-delà de son maximum naturel ;
+  - ligne manquante : une caractéristique de base absente ou tombée à 0 ;
+  - qualité        : où se situent les jets entre le minimum et le maximum de base.
 
-La comparaison se fait avec les caractéristiques de base de l'item (table item_effects).
+Les caractéristiques de base viennent de la table item_effects : {id d'effet: (min, max)}.
+Un malus de base a des bornes négatives : il n'est ni filtrable, ni « over », ni « manquant ».
 """
 from dataclasses import dataclass
 
@@ -13,35 +16,96 @@ CRAFTED_BY = 988
 NO_MORE_FM = 2825
 MARKERS = frozenset({MODIFIED_BY, CRAFTED_BY, NO_MORE_FM})
 
+Template = dict[int, tuple[int, int]]
+
 
 @dataclass(frozen=True, slots=True)
 class Classification:
+    values: dict[int, int]  # valeur de chaque caractéristique de l'exemplaire
     exo: tuple[int, ...]  # identifiants des effets ajoutés
     over: tuple[int, ...]  # identifiants des effets au-delà du maximum
+    missing: tuple[int, ...]  # caractéristiques de base absentes ou nulles
+    quality: float | None  # moyenne des jets de base, 0 = tous au minimum, 1 = tous au maximum
     modified: bool  # porte la marque « Modifié par » : passé en forgemagie
 
     @property
     def plain(self) -> bool:
-        """Comparable à un exemplaire tout juste fabriqué : ni exo ni over."""
-        return not self.exo and not self.over
+        """Comparable à un exemplaire tout juste fabriqué : ni exo, ni over, ni ligne manquante."""
+        return not self.exo and not self.over and not self.missing
+
+    @property
+    def perfect(self) -> bool:
+        """Toutes les caractéristiques de base au maximum (ou au-delà)."""
+        return self.quality is not None and self.quality >= 1 and not self.missing
 
     @property
     def label(self) -> str:
         parts = (["exo"] if self.exo else []) + (["over"] if self.over else [])
-        return " + ".join(parts) if parts else ("forgemagé" if self.modified else "de base")
+        if self.missing:
+            parts.append("ligne manquante")
+        if parts:
+            return " + ".join(parts)
+        if self.perfect:
+            return "jets parfaits"
+        return "forgemagé" if self.modified else "de base"
 
 
-def classify(effects: list[tuple[int, int | None]], template: dict[int, tuple[int, int]]) -> Classification:
-    """effects : (id, valeur) de l'exemplaire ; template : {id: (min, max)} de l'item de base."""
-    exo, over = [], []
-    for effect_id, value in effects:
-        if effect_id in MARKERS or value is None:
-            continue
-        if effect_id not in template:
-            exo.append(effect_id)
-            continue
-        low, high = template[effect_id]
-        # Un malus de base a des bornes négatives : il ne peut pas être « over ».
-        if high > 0 and value > high:
-            over.append(effect_id)
-    return Classification(tuple(exo), tuple(over), any(e == MODIFIED_BY for e, _ in effects))
+def base_lines(template: Template) -> dict[int, tuple[int, int]]:
+    """Caractéristiques de base positives, celles qu'on peut vouloir filtrer ou améliorer."""
+    return {effect_id: (low, high) for effect_id, (low, high) in template.items() if high > 0}
+
+
+def classify(effects: list[tuple[int, int | None]], template: Template) -> Classification:
+    """effects : (id, valeur) de l'exemplaire ; template : caractéristiques de l'item de base."""
+    values = {effect_id: value for effect_id, value in effects if effect_id not in MARKERS and value is not None}
+    lines = base_lines(template)
+    exo = tuple(effect_id for effect_id in values if effect_id not in template)
+    over = tuple(effect_id for effect_id, (_, high) in lines.items() if values.get(effect_id, 0) > high)
+    missing = tuple(effect_id for effect_id in lines if values.get(effect_id, 0) <= 0)
+    # Seules les lignes à jet variable comptent : une ligne fixe (1 PA) n'a pas de « bon » jet.
+    rolls = [
+        min(1.0, max(0.0, (values.get(effect_id, 0) - low) / (high - low)))
+        for effect_id, (low, high) in lines.items()
+        if high > low
+    ]
+    quality = sum(rolls) / len(rolls) if rolls else None
+    return Classification(values, exo, over, missing, quality, any(e == MODIFIED_BY for e, _ in effects))
+
+
+@dataclass(frozen=True, slots=True)
+class Filter:
+    """Critères réglés dans le dashboard pour un item.
+
+    minimums : valeur minimale exigée par caractéristique de base.
+    exo      : None = peu importe ; 0 = aucun exo accepté ; sinon l'identifiant de l'exo exigé.
+    exo_min  : valeur minimale de l'exo exigé.
+    """
+
+    minimums: dict[int, int]
+    exo: int | None = None
+    exo_min: int = 1
+
+    @classmethod
+    def from_config(cls, config: dict) -> "Filter":
+        return cls(
+            {int(k): int(v) for k, v in (config.get("minimums") or {}).items()},
+            config.get("exo"),
+            int(config.get("exo_min") or 1),
+        )
+
+    def to_config(self) -> dict:
+        return {"minimums": {str(k): v for k, v in self.minimums.items()}, "exo": self.exo, "exo_min": self.exo_min}
+
+    def matches(self, item: Classification) -> bool:
+        if any(item.values.get(effect_id, 0) < minimum for effect_id, minimum in self.minimums.items()):
+            return False
+        if self.exo == 0:
+            return not item.exo
+        if self.exo is not None:
+            return self.exo in item.exo and item.values[self.exo] >= self.exo_min
+        return True
+
+
+def perfect_filter(template: Template) -> Filter:
+    """Tous les jets de base au maximum, sans exo."""
+    return Filter({effect_id: high for effect_id, (_, high) in base_lines(template).items()}, exo=0)
