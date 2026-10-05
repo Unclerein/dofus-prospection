@@ -95,7 +95,7 @@ def filter_crafts(
 
 def trends_frame(conn: sqlite3.Connection, cfg: Config, ws: Workspace) -> tuple[pd.DataFrame, int]:
     """Renvoie (objets ayant une tendance calculable, nombre d'objets en « données insuffisantes »)."""
-    trends = compute_trends(conn, ws.now, cfg.min_snapshots_for_trend, cfg.last_sale_max_age_hours)
+    trends = compute_trends(conn, ws.now, cfg.min_snapshots_for_trend, cfg.last_sale_max_age_hours, ws.prices)
     rows = []
     insufficient = 0
     for trend in trends.values():

@@ -16,7 +16,7 @@ OVER = "sur-coté"
 class Trend:
     item_id: int
     basis: str
-    current: int | None = None
+    current: float | None = None
     mean_7d: float | None = None
     mean_30d: float | None = None
     samples: int = 0  # relevés ou tranches ayant servi au calcul
@@ -46,7 +46,7 @@ class Trend:
 
 
 def compute_trends(
-    conn: sqlite3.Connection, now: float, min_snapshots: int, last_sale_max_age_hours: float
+    conn: sqlite3.Connection, now: float, min_snapshots: int, last_sale_max_age_hours: float, prices=None
 ) -> dict[int, Trend]:
     """Tendance de chaque item ayant au moins un prix.
 
@@ -74,6 +74,11 @@ def compute_trends(
         (now - last_sale_max_age_hours * 3600,),
     ):
         if item_id in history:
+            # Équipement : une vente isolée dépend de sa forgemagie, on compare le prix médian du jour.
+            if prices is not None and prices.is_equipment(item_id):
+                price = prices.median_24h(item_id)
+                if price is None:
+                    continue
             mean_7d, mean_30d, count = history[item_id]
             trends[item_id] = Trend(item_id, MARKET_HISTORY, price, mean_7d, mean_30d, count)
 

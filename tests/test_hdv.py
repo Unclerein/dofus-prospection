@@ -5,6 +5,7 @@ import pytest
 from dofustool import db
 from dofustool.analysis.forgemagie import classify
 from dofustool.analysis.prices import AVG_PRICE, HDV, HDV_PLAIN, LAST_SALE, MEDIAN_24H, PriceBook, unit_price, weighted_median
+from dofustool.analysis.trends import compute_trends
 from dofustool.app import data
 from dofustool.config import Config
 from dofustool.messages import Mapping, hdv_listings, load_keymap
@@ -167,6 +168,17 @@ def test_equipment_reference_ignores_exo_and_single_sales(conn):
     store(conn, 2469, [(PA, 1, 1)])
     ref = book(conn).get(2469)
     assert (ref.price, ref.source) == (59_000, HDV_PLAIN)
+
+    # Tendance : pour un équipement, c'est le prix médian du jour qui est comparé, pas la dernière vente.
+    day = int(NOW) // 86400 * 86400
+    db.save_market_history(conn, 2469, db.GRAIN_DAY, [(day, 300_000, 50), (day - 86400, 280_000, 50)], NOW - 30)
+    trend = compute_trends(conn, NOW, 5, 24, book(conn))[2469]
+    assert trend.current == 292_747 and abs(trend.deviation) < 0.05
+
+    # Une annonce plus chère que les ventes récentes ne sert pas de référence.
+    save(conn, message(2469, listing(2469, 7, [800_000, 0, 0, 0], [(PA, 1)])))
+    assert (book(conn).get(2469).price, book(conn).get(2469).source) == (292_747, MEDIAN_24H)
+    save(conn, message(2469, listing(2469, 2, [59_000, 0, 0, 0], [(PA, 1)])))
 
     # Que des exos en vente : on retombe sur la médiane.
     save(conn, message(2469, listing(2469, 9, [40_000, 0, 0, 0], [(VITA, 5), (PA, 1)])))

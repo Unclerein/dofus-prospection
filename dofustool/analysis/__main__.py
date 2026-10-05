@@ -58,7 +58,7 @@ def main() -> int:
             f"{kamas(r.recursive_cost):>10} {kamas(r.recursive_margin):>10} {pct:>6}  {', '.join(notes)}"
         )
 
-    trends = compute_trends(conn, now, cfg.min_snapshots_for_trend, cfg.last_sale_max_age_hours)
+    trends = compute_trends(conn, now, cfg.min_snapshots_for_trend, cfg.last_sale_max_age_hours, prices)
     insufficient = sum(1 for t in trends.values() if t.basis == INSUFFICIENT)
     signals = [(t, t.signal(cfg.trend_threshold)) for t in trends.values()]
     signals = sorted(((t, s) for t, s in signals if s), key=lambda x: x[0].deviation)

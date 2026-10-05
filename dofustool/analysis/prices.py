@@ -133,13 +133,15 @@ class PriceBook:
 
     def get(self, item_id: int) -> PriceRef | None:
         hdv = self._hdv.get(item_id)
-        if hdv is not None:
-            return PriceRef(*hdv)
         if item_id in self._equipment:
             median = self._median.get(item_id)
             if median is not None and median[0] is not None:
-                return PriceRef(median[0], MEDIAN_24H, median[1])
-        else:
+                # Une annonce n'est pas une vente : si les ventes récentes sont plus basses, elles priment.
+                if hdv is None or median[0] < hdv[0]:
+                    return PriceRef(median[0], MEDIAN_24H, median[1])
+        if hdv is not None:
+            return PriceRef(*hdv)
+        if item_id not in self._equipment:
             sale = self._last_sales.get(item_id)
             if sale is not None:
                 return PriceRef(sale[0], LAST_SALE, sale[1])
@@ -147,6 +149,11 @@ class PriceBook:
         if avg is not None and self.snapshot_ts is not None:
             return PriceRef(avg, AVG_PRICE, self.snapshot_ts)
         return None
+
+    def median_24h(self, item_id: int) -> float | None:
+        """Prix médian pondéré des ventes des dernières 24 h d'un équipement, s'il est assez récent."""
+        median = self._median.get(item_id)
+        return median[0] if median else None
 
     def liquidity(self, item_id: int) -> Liquidity:
         if item_id not in self._seen:
