@@ -103,6 +103,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.crafts())
                 if path == "/api/trends":
                     return self._json(api.trends())
+                if path == "/api/ignored":
+                    return self._json(api.ignored())
                 if path == "/api/stock":
                     return self._json(api.stock())
                 if path == "/api/stock/crafts":
@@ -150,6 +152,18 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if not isinstance(payload, dict):
                         raise ValueError("objet JSON attendu")
                     return self._json(api.save_forge_filter(int(match[1]), payload))
+                if path == "/api/ignore-type":
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict) or not isinstance(payload.get("type"), str):
+                        raise ValueError("type attendu")
+                    return self._json(api.set_type_ignored(payload["type"], bool(payload.get("ignored", True))))
+                if path == "/api/ignore":
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict) or not isinstance(payload.get("item_id"), int):
+                        raise ValueError("item_id attendu")
+                    return self._json(api.set_ignored(payload["item_id"], bool(payload.get("ignored", True))))
                 self._not_found()
             except (ValueError, TypeError) as exc:
                 self._json({"error": f"requête invalide : {exc}"}, HTTPStatus.BAD_REQUEST)

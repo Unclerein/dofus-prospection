@@ -76,6 +76,58 @@ def test_item_detail(api):
     assert api.item(999_999) is None
 
 
+def test_ignored_items_disappear_from_rankings(api):
+    assert api.ignored()["rows"] == []
+    names = lambda rows, key: {row[key] for row in rows}  # noqa: E731
+    assert "Pain" in names(api.crafts()["rows"], "Objet")
+    trend_item = next(row for row in api.trends()["rows"] if row["item_id"] != 3)
+
+    assert api.set_ignored(3, True) == {"item_id": 3, "ignored": True, "count": 1}  # le Pain
+    api.set_ignored(trend_item["item_id"], True)
+    api.set_ignored(3, True)  # deux fois : sans effet
+    assert "Pain" not in names(api.crafts()["rows"], "Objet") and len(api.crafts()["rows"]) >= 6
+    assert trend_item["item_id"] not in {row["item_id"] for row in api.trends()["rows"]}
+    assert api.item(3)["ignored"] is True and api.item(1)["ignored"] is (trend_item["item_id"] == 1)
+
+    listed = api.ignored()["rows"]
+    json.dumps(listed, allow_nan=False)
+    assert {row["item_id"] for row in listed} == {3, trend_item["item_id"]}
+    assert next(row for row in listed if row["item_id"] == 3)["name"] == "Pain"
+
+    assert api.set_ignored(3, False)["count"] == 1
+    assert "Pain" in names(api.crafts()["rows"], "Objet") and api.item(3)["ignored"] is False
+
+
+def test_ignoring_a_whole_type(api):
+    types = {t["name"]: t for t in api.ignored()["types"]}
+    assert types["type"]["count"] >= 8 and types["Anneau"]["count"] == 1 and not types["type"]["ignored"]
+    before = len(api.crafts()["rows"])
+    assert before > 0 and api.trends()["rows"]
+
+    assert api.set_type_ignored("type", True) == {"type": "type", "ignored": True, "count": 1}
+    assert api.crafts()["rows"] == [] and api.trends()["rows"] == []  # toutes les recettes de la fixture sont de ce type
+    detail = api.item(3)
+    assert detail["type_ignored"] is True and detail["ignored"] is False
+    assert next(t for t in api.ignored()["types"] if t["name"] == "type")["ignored"] is True
+
+    api.set_type_ignored("type", False)
+    assert len(api.crafts()["rows"]) == before and api.item(3)["type_ignored"] is False
+    with pytest.raises(ValueError):
+        api.set_type_ignored("Type inventé", True)
+
+
+def test_ignored_recipe_leaves_stock_crafts(api):
+    from dofustool.messages.storage import Stack, Storage
+
+    conn = api.connect()
+    db.save_holdings(conn, db.INVENTORY, Storage(0, (Stack(1, 9, False), Stack(2, 7, False), Stack(4, 1, False))), 100.0)
+    conn.close()
+    assert {"Pain", "Farine"} <= {row["name"] for row in api.stock_crafts()["rows"]}
+    api.set_ignored(3, True)
+    remaining = {row["name"] for row in api.stock_crafts()["rows"]}
+    assert "Pain" not in remaining and "Farine" in remaining
+
+
 def test_stock_endpoints(api):
     empty = api.stock_crafts()
     assert empty["rows"] == [] and empty["meta"] == {}
@@ -242,6 +294,30 @@ def test_http_save_filter(server, api):
 
     assert post(b'{"minimums": {"125": 230}}') == {"saved": {"minimums": {"125": 230}, "exo": None, "exo_min": 1}}
     assert api.forge_item(500)["filter"]["minimums"] == {"125": 230}
+    def post_ignore(body: bytes):
+        request = urllib.request.Request(server + "/api/ignore", data=body, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+
+    assert post_ignore(b'{"item_id": 3, "ignored": true}')["count"] == 1
+    assert [row["item_id"] for row in json.loads(get(server + "/api/ignored")[2])["rows"]] == [3]
+    assert post_ignore(b'{"item_id": 3, "ignored": false}')["count"] == 0
+    with pytest.raises(urllib.error.HTTPError) as error:
+        post_ignore(b'{"item_id": "3"}')
+    assert error.value.code == 400
+
+    def post_type(body: bytes):
+        request = urllib.request.Request(server + "/api/ignore-type", data=body, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+
+    assert post_type(b'{"type": "Anneau"}') == {"type": "Anneau", "ignored": True, "count": 1}
+    assert post_type(b'{"type": "Anneau", "ignored": false}')["count"] == 0
+    for bad in (b'{"type": 12}', b'{"type": "Inconnu"}'):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            post_type(bad)
+        assert error.value.code == 400
+
     for bad in (b"pas du json", b"[1, 2]", b'{"minimums": {"125": "abc"}}'):
         with pytest.raises(urllib.error.HTTPError) as error:
             post(bad)

@@ -329,3 +329,36 @@ a.ingredient:hover .ingredient-name { color: var(--text); }
 .tip-price { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .tip-price b { font-size: 15px; }
 .tip-price .small { text-align: right; }
+
+/* Bouton d'action en fin de ligne */
+td.act { width: 52px; padding-left: 0; }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 8px; border: 1px solid transparent; background: transparent;
+  color: var(--muted); display: inline-flex; align-items: center; justify-content: center;
+}
+.icon-btn:hover { color: var(--text); background: var(--ground); border-color: var(--line-strong); }
+tbody tr .icon-btn { opacity: 0.45; }
+tbody tr:hover .icon-btn, .icon-btn:focus-visible { opacity: 1; }
+
+/* Bandeau de confirmation, avec annulation */
+.toast {
+  position: fixed; z-index: 30; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 18px; border-radius: 12px;
+  background: var(--raised); border: 1px solid var(--line-strong); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  max-width: calc(100vw - 32px);
+}
+.toast[hidden] { display: none; }
+.toast .btn { min-height: 36px; display: inline-flex; align-items: center; }
+
+/* Pastilles de type d'objet */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 12px; border-radius: 18px;
+  background: var(--raised); border: 1px solid var(--line-strong); font-weight: 500;
+}
+button.chip:hover { border-color: var(--accent); }
+.chip.on { background: #2A1B16; border-color: #7A4433; padding-right: 4px; }
+.chip-x {
+  width: 28px; height: 28px; margin-left: 4px; border-radius: 50%; border: 0; background: transparent;
+  color: var(--warn-soft); font-size: 18px; line-height: 1;
+}
+.chip-x:hover { background: #3A221B; }

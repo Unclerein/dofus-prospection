@@ -106,6 +106,7 @@ const NAV = [
   ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
   ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
+  ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5'],
 ];
 
@@ -143,7 +144,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
+  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -183,6 +184,90 @@ async function poll() {
 }
 
 window.addEventListener('hashchange', () => { $tip.hidden = true; window.scrollTo(0, 0); render(); });
+
+// ---------------------------------------------------------------- objets ignorés
+
+const EYE_OFF = 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.2 2.7 7.2 5-.3.7-.8 1.5-1.5 2.3';
+const $toast = h('div', { class: 'toast', hidden: true, role: 'status', 'aria-live': 'polite' });
+document.body.append($toast);
+let toastTimer = null;
+
+async function setIgnored(itemId, name, ignored) {
+  try {
+    await api('/api/ignore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item_id: itemId, ignored }) });
+  } catch (error) {
+    $toast.replaceChildren(`Impossible de modifier la liste : ${error.message}`); $toast.hidden = false; return;
+  }
+  S.cache = {}; // les classements dépendent de la liste des objets ignorés
+  await refresh();
+  clearTimeout(toastTimer);
+  $toast.replaceChildren(
+    h('span', {}, ignored ? `${name} est ignoré.` : `${name} n'est plus ignoré.`),
+    h('button', { class: 'btn', onclick: () => setIgnored(itemId, name, !ignored) }, 'Annuler'),
+    ignored && h('a', { class: 'btn', href: '#/ignored', onclick: () => { $toast.hidden = true; } }, 'Voir la liste'));
+  $toast.hidden = false;
+  toastTimer = setTimeout(() => { $toast.hidden = true; }, 7000);
+}
+
+/** Bouton d'une ligne de classement : un clic et l'objet disparaît des classements. */
+function ignoreButton(itemId, name) {
+  return h('button', { class: 'icon-btn', title: `Ignorer ${name}`, 'aria-label': `Ignorer ${name}`,
+    onclick: (event) => { event.stopPropagation(); $tip.hidden = true; setIgnored(itemId, name, true); } },
+    svg('svg', { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: EYE_OFF })));
+}
+
+async function setTypeIgnored(type, ignored) {
+  try {
+    await api('/api/ignore-type', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, ignored }) });
+  } catch (error) {
+    $toast.replaceChildren(`Impossible de modifier la liste : ${error.message}`); $toast.hidden = false; return;
+  }
+  S.cache = {};
+  await refresh();
+  clearTimeout(toastTimer);
+  $toast.replaceChildren(h('span', {}, ignored ? `Tous les objets de type « ${type} » sont ignorés.` : `Le type « ${type} » n'est plus ignoré.`),
+    h('button', { class: 'btn', onclick: () => setTypeIgnored(type, !ignored) }, 'Annuler'));
+  $toast.hidden = false;
+  toastTimer = setTimeout(() => { $toast.hidden = true; }, 7000);
+}
+
+async function pageIgnored() {
+  const data = await cached('ignored', '/api/ignored');
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Ignorés'),
+    h('div', { class: 'lead' }, 'Ces objets n\'apparaissent plus dans Crafts, Tendances et les recettes de Mon stock. Leur fiche reste accessible.')));
+
+  // Ignorer tout un type : on tape quelques lettres, on clique le type.
+  const ui = S.ui.ignored || (S.ui.ignored = { q: '' });
+  const hiddenTypes = data.types.filter((t) => t.ignored);
+  const query = norm(ui.q.trim());
+  const matches = query.length < 2 ? [] : data.types.filter((t) => !t.ignored && norm(t.name).includes(query)).slice(0, 30);
+  let typing = null;
+  const typePanel = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Ignorer tout un type d\'objets'), h('span', { class: 'muted small' }, `${hiddenTypes.length} type${hiddenTypes.length > 1 ? 's' : ''} ignoré${hiddenTypes.length > 1 ? 's' : ''}`)),
+    h('div', { style: 'padding: 16px 18px; display: flex; flex-direction: column; gap: 14px' },
+      h('div', { class: 'field', style: 'max-width: 380px' }, h('label', { for: 'ig-q' }, 'Type à ignorer'),
+        h('input', { id: 'ig-q', type: 'search', value: ui.q, placeholder: 'Aile, Rune de forgemagie, Bouclier…', autocomplete: 'off',
+          oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })),
+      query.length >= 2 && h('div', { class: 'tags' }, matches.length
+        ? matches.map((t) => h('button', { class: 'chip', title: `Ignorer les ${t.count} objets de ce type`, onclick: () => { ui.q = ''; setTypeIgnored(t.name, true); } }, t.name, h('span', { class: 'muted' }, ` · ${t.count} objets · ${t.category}`)))
+        : h('span', { class: 'muted' }, 'Aucun type ne correspond.')),
+      hiddenTypes.length
+        ? h('div', { class: 'tags' }, hiddenTypes.map((t) => h('span', { class: 'chip on' }, t.name, h('span', { class: 'muted' }, ` · ${t.count} objets`),
+          h('button', { class: 'chip-x', 'aria-label': `Ne plus ignorer le type ${t.name}`, title: 'Rétablir', onclick: () => setTypeIgnored(t.name, false) }, '×'))))
+        : h('div', { class: 'muted small' }, 'Aucun type ignoré pour l\'instant.')));
+
+  if (!data.rows.length) {
+    return [head, typePanel, h('div', { class: 'panel empty' }, "Aucun objet ignoré individuellement. Dans un classement, le bouton à droite d'une ligne masque l'objet en un clic.")];
+  }
+  return [head, typePanel, h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, `${data.rows.length} objet${data.rows.length > 1 ? 's' : ''} ignoré${data.rows.length > 1 ? 's' : ''}`)),
+    h('div', { class: 'scroll' }, h('table', { style: 'min-width: 520px' },
+      h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Ignoré'), h('th', {}, ''))),
+      h('tbody', {}, data.rows.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+        h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '))),
+        h('td', { class: 'muted' }, ago(row.added_at, data.now)),
+        h('td', {}, h('button', { class: 'btn', onclick: (event) => { event.stopPropagation(); setIgnored(row.item_id, row.name, false); } }, 'Rétablir'))))))))];
+}
 
 // ---------------------------------------------------------------- page Crafts
 
@@ -237,7 +322,8 @@ async function pageCrafts() {
       h('td', { class: 'soft' }, r['Marge %'] === null ? '—' : `${fmt(r['Marge %'])} %`),
       h('td', { class: r['Vendus 7 j'] === null ? 'muted' : 'soft' }, fmt(r['Vendus 7 j'])),
       h('td', {}, r.craftable > 0 ? h('span', { class: 'tag good' }, `× ${fmt(r.craftable)}`) : h('span', { class: 'muted' }, '—')),
-      h('td', { class: 'l wrap' }, h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag ' + (t.includes('sous-craft') ? 'info' : t.includes('manquant') || t.includes('non échangeable') ? 'bad' : '') }, t)))));
+      h('td', { class: 'l wrap' }, h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag ' + (t.includes('sous-craft') ? 'info' : t.includes('manquant') || t.includes('non échangeable') ? 'bad' : '') }, t)))),
+      h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet'])));
   });
 
   return [
@@ -251,7 +337,7 @@ async function pageCrafts() {
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, 'Métier'), h('th', {}, 'Prix de vente'), h('th', {}, 'Coût'),
             h('th', { class: ui.sort === 'margin' ? 'sorted' : '' }, 'Marge' + (ui.sort === 'margin' ? ' ↓' : '')),
-            h('th', { class: ui.sort === 'pct' ? 'sorted' : '' }, 'Marge %' + (ui.sort === 'pct' ? ' ↓' : '')), h('th', {}, 'Vendus 7 j'), h('th', { title: 'Nombre faisable avec ton inventaire et ta banque' }, 'En stock'), h('th', { class: 'l' }, 'À savoir'))),
+            h('th', { class: ui.sort === 'pct' ? 'sorted' : '' }, 'Marge %' + (ui.sort === 'pct' ? ' ↓' : '')), h('th', {}, 'Vendus 7 j'), h('th', { title: 'Nombre faisable avec ton inventaire et ta banque' }, 'En stock'), h('th', { class: 'l' }, 'À savoir'), h('th', {}, ''))),
           h('tbody', {}, body))),
       h('div', { class: 'panel-foot' },
         h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'dot on' }), 'prix observé (HDV ou ventes)'), h('span', {}, h('span', { class: 'dot' }), 'prix moyen du jeu, moins fiable pour un équipement')),
@@ -351,7 +437,8 @@ function stockCrafts(data) {
         tile(i.icon), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
     h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
     h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
-    h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—')));
+    h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—'),
+    h('td', { class: 'act' }, ignoreButton(row.item_id, row.name))));
 
   return [
     h('section', { class: 'kpis' },
@@ -362,7 +449,7 @@ function stockCrafts(data) {
     h('section', { class: 'panel', 'aria-label': 'Recettes' },
       rows.length === 0 ? h('div', { class: 'empty' }, 'Aucune recette ne correspond.')
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 980px' },
-          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Faisables'), h('th', { class: 'l' }, 'Ingrédients : en stock / par craft'), h('th', {}, 'Coût du manquant'), h('th', {}, 'Marge par craft'), h('th', { class: ui.view === 'ready' ? 'sorted' : '' }, 'Gain total' + (ui.view === 'ready' ? ' ↓' : '')))),
+          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Faisables'), h('th', { class: 'l' }, 'Ingrédients : en stock / par craft'), h('th', {}, 'Coût du manquant'), h('th', {}, 'Marge par craft'), h('th', { class: ui.view === 'ready' ? 'sorted' : '' }, 'Gain total' + (ui.view === 'ready' ? ' ↓' : '')), h('th', {}, ''))),
           h('tbody', {}, body))),
       h('div', { class: 'panel-foot' },
         h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'swatch', style: 'background: var(--gain)' }), 'en stock'), h('span', {}, h('span', { class: 'swatch', style: 'background: var(--warn)' }), 'pas assez'), h('span', {}, h('span', { class: 'swatch', style: 'background: var(--line-strong)' }), 'aucun'),
@@ -749,14 +836,15 @@ async function pageTrends() {
     h('div', { class: 'panel-head' }, h('h2', {}, title), h('span', { class: 'muted small' }, `${rows.length} objet${rows.length > 1 ? 's' : ''}`)),
     rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun pour le moment.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'))),
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'), h('th', {}, ''))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '))),
           h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
           h('td', {}, h('div', { class: 'soft' }, fmt(reference(r)[0])), h('div', { class: 'muted small' }, reference(r)[1])),
           h('td', { class: 'soft' }, `${positive ? '+' : '−'}${price(kamasGap(r))}`),
           h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`),
-          h('td', { class: r.recipes ? 'soft' : 'muted' }, r.recipes || '—')))))),
+          h('td', { class: r.recipes ? 'soft' : 'muted' }, r.recipes || '—'),
+          h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet']))))))),
     rows.length > 150 ? h('div', { class: 'panel-foot' }, h('span', {}, `Les 150 plus grands écarts sur ${fmt(rows.length)}. Monte l'écart minimum pour resserrer.`)) : null);
   const ui = S.ui.trends || (S.ui.trends = { category: '', type: '', usedOnly: false, pct: Math.round((status.trend_threshold || 0.15) * 100), kamas: 0 });
   const refValue = (r) => (r['Prix moyen'] !== null && r['Prix moyen'] !== undefined ? r['Prix moyen'] : r['Moyenne 30 j'] !== null ? r['Moyenne 30 j'] : r['Moyenne 7 j']);
@@ -895,8 +983,11 @@ async function pageItem(r) {
         d.owned.inventory + d.owned.bank > 0
           ? [h('span', { class: 'tag good' }, `Tu en as ${fmt(d.owned.inventory + d.owned.bank)}`), h('span', { class: 'tag' }, `inventaire ${fmt(d.owned.inventory)}`), h('span', { class: 'tag' }, `banque ${fmt(d.owned.bank)}`)]
           : h('span', { class: 'tag' }, "Tu n'en as pas"))),
-    d.equipment && d.hdv && h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Voir en forgemagie'));
+    d.equipment && d.hdv && h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Voir en forgemagie'),
+    h('button', { class: 'btn ' + (d.ignored ? '' : 'quiet'), onclick: () => setIgnored(id, d.name, !d.ignored) }, d.ignored ? 'Ne plus ignorer' : 'Ignorer cet objet'));
 
+  const ignoredNote = d.ignored ? h('div', { class: 'note' }, 'Cet objet est ignoré : il n\'apparaît plus dans Crafts, Tendances et les recettes de Mon stock.')
+    : d.type_ignored ? h('div', { class: 'note' }, `Le type « ${d.type} » est ignoré : cet objet n'apparaît plus dans Crafts, Tendances et les recettes de Mon stock. `, h('a', { href: '#/ignored', style: 'text-decoration: underline' }, 'Gérer les types ignorés')) : null;
   const kpis = h('section', { class: 'kpis' },
     kpi('Prix de référence', fmt(d.ref && d.ref.price), d.ref ? h('span', { class: 'source' }, h('span', { class: 'dot ' + (observed(d.ref.source) ? 'on' : '') }), `${d.ref.source} · ${ago(d.ref.ts, now)}`) : 'Aucun prix connu'),
     kpi('Coût le plus bas', fmt(d.unit_cost.cost), d.unit_cost.mode ? `Par ${d.unit_cost.mode}` : 'Prix manquant'),
@@ -975,7 +1066,7 @@ async function pageItem(r) {
           h('td', { class: 'soft' }, fmt(row['Quantité utilisée'])), h('td', {}, fmt(row['Prix de vente'])),
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
 
-  return [head, header, kpis, gap, charts, hdvPanel, recipePanel, usedPanel];
+  return [head, header, ignoredNote, kpis, gap, charts, hdvPanel, recipePanel, usedPanel];
 }
 
 // ---------------------------------------------------------------- page État

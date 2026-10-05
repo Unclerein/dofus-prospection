@@ -128,6 +128,16 @@ CREATE VIEW IF NOT EXISTS hdv_current AS
     SELECT h.* FROM hdv_listings h
     JOIN (SELECT item_id, MAX(captured_at) AS seen FROM hdv_listings GROUP BY item_id) l
       ON l.item_id = h.item_id AND h.captured_at = l.seen;
+-- Objets que le joueur ne veut plus voir dans les classements (réglé dans l'interface).
+CREATE TABLE IF NOT EXISTS ignored_items (
+    item_id  INTEGER PRIMARY KEY,
+    added_at REAL NOT NULL
+);
+-- Types d'objets ignorés en bloc (« Aile », « Rune de forgemagie »…).
+CREATE TABLE IF NOT EXISTS ignored_types (
+    type_name TEXT PRIMARY KEY,
+    added_at  REAL NOT NULL
+);
 -- Filtres de forgemagie réglés dans le dashboard, par item.
 CREATE TABLE IF NOT EXISTS fm_filters (
     item_id INTEGER PRIMARY KEY,
@@ -284,6 +294,32 @@ def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at
             (container, captured_at, storage.kamas, len(storage.stacks)),
         )
     return True
+
+
+def set_ignored(conn: sqlite3.Connection, item_id: int, ignored: bool, now: float) -> None:
+    with conn:
+        if ignored:
+            conn.execute("INSERT OR IGNORE INTO ignored_items VALUES (?, ?)", (item_id, now))
+        else:
+            conn.execute("DELETE FROM ignored_items WHERE item_id = ?", (item_id,))
+
+
+def ignored_items(conn: sqlite3.Connection) -> dict[int, float]:
+    """{item: date d'ajout} des objets ignorés."""
+    return dict(conn.execute("SELECT item_id, added_at FROM ignored_items"))
+
+
+def set_type_ignored(conn: sqlite3.Connection, type_name: str, ignored: bool, now: float) -> None:
+    with conn:
+        if ignored:
+            conn.execute("INSERT OR IGNORE INTO ignored_types VALUES (?, ?)", (type_name, now))
+        else:
+            conn.execute("DELETE FROM ignored_types WHERE type_name = ?", (type_name,))
+
+
+def ignored_types(conn: sqlite3.Connection) -> dict[str, float]:
+    """{type: date d'ajout} des types d'objets ignorés."""
+    return dict(conn.execute("SELECT type_name, added_at FROM ignored_types"))
 
 
 def load_fm_filter(conn: sqlite3.Connection, item_id: int) -> dict:

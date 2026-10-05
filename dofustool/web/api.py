@@ -132,6 +132,13 @@ class Api:
                 self._stamp = stamp
             return self._state
 
+    def _hidden(self, conn: sqlite3.Connection, state: dict):
+        """Renvoie une fonction disant si un item est masqué : ignoré lui-même, ou par son type."""
+        items = db.ignored_items(conn)
+        types = db.ignored_types(conn)
+        meta = state["meta"]
+        return lambda item_id: item_id in items or meta.get(item_id, (None, None))[0] in types
+
     # --- pages ---------------------------------------------------------------
 
     def version(self) -> dict:
@@ -167,7 +174,8 @@ class Api:
         try:
             state = self._load(conn)
             frame = state["crafts"]
-            rows = records(frame) if not frame.empty else []
+            hidden = self._hidden(conn, state)
+            rows = [row for row in (records(frame) if not frame.empty else []) if not hidden(row["item_id"])]
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
                 row["craftable"] = state["craftable"].get(row["item_id"], 0)
@@ -183,7 +191,12 @@ class Api:
         conn = self.connect()
         try:
             state = self._load(conn)
-            rows = records(state["trends"]) if not state["trends"].empty else []
+            hidden = self._hidden(conn, state)
+            rows = [
+                row
+                for row in (records(state["trends"]) if not state["trends"].empty else [])
+                if not hidden(row["item_id"])
+            ]
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
                 row["type"], row["category"] = state["meta"].get(row["item_id"], (None, "Autres"))
@@ -264,6 +277,8 @@ class Api:
                     "type": detail["type"],
                     "category": state["meta"].get(item_id, (None, "Autres"))[1],
                     "avg_price": {"price": avg[0], "ts": avg[1]} if avg else None,
+                    "ignored": item_id in db.ignored_items(conn),
+                    "type_ignored": state["meta"].get(item_id, (None, None))[0] in db.ignored_types(conn),
                     "owned": {
                         "inventory": state["stock"].get(item_id).inventory,
                         "bank": state["stock"].get(item_id).bank,
@@ -291,6 +306,65 @@ class Api:
                     "now": ws.now,
                 }
             )
+        finally:
+            conn.close()
+
+    # --- objets ignorés ------------------------------------------------------
+
+    def ignored(self) -> dict:
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws = state["ws"]
+            rows = []
+            for item_id, added_at in db.ignored_items(conn).items():
+                item = ws.items.get(item_id)
+                rows.append(
+                    {
+                        "item_id": item_id,
+                        "name": item.name if item else f"#{item_id}",
+                        "level": item.level if item else None,
+                        "icon": state["icons"].get(item_id),
+                        "type": state["meta"].get(item_id, (None, None))[0],
+                        "added_at": added_at,
+                    }
+                )
+            rows.sort(key=lambda row: -row["added_at"])
+            # Tous les types d'objets, pour en ignorer un en bloc. Seuls comptent les objets échangeables.
+            hidden_types = db.ignored_types(conn)
+            counts: dict[tuple[str, str], int] = {}
+            for item_id, (type_name, category) in state["meta"].items():
+                item = ws.items.get(item_id)
+                if type_name and item is not None and item.exchangeable:
+                    counts[(type_name, category)] = counts.get((type_name, category), 0) + 1
+            merged: dict[str, dict] = {}
+            for (type_name, category), count in counts.items():
+                entry = merged.setdefault(type_name, {"name": type_name, "category": category, "count": 0})
+                entry["count"] += count
+            types = [
+                {**entry, "ignored": entry["name"] in hidden_types, "added_at": hidden_types.get(entry["name"])}
+                for entry in sorted(merged.values(), key=lambda e: e["name"])
+            ]
+            return {"rows": rows, "types": types, "now": time.time()}
+        finally:
+            conn.close()
+
+    def set_ignored(self, item_id: int, ignored: bool) -> dict:
+        conn = self.connect()
+        try:
+            db.set_ignored(conn, item_id, ignored, time.time())
+            return {"item_id": item_id, "ignored": ignored, "count": len(db.ignored_items(conn))}
+        finally:
+            conn.close()
+
+    def set_type_ignored(self, type_name: str, ignored: bool) -> dict:
+        conn = self.connect()
+        try:
+            known = {row[0] for row in conn.execute("SELECT DISTINCT type_name FROM items WHERE type_name IS NOT NULL")}
+            if type_name not in known:
+                raise ValueError("type d'objet inconnu")
+            db.set_type_ignored(conn, type_name, ignored, time.time())
+            return {"type": type_name, "ignored": ignored, "count": len(db.ignored_types(conn))}
         finally:
             conn.close()
 
@@ -335,9 +409,12 @@ class Api:
         try:
             state = self._load(conn)
             ws = state["ws"]
+            hidden = self._hidden(conn, state)
             rows = []
             for c in state["stock_crafts"]:
                 r = c.result
+                if hidden(r.item.id):
+                    continue
                 rows.append(
                     {
                         "item_id": r.item.id,
