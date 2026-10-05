@@ -65,6 +65,14 @@ function tile(iconId, big) {
   return box;
 }
 
+/** Petite image d'une caractéristique (vitalité, force…), ou rien si elle n'en a pas. */
+function statIcon(asset) {
+  if (!asset) return null;
+  const img = h('img', { class: 'stat-ico', src: `/icons/effects/${asset}.png`, alt: '', loading: 'lazy' });
+  img.addEventListener('error', () => img.remove());
+  return img;
+}
+
 const itemCell = (iconId, name, sub) =>
   h('div', { class: 'item-cell' }, tile(iconId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
 
@@ -334,7 +342,7 @@ async function forgeItem(id, options) {
   const lineRows = d.lines.map((line) => {
     const value = f.minimums[line.id];
     return h('div', { class: 'line-row' },
-      h('label', { for: `line-${line.id}` }, line.name),
+      h('label', { for: `line-${line.id}`, class: 'with-ico' }, statIcon(d.assets[line.id]), line.name),
       h('span', { class: 'range' }, line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`),
       h('input', { id: `line-${line.id}`, type: 'number', min: 0, value: value || '', placeholder: '—', class: value ? 'set' : '',
         onchange: (e) => change((x) => { const n = Number(e.target.value); if (n > 0) x.minimums[line.id] = n; else delete x.minimums[line.id]; }) }));
@@ -404,17 +412,20 @@ function itemTooltip(l, d) {
     const v = l.values[line.id] || 0;
     const range = line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`;
     const state = v <= 0 ? ['low', 'ligne perdue'] : v > line.max ? ['over', `over, +${v - line.max}`] : v >= line.max && line.max > line.min ? ['max', 'jet parfait'] : v < line.min ? ['low', 'sous le minimum'] : ['', ''];
-    lines.push(h('div', { class: 'tip-line ' + state[0] }, h('span', { class: 'v' }, v), h('span', { class: 'n' }, line.name), h('span', { class: 'r' }, `${range}${state[1] ? ' · ' + state[1] : ''}`)));
+    lines.push([line.id, h('div', { class: 'tip-line ' + state[0] }, h('span', { class: 'v' }, v), h('span', { class: 'n with-ico' }, statIcon(d.assets[line.id]), line.name), h('span', { class: 'r' }, `${range}${state[1] ? ' · ' + state[1] : ''}`))]);
   }
-  for (const effect of l.exo) lines.push(h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, l.values[effect]), h('span', { class: 'n' }, d.names[effect]), h('span', { class: 'r' }, 'exo')));
+  for (const effect of l.exo) lines.push([effect, h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, l.values[effect]), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'exo'))]);
   for (const [effect, bounds] of Object.entries(d.template || {})) {
     if (bounds[1] > 0) continue; // malus de base
     const v = l.values[effect];
-    if (v !== undefined) lines.push(h('div', { class: 'tip-line malus' }, h('span', { class: 'v' }, `−${Math.abs(v)}`), h('span', { class: 'n' }, d.names[effect]), h('span', { class: 'r' }, 'malus de base')));
+    if (v !== undefined) lines.push([Number(effect), h('div', { class: 'tip-line malus' }, h('span', { class: 'v' }, `−${Math.abs(v)}`), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'malus de base'))]);
   }
+  // Même ordre que l'infobulle du jeu : chaque ligne à sa place, exos compris.
+  const rank = new Map((d.order || []).map((effect, index) => [Number(effect), index]));
+  lines.sort((a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9));
   return [
     h('div', { class: 'tip-head' }, tile(d.icon), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niveau ${d.level}${l.quality !== null ? ` · jets à ${l.quality} %` : ''}`)), typeTag(l)),
-    h('div', { class: 'tip-lines' }, lines.length ? lines : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
+    h('div', { class: 'tip-lines' }, lines.length ? lines.map((entry) => entry[1]) : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
     h('div', { class: 'tip-foot' }, h('span', { class: 'muted' }, 'Prix demandé'), h('b', {}, `${fmt(l.price)} kamas`)),
     h('div', { class: 'muted small' }, `En vente depuis au moins le ${when(l.first_seen)}`),
   ];
@@ -444,7 +455,7 @@ function listingsTable(listings, d, f, withDates) {
   const short = (name) => name.replace('% Résistance', 'Ré').replace('Dommages', 'Do').replace('Dommage', 'Do').replace('Intelligence', 'Int').replace('Vitalité', 'Vita').replace('Agilité', 'Agi').replace('Sagesse', 'Sag').replace('Initiative', 'Ini').replace('Prospection', 'PP').replace('% Critique', 'Crit');
   return h('div', { class: 'scroll' }, h('table', { style: `min-width: ${420 + d.lines.length * 62}px` },
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
-      d.lines.map((line) => head(line.id, short(line.name), false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
+      d.lines.map((line) => head(line.id, [statIcon(d.assets[line.id]), short(line.name)], false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
       onmouseenter: (event) => { $tip.replaceChildren(...itemTooltip(l, d)); $tip.hidden = false; placeTip(event); },
       onmousemove: placeTip,
@@ -454,7 +465,7 @@ function listingsTable(listings, d, f, withDates) {
       h('td', { class: 'l' }, typeTag(l)),
       h('td', { class: 'l' }, l.quality === null ? h('span', { class: 'muted' }, '—')
         : [h('span', { class: 'bar thin' }, h('span', { style: `width: ${l.quality}%` })), h('span', { class: 'muted' }, ` ${l.quality} %`)]),
-      h('td', { class: 'l' }, l.exo.length ? h('div', { class: 'tags' }, l.exo.map((i) => h('span', { class: 'tag exo' }, `${d.names[i]} ${l.values[i]}`))) : h('span', { class: 'muted' }, '—')),
+      h('td', { class: 'l' }, l.exo.length ? h('div', { class: 'tags' }, l.exo.map((i) => h('span', { class: 'tag exo with-ico' }, statIcon(d.assets[i]), `${d.names[i]} ${l.values[i]}`))) : h('span', { class: 'muted' }, '—')),
       d.lines.map((line) => { const v = l.values[line.id] || 0; return h('td', { class: v >= line.max && line.max > line.min ? 'max' : v > line.max ? 'max' : v < line.min ? 'low' : 'soft' }, v); }),
       withDates && h('td', { class: 'muted' }, when(l.last_seen)))))));
 }

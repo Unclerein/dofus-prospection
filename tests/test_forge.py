@@ -54,6 +54,16 @@ def test_options_and_templates(conn):
     assert forge.load_template(conn, SHIELD) == {} and forge.load_template(conn, 700) is None
 
 
+def test_lines_follow_game_tooltip_order(conn):
+    # Par identifiant, PA (111) précède Vitalité (125) ; le jeu affiche la Vitalité d'abord.
+    assert list(forge.load_template(conn, RING)) == [PA, VITA]
+    conn.executemany("INSERT INTO effect_meta VALUES (?, ?, ?)", [(VITA, 5000, "tx_vitality"), (PA, 7000, "tx_actionPoints")])
+    assert list(forge.load_template(conn, RING)) == [VITA, PA]
+    frame = forge.listings_frame(forge.read_listings(conn, RING, forge.load_template(conn, RING)), forge.load_template(conn, RING), forge.effect_names(conn))
+    assert list(frame.columns).index("Vitalité") < list(frame.columns).index("PA")
+    assert forge.effect_assets(conn) == {VITA: "tx_vitality", PA: "tx_actionPoints"}
+
+
 def test_listings_frame_reads_each_line(conn):
     template = forge.load_template(conn, RING)
     listings = forge.read_listings(conn, RING, template)

@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS effects (
     id   INTEGER PRIMARY KEY,
     name TEXT NOT NULL
 );
+-- Ordre d'affichage d'un effet dans une infobulle du jeu, et nom de l'image de sa caractéristique.
+CREATE TABLE IF NOT EXISTS effect_meta (
+    effect_id INTEGER PRIMARY KEY,
+    priority  INTEGER NOT NULL,
+    asset     TEXT
+);
 -- Caractéristiques de base d'un item (source : DofusDB), pour repérer exos et overs.
 CREATE TABLE IF NOT EXISTS item_effects (
     item_id   INTEGER NOT NULL,

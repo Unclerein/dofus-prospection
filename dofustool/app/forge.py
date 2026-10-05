@@ -48,12 +48,25 @@ def load_template(conn: sqlite3.Connection, item_id: int) -> Template | None:
     """Caractéristiques de base de l'item, ou None si elles n'ont pas encore été récupérées."""
     if conn.execute("SELECT 1 FROM item_effects_fetched WHERE item_id = ?", (item_id,)).fetchone() is None:
         return None
+    # Dans l'ordre d'une infobulle du jeu (priorité d'affichage de l'effet), pas par identifiant.
     return {
         effect_id: (low, high)
         for effect_id, low, high in conn.execute(
-            "SELECT effect_id, min_value, max_value FROM item_effects WHERE item_id = ?", (item_id,)
+            "SELECT e.effect_id, e.min_value, e.max_value FROM item_effects e "
+            "LEFT JOIN effect_meta m ON m.effect_id = e.effect_id "
+            "WHERE e.item_id = ? ORDER BY COALESCE(m.priority, 1000000), e.effect_id",
+            (item_id,),
         )
     }
+
+
+def effect_assets(conn: sqlite3.Connection) -> dict[int, str]:
+    """Nom de l'image de la caractéristique de chaque effet (pour l'interface)."""
+    return dict(conn.execute("SELECT effect_id, asset FROM effect_meta WHERE asset IS NOT NULL"))
+
+
+def effect_priorities(conn: sqlite3.Connection) -> dict[int, int]:
+    return dict(conn.execute("SELECT effect_id, priority FROM effect_meta"))
 
 
 def _describe(ids: tuple[int, ...], values: dict[int, int], names: dict[int, str]) -> str:

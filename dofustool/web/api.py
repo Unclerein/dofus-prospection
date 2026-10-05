@@ -118,6 +118,8 @@ class Api:
                         for item_id, type_name, category_id in conn.execute("SELECT id, type_name, category_id FROM items")
                     },
                     "effects": forge.effect_names(conn),
+                    "assets": forge.effect_assets(conn),
+                    "priorities": forge.effect_priorities(conn),
                     "recipe_uses": dict(conn.execute("SELECT item_id, COUNT(*) FROM recipe_ingredients GROUP BY item_id")),
                 }
                 self._stamp = stamp
@@ -337,6 +339,8 @@ class Api:
                         {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "min": low, "max": high}
                         for effect_id, (low, high) in base_lines(template).items()
                     ],
+                    "assets": {i: state["assets"][i] for i in used if i in state["assets"]},
+                    "order": sorted(used, key=lambda i: (state["priorities"].get(i, 1_000_000), i)),
                     "exos": [
                         {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
                         for effect_id, count in forge.exo_counts(current).items()

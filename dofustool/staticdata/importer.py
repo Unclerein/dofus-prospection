@@ -75,6 +75,15 @@ def import_static(
                 (lang,),
             ):
                 effects.append((effect_id, _effect_name(description) or f"effet {effect_id}"))
+        effect_meta = []
+        tables = {row[0] for row in src.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        effect_columns = {row[1] for row in src.execute("PRAGMA table_info(EffectData)")} if "EffectData" in tables else set()
+        if {"effectPriority", "characteristic"} <= effect_columns and "CharacteristicData" in tables:
+            effect_meta = src.execute(
+                "SELECT e.id, e.effectPriority, NULLIF(c.asset, '') FROM EffectData e "
+                # 0 est la valeur par défaut des effets sans caractéristique : pas d'image plutôt qu'une fausse.
+                "LEFT JOIN CharacteristicData c ON c.id = e.characteristic AND e.characteristic > 0"
+            ).fetchall()
         recipes, ingredients = [], []
         by_recipe: dict[str, list[int]] = {}
         # quantities[i] correspond au i-ème ingrédient dans l'ordre d'insertion de la jonction.
@@ -93,11 +102,12 @@ def import_static(
 
         with dst:  # une seule transaction : l'ancien contenu reste en place si l'import échoue
             dst.executescript(SCHEMA)
-            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects", "item_icons"):
+            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects", "item_icons", "effect_meta"):
                 dst.execute(f"DELETE FROM {table}")
             dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)", items)
             dst.executemany("INSERT INTO effects VALUES (?, ?)", effects)
             dst.executemany("INSERT OR REPLACE INTO item_icons VALUES (?, ?)", icons)
+            dst.executemany("INSERT OR REPLACE INTO effect_meta VALUES (?, ?, ?)", effect_meta)
             dst.executemany("INSERT INTO jobs VALUES (?, ?)", jobs)
             dst.executemany("INSERT INTO recipes VALUES (?, ?, ?)", recipes)
             dst.executemany("INSERT INTO recipe_ingredients VALUES (?, ?, ?)", ingredients)

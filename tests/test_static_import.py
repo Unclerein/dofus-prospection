@@ -18,7 +18,9 @@ def mini_source(tmp_path):
         CREATE TABLE ItemData (id INTEGER PRIMARY KEY, m_flags INTEGER, nameId INTEGER, typeId INTEGER, level INTEGER);
         CREATE TABLE WeaponData (id INTEGER PRIMARY KEY, m_flags INTEGER, nameId INTEGER, typeId INTEGER, level INTEGER);
         CREATE TABLE ItemTypeData (id INTEGER PRIMARY KEY, nameId INTEGER, categoryId INTEGER);
-        CREATE TABLE EffectData (id INTEGER PRIMARY KEY, descriptionId INTEGER);
+        CREATE TABLE EffectData (id INTEGER PRIMARY KEY, descriptionId INTEGER, effectPriority INTEGER,
+            characteristic INTEGER);
+        CREATE TABLE CharacteristicData (id INTEGER PRIMARY KEY, asset TEXT);
         CREATE TABLE JobData (id INTEGER PRIMARY KEY, nameId INTEGER);
         CREATE TABLE RecipeData (id TEXT PRIMARY KEY, resultId INTEGER, resultLevel INTEGER, quantities TEXT, jobId INTEGER);
         CREATE TABLE RecipeData_ingredientIds_junction (RecipeData_id INTEGER, target_id INTEGER,
@@ -36,7 +38,8 @@ def mini_source(tmp_path):
     )
     c.execute("INSERT INTO WeaponData VALUES (200, ?, 3, 60, 30)", (1024 | EXCH,))
     c.execute("INSERT INTO ItemTypeData VALUES (50, 10, 2)")
-    c.execute("INSERT INTO EffectData VALUES (125, 30)")
+    c.execute("INSERT INTO EffectData VALUES (125, 30, 5000, 11)")
+    c.execute("INSERT INTO CharacteristicData VALUES (11, 'tx_vitality')")
     c.execute("INSERT INTO translations VALUES ('30', '#1{{~1~2 à }}#2 Vitalité', 'fr')")
     c.executemany("INSERT INTO JobData VALUES (?, ?)", [(28, 20), (11, 21)])
     c.executemany(
@@ -58,6 +61,7 @@ def test_import_static(mini_source):
     counts = importer.import_static(mini_source, dst, version="v-test")
     assert counts == {"items": 5, "jobs": 2, "recipes": 2, "recipe_ingredients": 3, "effects": 1}
     assert dst.execute("SELECT id, name FROM effects").fetchall() == [(125, "Vitalité")]
+    assert dst.execute("SELECT * FROM effect_meta").fetchall() == [(125, 5000, "tx_vitality")]
 
     items = {r[0]: r[1:] for r in dst.execute("SELECT * FROM items")}
     assert items[100] == ("Blé", 50, "Céréale", 1, 1, 0, 2)

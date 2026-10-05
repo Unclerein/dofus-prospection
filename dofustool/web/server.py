@@ -21,16 +21,22 @@ log = logging.getLogger("dofustool.web")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ICON_DIR = db.MARKET_PATH.parent / "icons"
 ICON_URL = "https://api.dofusdb.fr/img/items/{icon_id}.png"
+EFFECT_ICON_URL = "https://dofusdb.fr/icons/characteristics/{asset}.png"
 DEFAULT_PORT = 8600
 
 
-def fetch_icon(icon_id: int, directory: Path = ICON_DIR) -> bytes | None:
+def fetch_effect_icon(asset: str, directory: Path = ICON_DIR) -> bytes | None:
+    """Image d'une caractéristique (vitalité, force…), avec le même cache que les images d'items."""
+    return fetch_icon(asset, directory / "effects", EFFECT_ICON_URL.format(asset=asset))
+
+
+def fetch_icon(icon_id: int | str, directory: Path = ICON_DIR, url: str | None = None) -> bytes | None:
     """Image d'un item : lue dans le cache local, sinon téléchargée une fois sur DofusDB."""
     path = directory / f"{icon_id}.png"
     if path.exists():
         return path.read_bytes()
     try:
-        request = urllib.request.Request(ICON_URL.format(icon_id=icon_id), headers={"User-Agent": "dofustool"})
+        request = urllib.request.Request(url or ICON_URL.format(icon_id=icon_id), headers={"User-Agent": "dofustool"})
         with urllib.request.urlopen(request, timeout=10) as response:
             content = response.read()
     except (urllib.error.URLError, TimeoutError, OSError):
@@ -99,6 +105,11 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                             to_int(query.get("amount")),
                         )
                     )
+                if match := re.fullmatch(r"/icons/effects/([A-Za-z0-9_]{1,64})\.png", path):
+                    content = fetch_effect_icon(match[1], icon_dir)
+                    if content is None:
+                        return self._not_found()
+                    return self._send(HTTPStatus.OK, content, "image/png", "max-age=604800")
                 if match := re.fullmatch(r"/icons/(\d+)\.png", path):
                     content = fetch_icon(int(match[1]), icon_dir)
                     if content is None:
