@@ -101,6 +101,14 @@ def test_stock_endpoints(api):
     pain = next(r for r in crafts["rows"] if r["name"] == "Pain")
     assert pain["craftable"] == 1 and (pain["covered"], pain["lines"]) == (2, 2)
     assert [(i["name"], i["have"], i["need"]) for i in pain["ingredients"]] == [("Farine", 7, 3), ("Eau", 1, 1)]
+    farine_id = pain["ingredients"][0]["id"]
+    avg, hdv, hdv_ts = crafts["prices"][str(farine_id)]
+    assert avg is not None and hdv is None and hdv_ts is None  # prix moyen connu, fiche HDV jamais ouverte
+    conn = api.connect()
+    conn.execute("INSERT INTO hdv_listings VALUES (?, 1, 60, 500, 0, 0, '[]', 9e9, 9e9)", (farine_id,))
+    conn.commit()
+    conn.close()
+    assert api.stock_crafts()["prices"][str(farine_id)][1:] == [50, 9e9]  # meilleur prix unitaire : le lot de 10
     farine = next(r for r in crafts["rows"] if r["name"] == "Farine")
     assert farine["craftable"] == 54 and farine["total_margin"] == pytest.approx(54 * farine["margin"])
 

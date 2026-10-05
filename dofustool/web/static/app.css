@@ -322,3 +322,10 @@ tbody tr:hover { background: var(--raised); }
 .ingredient.part { border-color: #7A4433; background: #2A1B16; }
 .ingredient.part .ingredient-qty { color: var(--warn-soft); }
 .ingredient.none .ingredient-qty { color: var(--muted); }
+
+a.ingredient { cursor: pointer; }
+a.ingredient:hover { border-color: var(--accent); }
+a.ingredient:hover .ingredient-name { color: var(--text); }
+.tip-price { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.tip-price b { font-size: 15px; }
+.tip-price .small { text-align: right; }

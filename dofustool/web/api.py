@@ -368,9 +368,22 @@ class Api:
                     }
                 )
             stock = state["stock"]
+            # Prix de chaque ingrédient, une seule fois : [prix moyen du jeu, prix HDV, date du relevé HDV].
+            prices = {}
+            for row in rows:
+                for ingredient in row["ingredients"]:
+                    if ingredient["id"] not in prices:
+                        hdv = ws.prices.hdv_price(ingredient["id"])
+                        prices[ingredient["id"]] = [
+                            ws.prices.avg_price(ingredient["id"]),
+                            hdv[0] if hdv else None,
+                            hdv[2] if hdv else None,
+                        ]
             return clean(
                 {
                     "rows": rows,
+                    "prices": prices,
+                    "snapshot_ts": ws.prices.snapshot_ts,
                     "jobs": sorted({row["job"] for row in rows}),
                     "meta": stock.meta,
                     "bank_inferred": stock.bank_inferred,

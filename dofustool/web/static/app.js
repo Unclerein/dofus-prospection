@@ -287,6 +287,32 @@ async function pageStock(r) {
   return [head, ...(items ? stockItems(data) : stockCrafts(data))];
 }
 
+/** Infobulle d'un ingrédient : prix moyen du jeu, prix à l'HDV, et ce qu'il en faut. */
+function ingredientTooltip(i, data) {
+  const [avg, hdv, hdvTs] = data.prices[i.id] || [null, null, null];
+  const unit = (v) => (v === null ? '—' : v < 100 && !Number.isInteger(v) ? v.toFixed(2).replace('.', ',') : fmt(v));
+  const line = (label, value, note, cls) => h('div', { class: 'tip-price' }, h('span', { class: 'muted' }, label), h('b', { class: cls || '' }, value), h('span', { class: 'muted small' }, note || ''));
+  let gap = null;
+  if (avg && hdv !== null) {
+    const pct = (hdv - avg) / avg * 100;
+    gap = Math.abs(pct) < 0.5 ? null
+      : h('div', { class: 'small ' + (pct < 0 ? 'gain' : 'warn') }, `HDV ${pct < 0 ? '−' : '+'}${fmt(Math.abs(pct))} % par rapport au prix moyen`);
+  }
+  const missing = Math.max(0, i.need - i.have);
+  const price = hdv !== null ? hdv : avg;
+  return [
+    h('div', { class: 'tip-head' }, tile(i.icon), h('div', {}, h('div', { class: 'tip-name' }, i.name), h('div', { class: 'muted small' }, `${fmt(i.have)} en stock · ${fmt(i.need)} par craft`))),
+    h('div', { class: 'tip-lines' },
+      line('Prix moyen', unit(avg), avg === null ? 'absent du dernier relevé' : `relevé ${ago(data.snapshot_ts, data.now)}`),
+      line("Prix à l'HDV", unit(hdv), hdv === null ? "fiche d'achat non consultée récemment" : `relevé ${ago(hdvTs, data.now)}`),
+      gap),
+    missing > 0
+      ? h('div', { class: 'tip-foot' }, h('span', { class: 'muted' }, `Il en manque ${fmt(missing)}`), h('b', {}, price === null ? 'prix inconnu' : `≈ ${fmt(missing * price)} kamas`))
+      : h('div', { class: 'small gain' }, 'En quantité suffisante pour un craft.'),
+    h('div', { class: 'muted small' }, 'Clic : ouvrir la fiche de l\'objet.'),
+  ];
+}
+
 function stockCrafts(data) {
   const ui = S.ui.stockCrafts || (S.ui.stockCrafts = { view: 'ready', q: '', job: '', own: false, limit: 100 });
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
@@ -318,7 +344,10 @@ function stockCrafts(data) {
     h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`)),
     h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
     h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
-      h('span', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), title: `${i.name} : ${fmt(i.have)} en stock, ${fmt(i.need)} par craft` },
+      h('a', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), href: `#/item/${i.id}`,
+        'aria-label': `${i.name}, ${fmt(i.have)} en stock pour ${fmt(i.need)} par craft, ouvrir la fiche`,
+        onclick: (event) => event.stopPropagation(), // ne pas ouvrir la fiche de la recette
+        onmouseenter: (event) => showTip(event, ingredientTooltip(i, data)), onmousemove: placeTip, onmouseleave: () => { $tip.hidden = true; } },
         tile(i.icon), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
     h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
     h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
@@ -581,6 +610,12 @@ function itemTooltip(l, d) {
   ];
 }
 
+function showTip(event, nodes) {
+  $tip.replaceChildren(...nodes.filter(Boolean));
+  $tip.hidden = false;
+  placeTip(event);
+}
+
 function placeTip(event) {
   const pad = 18, box = $tip.getBoundingClientRect();
   let x = event.clientX + pad, y = event.clientY + pad;
@@ -607,7 +642,7 @@ function listingsTable(listings, d, f, withDates) {
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
       d.lines.map((line) => head(line.id, [statIcon(d.assets[line.id]), short(line.name)], false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
-      onmouseenter: (event) => { $tip.replaceChildren(...itemTooltip(l, d)); $tip.hidden = false; placeTip(event); },
+      onmouseenter: (event) => showTip(event, itemTooltip(l, d)),
       onmousemove: placeTip,
       onmouseleave: () => { $tip.hidden = true; },
     },

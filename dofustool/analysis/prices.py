@@ -159,6 +159,10 @@ class PriceBook:
         hdv = self._hdv.get(item_id)
         return (hdv[0], hdv[2]) if hdv is not None and hdv[1] == HDV else None
 
+    def hdv_price(self, item_id: int) -> tuple[float, str, float] | None:
+        """(prix unitaire, nature, date du relevé) de l'annonce HDV retenue pour l'item, quel que soit son type."""
+        return self._hdv.get(item_id)
+
     def avg_price(self, item_id: int) -> int | None:
         """Prix moyen du jeu dans le dernier relevé."""
         return self._avg.get(item_id)
