@@ -14,37 +14,7 @@ VERSION_FILE = source.DOFUS_SQLITE.with_name("VERSION")
 # concorde avec le champ « exchangeable » de DofusDB sur un échantillon de 12 items.
 EXCHANGEABLE_FLAG = 0x4
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS items (
-    id           INTEGER PRIMARY KEY,
-    name         TEXT NOT NULL,
-    type_id      INTEGER NOT NULL,
-    type_name    TEXT,
-    level        INTEGER NOT NULL,
-    exchangeable INTEGER NOT NULL,
-    is_weapon    INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS jobs (
-    id   INTEGER PRIMARY KEY,
-    name TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS recipes (
-    result_id INTEGER PRIMARY KEY,
-    job_id    INTEGER NOT NULL,
-    level     INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS recipe_ingredients (
-    result_id INTEGER NOT NULL,
-    item_id   INTEGER NOT NULL,
-    quantity  INTEGER NOT NULL,
-    PRIMARY KEY (result_id, item_id)
-);
-CREATE INDEX IF NOT EXISTS recipe_ingredients_item ON recipe_ingredients (item_id);
-CREATE TABLE IF NOT EXISTS static_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-"""
+SCHEMA = db.STATIC_SCHEMA
 
 _ITEMS = """
 SELECT i.id, t.value, i.typeId, tt.value, i.level, (i.m_flags & {flag}) != 0, {weapon}
