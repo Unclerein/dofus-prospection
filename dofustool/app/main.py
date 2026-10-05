@@ -171,10 +171,16 @@ def page_trends(state: dict) -> None:
     under, over = st.tabs(["Sous-cotés (à acheter)", "Sur-cotés (à vendre)"])
     with under:
         view = trends[trends["Signal"] == UNDER].sort_values("Écart %").drop(columns=["Signal"])
-        selectable_table(view.head(500), "under", config_cols) if not view.empty else st.info("Aucun objet sous-coté.")
+        if view.empty:
+            st.info("Aucun objet sous-coté.")
+        else:
+            selectable_table(view.head(500), "under", config_cols)
     with over:
         view = trends[trends["Signal"] == OVER].sort_values("Écart %", ascending=False).drop(columns=["Signal"])
-        selectable_table(view.head(500), "over", config_cols) if not view.empty else st.info("Aucun objet sur-coté.")
+        if view.empty:
+            st.info("Aucun objet sur-coté.")
+        else:
+            selectable_table(view.head(500), "over", config_cols)
 
 
 def price_chart(frame, column: str, empty: str) -> None:
