@@ -17,6 +17,20 @@ après chaque mise à jour du jeu.
 .\.venv\Scripts\python.exe -m dofustool.staticdata.update
 ```
 
+## Utilisation
+
+Le raccourci bureau « Dofus + dofustool » (créé par `launcher\install_shortcut.ps1`) lance
+`launcher\start.ps1` : la capture démarre en arrière-plan, le launcher Ankama s'ouvre, et la
+capture s'arrête d'elle-même à la fermeture de Dofus. Les réglages sont dans `dofustool\config.toml`.
+
+La capture seule, sans lanceur (Ctrl+C pour arrêter) :
+
+```powershell
+.\.venv\Scripts\python.exe -m dofustool.capture
+```
+
+Le journal est dans `data\capture.log` : une ligne par relevé enregistré et par alerte.
+
 Tests :
 
 ```powershell

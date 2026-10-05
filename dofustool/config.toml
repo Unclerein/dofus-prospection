@@ -1,0 +1,34 @@
+# Paramètres utilisateur de dofustool.
+
+[server]
+# Nom de ton serveur de jeu (informatif : la v1 ne gère qu'un seul serveur).
+name = ""
+
+[jobs]
+# Tes métiers et leur niveau, pour filtrer les recettes. Exemple :
+# Bijoutier = 120
+# Paysan = 200
+
+[market]
+# Taxe de mise en vente en HDV, en proportion du prix (0.02 = 2 %). À vérifier en jeu.
+hdv_tax = 0.02
+# Au-delà de cet âge, le dernier prix de vente n'est plus utilisé : on retombe sur le prix moyen.
+last_sale_max_age_hours = 24
+# Nombre minimal de relevés avant de calculer une tendance sur les prix moyens.
+min_snapshots_for_trend = 5
+# Quantité vendue minimale sur 7 jours pour qu'un objet apparaisse par défaut.
+min_liquidity = 0
+
+[capture]
+# Interface réseau à écouter. Vide = interface par défaut.
+# Liste : python -m dofustool.tools.identify --list-ifaces
+iface = ""
+# Délai (s) après la connexion au-delà duquel l'absence de prix moyens déclenche une alerte.
+avg_prices_timeout_s = 60
+
+[launcher]
+ankama_path = 'C:\Program Files\Ankama\Ankama Launcher\Ankama Launcher.exe'
+# Nom du processus du jeu, sans « .exe ».
+dofus_process = "Dofus"
+# Ouvrir le dashboard Streamlit au lancement.
+start_dashboard = false

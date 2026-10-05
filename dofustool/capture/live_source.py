@@ -11,10 +11,11 @@ from .packet import LINKTYPE_ETHERNET, parse_tcp
 class LiveSource:
     def __init__(self, ports: Iterable[int] = (GAME_PORT,), iface: str | None = None):
         self.ports = frozenset(ports)
-        self.iface = iface or conf.iface
+        resolved = conf.ifaces.dev_from_name(iface) if iface else conf.iface
+        self.iface = getattr(resolved, "name", None) or str(resolved)
         self._queue: queue.Queue[Segment | None] = queue.Queue()
         self._sniffer = AsyncSniffer(
-            iface=self.iface,
+            iface=resolved,
             filter=" or ".join(f"tcp port {p}" for p in sorted(self.ports)),
             store=False,
             prn=self._on_packet,
@@ -32,6 +33,13 @@ class LiveSource:
         if self._sniffer.running:
             self._sniffer.stop()
         self._queue.put(None)
+
+    def poll(self, timeout: float) -> Segment | None:
+        """Renvoie le prochain segment, ou None si rien n'arrive dans le délai."""
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
 
     def __iter__(self) -> Iterator[Segment]:
         """Itère jusqu'à l'appel de stop()."""

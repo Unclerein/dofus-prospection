@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS market_history (
     captured_at REAL NOT NULL,
     PRIMARY KEY (item_id, period, bucket_ts)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS capture_status (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -132,6 +136,19 @@ def save_market_history(
             "WHERE excluded.captured_at >= market_history.captured_at",
             ((item_id, period, bucket_ts, price, qty, captured_at) for bucket_ts, price, qty in points),
         )
+
+
+def set_status(conn: sqlite3.Connection, **values: object) -> None:
+    """État de la capture, lu par le dashboard (dernier démarrage, alerte de décodage…)."""
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO capture_status (key, value) VALUES (?, ?)",
+            ((key, str(value)) for key, value in values.items()),
+        )
+
+
+def get_status(conn: sqlite3.Connection) -> dict[str, str]:
+    return dict(conn.execute("SELECT key, value FROM capture_status"))
 
 
 def latest_snapshot(conn: sqlite3.Connection) -> tuple[int, float] | None:
