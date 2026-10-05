@@ -6,6 +6,7 @@ from . import DAY, GRAIN_DAY
 
 MARKET_HISTORY = "cours du marché"
 SNAPSHOTS = "relevés de prix moyens"
+HDV_ASK = "annonce HDV"
 INSUFFICIENT = "données insuffisantes"
 
 UNDER = "sous-coté"
@@ -20,6 +21,7 @@ class Trend:
     mean_7d: float | None = None
     mean_30d: float | None = None
     samples: int = 0  # relevés ou tranches ayant servi au calcul
+    reference: float | None = None  # base « annonce HDV » : le prix moyen du jeu auquel l'annonce est comparée
 
     @property
     def dev_7d(self) -> float | None:
@@ -31,7 +33,9 @@ class Trend:
 
     @property
     def deviation(self) -> float | None:
-        """Écart retenu pour le signal : sur 30 j s'il existe, sinon sur 7 j."""
+        """Écart retenu pour le signal : sur 30 j s'il existe, sinon sur 7 j ; au prix moyen pour une annonce HDV."""
+        if self.reference:
+            return self.current / self.reference - 1 if self.current is not None else None
         return self.dev_30d if self.dev_30d is not None else self.dev_7d
 
     def signal(self, threshold: float) -> str | None:
@@ -50,9 +54,14 @@ def compute_trends(
 ) -> dict[int, Trend]:
     """Tendance de chaque item ayant au moins un prix.
 
-    Avec un historique du cours du marché et un dernier prix de vente récent, le signal est
-    immédiat. Sinon on compare le prix moyen du dernier relevé à la moyenne des relevés
-    précédents, à condition d'en avoir assez.
+    Par ordre de préférence :
+      1. cours du marché consulté et vente récente : écart aux moyennes 7 j / 30 j, signal immédiat ;
+      2. ressource ou consommable ouvert à l'HDV récemment : meilleure annonce comparée au prix
+         moyen du jeu. Ce n'est pas une tendance au sens strict (une annonce contre une moyenne),
+         mais c'est le seul signal qui suit la navigation dans l'HDV pendant une session ;
+      3. sinon, prix moyen du dernier relevé comparé à la moyenne des relevés précédents, à
+         condition d'en avoir assez.
+    Les équipements sont exclus du cas 2 : leur prix moyen est gonflé par la forgemagie.
     """
     trends: dict[int, Trend] = {}
 
@@ -98,6 +107,10 @@ def compute_trends(
     }
     for item_id, price in current.items():
         if item_id in trends:
+            continue
+        ask = prices.hdv_ask(item_id) if prices is not None else None
+        if ask is not None and price > 0:
+            trends[item_id] = Trend(item_id, HDV_ASK, ask[0], samples=1, reference=float(price))
             continue
         mean_7d, mean_30d, count = past.get(item_id, (None, None, 0))
         if count + 1 < min_snapshots:

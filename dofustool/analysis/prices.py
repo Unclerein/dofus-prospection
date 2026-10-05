@@ -150,6 +150,15 @@ class PriceBook:
             return PriceRef(avg, AVG_PRICE, self.snapshot_ts)
         return None
 
+    def hdv_ask(self, item_id: int) -> tuple[float, float] | None:
+        """(meilleur prix unitaire demandé à l'HDV, date du relevé) d'une ressource ou d'un consommable."""
+        hdv = self._hdv.get(item_id)
+        return (hdv[0], hdv[2]) if hdv is not None and hdv[1] == HDV else None
+
+    def avg_price(self, item_id: int) -> int | None:
+        """Prix moyen du jeu dans le dernier relevé."""
+        return self._avg.get(item_id)
+
     def median_24h(self, item_id: int) -> float | None:
         """Prix médian pondéré des ventes des dernières 24 h d'un équipement, s'il est assez récent."""
         median = self._median.get(item_id)

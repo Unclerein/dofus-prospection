@@ -542,18 +542,22 @@ async function pageTrends() {
   const data = await cached('trends', '/api/trends');
   const status = S.status || {};
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Tendances'),
-    h('div', { class: 'lead' }, `Écart du prix courant à sa moyenne (30 j, sinon 7 j) · seuil de signal ${Math.round((status.trend_threshold || 0.15) * 100)} % · ${fmt(data.insufficient)} objets en données insuffisantes`)));
+    h('div', { class: 'lead' }, `Prix courant comparé à sa moyenne passée, ou meilleure annonce HDV comparée au prix moyen du jeu · seuil de signal ${Math.round((status.trend_threshold || 0.15) * 100)} % · ${fmt(data.insufficient)} objets en données insuffisantes`)));
   if (!data.rows.length) {
     return [head, h('div', { class: 'panel empty' }, `Données insuffisantes. Une tendance demande au moins ${status.min_snapshots_for_trend || 5} relevés de prix moyens (${status.snapshots || 0} pour l'instant), ou l'historique du cours du marché de l'objet.`)];
   }
+  const price = (v) => (v !== null && v < 100 && !Number.isInteger(v) ? v.toFixed(2).replace('.', ',') : fmt(v));
+  const reference = (r) => (r['Prix moyen'] !== null && r['Prix moyen'] !== undefined ? [r['Prix moyen'], 'prix moyen du jeu']
+    : r['Moyenne 30 j'] !== null ? [r['Moyenne 30 j'], 'moyenne 30 j'] : [r['Moyenne 7 j'], 'moyenne 7 j']);
   const table = (title, rows, positive) => h('section', { class: 'panel' },
     h('div', { class: 'panel-head' }, h('h2', {}, title), h('span', { class: 'muted small' }, `${rows.length} objet${rows.length > 1 ? 's' : ''}`)),
     rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun pour le moment.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Moy. 7 j'), h('th', {}, 'Moy. 30 j'), h('th', { class: 'sorted' }, 'Écart'))),
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', { class: 'sorted' }, 'Écart'))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '))),
-          h('td', { style: 'font-weight: 500' }, fmt(r['Prix'])), h('td', { class: 'soft' }, fmt(r['Moyenne 7 j'])), h('td', { class: 'soft' }, fmt(r['Moyenne 30 j'])),
+          h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
+          h('td', {}, h('div', { class: 'soft' }, fmt(reference(r)[0])), h('div', { class: 'muted small' }, reference(r)[1])),
           h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`)))))));
   const ui = S.ui.trends || (S.ui.trends = { category: '', type: '' });
   const signalled = data.rows.filter((r) => r['Signal']);

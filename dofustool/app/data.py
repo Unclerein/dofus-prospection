@@ -111,13 +111,17 @@ def trends_frame(conn: sqlite3.Connection, cfg: Config, ws: Workspace) -> tuple[
                 "Prix": trend.current,
                 "Moyenne 7 j": trend.mean_7d,
                 "Moyenne 30 j": trend.mean_30d,
+                "Prix moyen": trend.reference,
                 "Écart %": trend.deviation * 100,
                 "Signal": trend.signal(cfg.trend_threshold),
                 "Base": trend.basis,
                 "Vendus 7 j": ws.prices.liquidity(trend.item_id).qty_7d,
             }
         )
-    columns = ["item_id", "Objet", "Niveau", "Prix", "Moyenne 7 j", "Moyenne 30 j", "Écart %", "Signal", "Base", "Vendus 7 j"]
+    columns = [
+        "item_id", "Objet", "Niveau", "Prix", "Moyenne 7 j", "Moyenne 30 j", "Prix moyen", "Écart %", "Signal", "Base",
+        "Vendus 7 j",
+    ]  # fmt: skip
     return pd.DataFrame(rows, columns=columns), insufficient
 
 

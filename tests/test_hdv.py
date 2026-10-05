@@ -6,7 +6,7 @@ import pytest
 from dofustool import db
 from dofustool.analysis.forgemagie import Filter, classify, perfect_filter
 from dofustool.analysis.prices import AVG_PRICE, HDV, HDV_PLAIN, LAST_SALE, MEDIAN_24H, PriceBook, unit_price, weighted_median
-from dofustool.analysis.trends import compute_trends
+from dofustool.analysis.trends import HDV_ASK, compute_trends
 from dofustool.app import data
 from dofustool.config import Config
 from dofustool.messages import Mapping, hdv_listings, load_keymap
@@ -172,6 +172,34 @@ def test_resource_reference_order(conn):
     ref = book(conn).get(289)
     assert (ref.price, ref.source) == (8, HDV)  # le lot de 10 revient à 8 l'unité
     assert book(conn, NOW + 48 * 3600).get(289).source == AVG_PRICE  # annonces et vente trop anciennes
+
+
+def test_trend_from_hdv_ask_for_resources_only(conn):
+    # Blé affiché à 4 l'unité pour un prix moyen de 10 : sous-coté de 60 %, sans attendre d'autres relevés.
+    save(conn, message(289, listing(289, 1137, [4, 80, 937, 9443])))
+    trends = compute_trends(conn, NOW, 5, 24, book(conn))
+    ble = trends[289]
+    assert ble.basis == HDV_ASK and (ble.current, ble.reference) == (4, 10)
+    assert ble.deviation == pytest.approx(-0.6) and ble.signal(0.15) == "sous-coté"
+    assert trends[2469].basis == "données insuffisantes"  # sans annonce : relevés, pas encore assez nombreux
+    assert compute_trends(conn, NOW, 5, 24)[289].basis == "données insuffisantes"  # sans carnet de prix : inchangé
+
+    # Un équipement ouvert à l'HDV n'est jamais comparé à son prix moyen.
+    save(conn, message(2469, listing(2469, 2, [59_000, 0, 0, 0], [(PA, 1)])))
+    store(conn, 2469, [(PA, 1, 1)])
+    assert compute_trends(conn, NOW, 5, 24, book(conn))[2469].basis == "données insuffisantes"
+
+    # Annonce trop ancienne : elle ne sert plus.
+    assert compute_trends(conn, NOW + 48 * 3600, 5, 24, book(conn, NOW + 48 * 3600))[289].basis == "données insuffisantes"
+
+    # Le cours du marché, quand il existe, reste prioritaire sur l'annonce.
+    day = int(NOW) // 86400 * 86400
+    db.save_market_history(conn, 289, db.GRAIN_DAY, [(day, 9, 500), (day - 86400, 9, 500)], NOW - 30)
+    db.save_last_sale(conn, 289, 9, NOW - 600, NOW)
+    assert compute_trends(conn, NOW, 5, 24, book(conn))[289].basis == "cours du marché"
+
+    frame, _ = data.trends_frame(conn, Config(min_snapshots_for_trend=5), data.build_workspace(conn, Config(), NOW))
+    assert "Prix moyen" in frame.columns
 
 
 def test_equipment_reference_ignores_exo_and_single_sales(conn):
