@@ -62,6 +62,11 @@ def import_static(
                 (lang,),
             )
         ]
+        icons = []
+        for table in ("ItemData", "WeaponData"):
+            columns = {row[1] for row in src.execute(f"PRAGMA table_info({table})")}
+            if "iconId" in columns:
+                icons += src.execute(f"SELECT id, iconId FROM {table} WHERE iconId > 0").fetchall()
         effects = []
         if src.execute("SELECT 1 FROM sqlite_master WHERE name = 'EffectData'").fetchone():
             for effect_id, description in src.execute(
@@ -88,10 +93,11 @@ def import_static(
 
         with dst:  # une seule transaction : l'ancien contenu reste en place si l'import échoue
             dst.executescript(SCHEMA)
-            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects"):
+            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects", "item_icons"):
                 dst.execute(f"DELETE FROM {table}")
             dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)", items)
             dst.executemany("INSERT INTO effects VALUES (?, ?)", effects)
+            dst.executemany("INSERT OR REPLACE INTO item_icons VALUES (?, ?)", icons)
             dst.executemany("INSERT INTO jobs VALUES (?, ?)", jobs)
             dst.executemany("INSERT INTO recipes VALUES (?, ?, ?)", recipes)
             dst.executemany("INSERT INTO recipe_ingredients VALUES (?, ?, ?)", ingredients)

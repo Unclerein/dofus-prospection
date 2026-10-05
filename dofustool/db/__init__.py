@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS items (
     is_weapon    INTEGER NOT NULL,
     category_id  INTEGER
 );
+-- Identifiant de l'image d'un item (servie par DofusDB, mise en cache dans data/icons).
+CREATE TABLE IF NOT EXISTS item_icons (
+    item_id INTEGER PRIMARY KEY,
+    icon_id INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS effects (
     id   INTEGER PRIMARY KEY,
     name TEXT NOT NULL

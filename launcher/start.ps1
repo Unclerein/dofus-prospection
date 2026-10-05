@@ -48,15 +48,14 @@ try {
         }
     }
 
-    # 3. Dashboard (optionnel).
-    $app = Join-Path $root 'dofustool\app\main.py'
-    if ($cfg.start_dashboard -and (Test-Path $app)) {
-        if (Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue) {
-            Say "Dashboard déjà ouvert : http://localhost:8501"
+    # 3. Interface web (optionnelle). Elle reste ouverte après la fermeture du jeu.
+    if ($cfg.start_dashboard) {
+        if (Get-NetTCPConnection -LocalPort 8600 -State Listen -ErrorAction SilentlyContinue) {
+            Start-Process 'http://localhost:8600'
+            Say "Interface déjà lancée : http://localhost:8600"
         } else {
-            $streamlit = Join-Path $root '.venv\Scripts\streamlit.exe'
-            Start-Process -FilePath $streamlit -ArgumentList 'run', "`"$app`"", '--server.port', '8501', '--browser.gatherUsageStats', 'false' -WorkingDirectory $root -WindowStyle Hidden
-            Say "Dashboard lancé : http://localhost:8501 (il reste ouvert après la fermeture du jeu)."
+            Start-Process -FilePath $python -ArgumentList '-m', 'dofustool.web' -WorkingDirectory $root -WindowStyle Hidden
+            Say "Interface lancée : http://localhost:8600"
         }
     }
 

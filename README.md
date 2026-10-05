@@ -29,13 +29,17 @@ La capture seule, sans lanceur (Ctrl+C pour arrêter) :
 .\.venv\Scripts\python.exe -m dofustool.capture
 ```
 
-Le dashboard (crafts, tendances, fiche objet, état), ouvert dans le navigateur :
+L'interface (crafts, forgemagie, tendances, fiche objet, état) s'ouvre dans le navigateur sur
+http://localhost:8600 et se met à jour toute seule pendant une capture :
 
 ```powershell
-.\.venv\Scripts\streamlit.exe run dofustool\app\main.py
+.\.venv\Scripts\python.exe -m dofustool.web
 ```
 
-Pour qu'il s'ouvre avec le lanceur, passe `start_dashboard` à `true` dans `config.toml`.
+Le lanceur l'ouvre avec le jeu tant que `start_dashboard` vaut `true` dans `config.toml`. Les
+icônes des objets sont téléchargées depuis DofusDB à leur premier affichage, puis gardées dans
+`data\icons`. L'ancien dashboard Streamlit reste disponible :
+`.\.venv\Scripts\streamlit.exe run dofustool\app\main.py`.
 
 Le journal est dans `data\capture.log` : une ligne par relevé enregistré et par alerte.
 
