@@ -195,17 +195,18 @@ def page_item(state: dict) -> None:
     c4.metric("Vendus sur 7 j", "—" if liquidity.qty_7d is None else f"{liquidity.qty_7d:,}".replace(",", " "))
     if not liquidity.known:
         c3.caption("Inconnu : cours du marché jamais consulté.")
+    else:
+        c3.caption(f"Cours consulté {ago(detail['market_seen_at'], ws.now)}.")
 
     st.subheader("Cours du marché")
     if detail["history"]:
-        for tab, (period, frame) in zip(st.tabs(list(detail["history"])), detail["history"].items()):
+        for tab, frame in zip(st.tabs(list(detail["history"])), detail["history"].values()):
             with tab:
                 price_chart(frame, "Prix", "")
                 if frame["Quantité vendue"].notna().any():
                     st.bar_chart(frame, x="Date", y="Quantité vendue", height=180)
     else:
         st.caption("Pas d'historique : ouvre l'onglet « Cours du marché » de cet objet en jeu pendant une capture.")
-    price_chart(detail["last_sales"], "Dernier prix de vente", "")
 
     st.subheader("Prix moyen au fil des relevés")
     price_chart(detail["snapshots"], "Prix moyen", "Cet objet n'apparaît dans aucun relevé de prix moyens.")

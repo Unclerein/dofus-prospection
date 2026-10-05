@@ -2,5 +2,9 @@
   "avg_prices": {
     "key": "itn",
     "fields": { "entries": 1, "item_id": 3, "price": 5 }
+  },
+  "market_history": {
+    "key": "iuk",
+    "fields": { "hourly": 1, "daily": 2, "quantity": 1, "date": 2, "price": 3, "item_id": 4 }
   }
 }

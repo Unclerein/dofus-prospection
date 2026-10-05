@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, load_keymap
+from ..messages import avg_prices, load_keymap, market_history
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -24,6 +24,17 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             counts["rejetés"] += 1
         elif db.save_snapshot(market, ts, prices) is not None:
             counts["relevés ajoutés"] += 1
+    mapping = keymap.get("market_history")
+    if mapping is not None:
+        counts.update({"cours lus": 0, "cours enregistrés": 0, "cours rejetés": 0})
+        for ts, body in archive.execute("SELECT ts, body FROM messages WHERE key = ? ORDER BY ts", (mapping.key,)):
+            counts["cours lus"] += 1
+            history = market_history.parse(body, mapping)
+            if history is None:
+                counts["cours rejetés"] += 1
+            else:
+                db.save_market(market, history, ts)
+                counts["cours enregistrés"] += 1
     return counts
 
 
@@ -34,7 +45,7 @@ def main() -> int:
     archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
     market = db.connect()
     counts = backfill(archive, market)
-    print("Prix moyens : " + ", ".join(f"{n} {label}" for label, n in counts.items()))
+    print("Rejeu de l'archive : " + ", ".join(f"{n} {label}" for label, n in counts.items()))
     archive.close()
     market.close()
     return 0

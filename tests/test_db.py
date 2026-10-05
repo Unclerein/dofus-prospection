@@ -10,6 +10,7 @@ from dofustool.protocol.session import Message
 from dofustool.protocol.tcp import S2C
 
 from .test_avg_prices import FIXTURE
+from .test_market_history import FIXTURE as MARKET_FIXTURE
 
 
 @pytest.fixture
@@ -42,9 +43,9 @@ def test_empty_snapshot_is_not_saved(conn):
 
 
 def test_last_sales_keep_each_observation(conn):
-    db.save_last_sale(conn, 7, 100, 10.0)
-    db.save_last_sale(conn, 7, 120, 20.0)
-    db.save_last_sale(conn, 7, 120, 20.0)
+    db.save_last_sale(conn, 7, 100, 10.0, 50.0)
+    db.save_last_sale(conn, 7, 120, 20.0, 50.0)
+    db.save_last_sale(conn, 7, 120, 20.0, 60.0)  # même vente revue plus tard
     assert conn.execute("SELECT COUNT(*) FROM last_sales").fetchone()[0] == 2
     assert db.latest_last_sale(conn, 7) == (120, 20.0)
     assert db.latest_last_sale(conn, 8) is None
@@ -76,8 +77,15 @@ def test_backfill_from_archive_is_idempotent(conn):
     archive.add(conn_id, Message(0, 600.0, S2C, mapping.key, b"\x08\x01", 2, None))  # même clé, autre forme
     archive.commit()
 
-    assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 1, "rejetés": 1}
-    assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 0, "rejetés": 1}
+    history = load_keymap()["market_history"]
+    archive.add(conn_id, Message(0, 700.0, S2C, history.key, MARKET_FIXTURE.read_bytes(), 3, 1))
+    archive.add(conn_id, Message(0, 800.0, S2C, history.key, b"\\x08\\x01", 3, 2))
+    archive.commit()
+
+    cours = {"cours lus": 2, "cours enregistrés": 1, "cours rejetés": 1}
+    assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 1, "rejetés": 1, **cours}
+    assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 0, "rejetés": 1, **cours}
+    assert conn.execute("SELECT COUNT(*) FROM market_history").fetchone()[0] == 53  # rejouer n'ajoute rien
     snapshot_id, ts = db.latest_snapshot(conn)
     assert ts == 10.0
     assert db.snapshot_prices(conn, snapshot_id) == avg_prices.parse(body, mapping)

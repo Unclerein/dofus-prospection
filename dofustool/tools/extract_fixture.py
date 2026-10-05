@@ -1,19 +1,20 @@
 """Extrait de l'archive le corps du dernier message d'un nom logique vers tests/fixtures/<nom>.bin.
 
 Seuls les messages qu'un parseur valide sont extraits : la fixture est commitée, elle ne
-doit donc contenir que des données de marché, sans chaîne ni donnée de session.
+doit donc contenir que des données de marché (identifiants, prix, quantités, dates de vente),
+sans texte libre ni donnée de session.
 
-Usage : python -m dofustool.tools.extract_fixture avg_prices
+Usage : python -m dofustool.tools.extract_fixture avg_prices|market_history
 """
 import argparse
 import sys
 from pathlib import Path
 
 from ..archive import Archive
-from ..messages import avg_prices, load_keymap
+from ..messages import avg_prices, load_keymap, market_history
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
-PARSERS = {"avg_prices": avg_prices.parse}
+PARSERS = {"avg_prices": avg_prices.parse, "market_history": market_history.parse}
 
 
 def main() -> int:

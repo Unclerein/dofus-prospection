@@ -1,7 +1,7 @@
 import pytest
 
 from dofustool import db
-from dofustool.analysis import DAY, PERIOD_7D, PERIOD_24H, PERIOD_30D
+from dofustool.analysis import DAY, GRAIN_DAY, GRAIN_HOUR
 from dofustool.analysis.crafts import BUY, CRAFT, CraftCalculator, load_items, load_recipes, rank_crafts, resolve_jobs
 from dofustool.analysis.prices import AVG_PRICE, LAST_SALE, PriceBook
 from dofustool.analysis.trends import INSUFFICIENT, MARKET_HISTORY, OVER, SNAPSHOTS, UNDER, compute_trends
@@ -52,8 +52,8 @@ def calculator(conn, job_levels=None, min_liquidity=0, tax=0.02):
 # --- prix de référence -------------------------------------------------------
 
 def test_reference_price_prefers_fresh_last_sale(conn):
-    db.save_last_sale(conn, 3, 180, NOW - 2 * HOUR)  # récent
-    db.save_last_sale(conn, 2, 999, NOW - 30 * HOUR)  # trop vieux
+    db.save_last_sale(conn, 3, 180, NOW - 2 * HOUR, NOW)  # vente récente
+    db.save_last_sale(conn, 2, 999, NOW - 30 * HOUR, NOW)  # vente trop ancienne, même vue à l'instant
     prices = PriceBook(conn, NOW, last_sale_max_age_hours=24)
     pain = prices.get(3)
     assert (pain.price, pain.source) == (180, LAST_SALE) and pain.age_hours(NOW) == pytest.approx(2)
@@ -144,8 +144,11 @@ def test_ranking_puts_incomputable_last(conn):
 # --- liquidité ---------------------------------------------------------------
 
 def test_liquidity_weights_ranking(conn):
-    db.save_market_history(conn, 3, PERIOD_24H, [(1, 200, 4)], NOW)
-    db.save_market_history(conn, 3, PERIOD_7D, [(1, 200, 10), (2, 210, 15)], NOW)
+    hour, day = int(NOW) // 3600 * 3600, int(NOW) // 86400 * 86400
+    db.save_market_history(conn, 3, GRAIN_HOUR, [(hour, 200, 4), (hour - 30 * 3600, 200, 99)], NOW)  # 2e : hors 24 h
+    db.save_market_history(
+        conn, 3, GRAIN_DAY, [(day, 200, 10), (day - 6 * 86400, 210, 15), (day - 7 * 86400, 210, 500)], NOW
+    )  # le dernier point est hors des 7 jours
     calc = calculator(conn, min_liquidity=100)
     pain = calc.evaluate(load_recipes(conn)[3])
     assert (pain.liquidity.qty_24h, pain.liquidity.qty_7d) == (4, 25)
@@ -177,13 +180,15 @@ def test_trend_from_snapshots(conn):
 
 
 def test_trend_from_market_history_is_immediate(conn):
-    db.save_market_history(conn, 3, PERIOD_7D, [(1, 100, 5), (2, 120, 5)], NOW)
-    db.save_market_history(conn, 3, PERIOD_30D, [(1, 90, 5), (2, 110, 5)], NOW)
-    db.save_last_sale(conn, 3, 150, NOW - HOUR)
-    db.save_market_history(conn, 2, PERIOD_7D, [(1, 100, 5)], NOW)  # historique sans dernier prix de vente
+    day = int(NOW) // 86400 * 86400
+    points = [(day, 100, 5), (day - 2 * 86400, 120, 5), (day - 10 * 86400, 90, 5), (day - 20 * 86400, 90, 5)]
+    db.save_market_history(conn, 3, GRAIN_DAY, points + [(day - 40 * 86400, 5000, 5)], NOW)  # le dernier : hors 30 j
+    db.save_last_sale(conn, 3, 150, NOW - HOUR, NOW)
+    db.save_market_history(conn, 2, GRAIN_DAY, [(day, 100, 5)], NOW)  # historique sans dernier prix de vente
     trends = compute_trends(conn, NOW, min_snapshots=5, last_sale_max_age_hours=24)
     pain = trends[3]
     assert pain.basis == MARKET_HISTORY and pain.current == 150
-    assert pain.dev_7d == pytest.approx(150 / 110 - 1) and pain.dev_30d == pytest.approx(0.5)
+    assert pain.dev_7d == pytest.approx(150 / 110 - 1) and pain.dev_30d == pytest.approx(0.5)  # moyennes 110 et 100
+    assert pain.samples == 4
     assert pain.signal(0.15) == OVER
     assert trends[2].basis == INSUFFICIENT  # retombe sur les relevés

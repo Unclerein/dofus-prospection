@@ -8,7 +8,11 @@ from dofustool.capture import Segment
 from dofustool.capture.pipeline import Pipeline
 from dofustool.messages import Mapping
 
+from datetime import timedelta
+
 from .test_avg_prices import synthetic
+from .test_market_history import MAPPING as MARKET_MAPPING
+from .test_market_history import T0, entry
 from .test_protocol import AUTH_LIKE, EVENT, REQUEST, framed, ld, segments
 
 MAPPING = Mapping("avg", {"entries": 1, "item_id": 3, "price": 5})
@@ -47,6 +51,20 @@ def test_snapshot_saved_archived_and_logged(pipeline, caplog):
     feed(pipeline, framed(any_frame("avg", synthetic(1200))), t=2000.0, port=40002)
     assert pipeline.market.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == 1
     assert "identiques au dernier relevé" in caplog.records[-1].getMessage()
+
+
+def test_market_history_saved_and_logged(pipeline, caplog):
+    caplog.set_level(logging.INFO, logger="dofustool.capture")
+    pipeline.keymap["market_history"] = MARKET_MAPPING
+    pipeline.market.execute("INSERT INTO items VALUES (289, 'Blé', 1, 'Céréale', 1, 1, 0)")
+    body = entry(1, T0, 9, 100) + entry(2, T0, 9, 100) + entry(2, T0 - timedelta(days=1), 8, 900)
+    feed(pipeline, framed(any_frame("xxx", body)) + framed(any_frame("xxx", b"\x08\x01")))  # le 2e est rejeté
+    assert [r.getMessage() for r in caplog.records] == [
+        "Cours du marché enregistré : Blé (1 points horaires, 2 journaliers)."
+    ]
+    assert pipeline.market.execute("SELECT COUNT(*) FROM market_history").fetchone()[0] == 3
+    assert db.latest_last_sale(pipeline.market, 289)[0] == 9
+    assert pipeline.archive.count() == 3  # les deux messages restent dans l'archive brute
 
 
 def test_alert_when_no_avg_prices_after_timeout(pipeline, caplog):

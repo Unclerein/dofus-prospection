@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .. import db
 from ..archive import Archive
-from ..messages import Mapping, avg_prices
+from ..messages import Mapping, avg_prices, market_history
 from ..protocol.session import Message, Session
 from . import Segment
 
@@ -61,6 +61,20 @@ class Pipeline:
         watch.last_ts = msg.ts
         if watch.archive_id is not None:
             self.archive.add(watch.archive_id, msg)
+
+        mapping = self.keymap.get("market_history")
+        if mapping is not None and msg.key == mapping.key:
+            history = market_history.parse(msg.body, mapping)
+            if history is not None:
+                db.save_market(self.market, history, msg.ts)
+                row = self.market.execute("SELECT name FROM items WHERE id = ?", (history.item_id,)).fetchone()
+                log.info(
+                    "Cours du marché enregistré : %s (%d points horaires, %d journaliers).",
+                    row[0] if row else f"item {history.item_id}",
+                    len(history.hourly),
+                    len(history.daily),
+                )
+            return
 
         mapping = self.keymap.get("avg_prices")
         if mapping is not None and msg.key == mapping.key:

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from dofustool import db
-from dofustool.analysis import DAY, PERIOD_7D
+from dofustool.analysis import DAY, GRAIN_DAY, GRAIN_HOUR
 from dofustool.app import data
 from dofustool.config import Config
 
@@ -31,7 +31,7 @@ def test_crafts_frame_and_filters(conn):  # noqa: F811
     assert set(data.filter_crafts(df, only_own_jobs=True)["Objet"]) == {"Farine", "Pain"}
     assert "Cycle B" not in set(data.filter_crafts(df, max_capital=100)["Objet"])
     # Liquidité : connue et insuffisante = masqué ; inconnue = conservé.
-    db.save_market_history(conn, 3, PERIOD_7D, [(1, 200, 5)], NOW)
+    db.save_market_history(conn, 3, GRAIN_DAY, [(int(NOW) // 86400 * 86400, 200, 5)], NOW)
     df = data.crafts_frame(conn, data.build_workspace(conn, CFG, NOW))
     filtered = set(data.filter_crafts(df, min_liquidity=10)["Objet"])
     assert "Pain" not in filtered and "Farine" in filtered
@@ -49,10 +49,13 @@ def test_trends_frame(conn):  # noqa: F811
 
 
 def test_item_detail(conn):  # noqa: F811
-    db.save_last_sale(conn, 3, 180, NOW - HOUR)
+    db.save_last_sale(conn, 3, 180, NOW - HOUR, NOW)
+    db.save_market_history(conn, 3, GRAIN_HOUR, [(int(NOW) // 3600 * 3600, 180, 12)], NOW)
     ws = data.build_workspace(conn, CFG, NOW)
     pain = data.item_detail(conn, ws, 3)
     assert pain["ref"].price == 180 and len(pain["snapshots"]) == 1 and len(pain["last_sales"]) == 1
+    assert list(pain["history"]) == ["Par heure (24 h)"] and pain["liquidity"].qty_24h == 12
+    assert pain["market_seen_at"] == NOW
     ingredients = pain["craft"]["ingredients"].set_index("Ingrédient")
     assert ingredients.loc["Farine", "Mode"] == "craft" and ingredients.loc["Farine", "Sous-total"] == 60
     assert ingredients.loc["Eau", "Mode"] == "achat"
@@ -89,8 +92,10 @@ def app_db(tmp_path, monkeypatch):
     now = time.time()
     for age, factor in [(20, 1.0), (10, 1.0), (5, 1.0), (3, 1.0), (0, 2.0)]:
         db.save_snapshot(c, now - age * DAY - 1, {k: int(v * factor) + age for k, v in AVG.items()})
-    db.save_last_sale(c, 3, 180, now - HOUR)
-    db.save_market_history(c, 3, PERIOD_7D, [(int(now - d * DAY), 150 + d, 10 + d) for d in range(7)], now)
+    db.save_last_sale(c, 3, 180, now - HOUR, now)
+    day = int(now) // 86400 * 86400
+    db.save_market_history(c, 3, GRAIN_DAY, [(day - d * 86400, 150 + d, 10 + d) for d in range(12)], now)
+    db.save_market_history(c, 3, GRAIN_HOUR, [(int(now) // 3600 * 3600 - h * 3600, 170 + h, 3) for h in range(20)], now)
     db.set_status(c, decode_alert="test d'alerte", decode_alert_ts=now)
     c.commit()
     c.close()

@@ -1,16 +1,18 @@
 """Préparation des données du dashboard, sans dépendance à Streamlit (testable)."""
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 
 import pandas as pd
 
-from ..analysis import PERIOD_7D, PERIOD_24H, PERIOD_30D
+from ..analysis import GRAIN_DAY, GRAIN_HOUR
 from ..analysis.crafts import CraftCalculator, CraftResult, Item, load_items, load_recipes, rank_crafts, resolve_jobs
 from ..analysis.prices import PriceBook, PriceRef
 from ..analysis.trends import INSUFFICIENT, compute_trends
 from ..config import Config
 
-PERIODS = (PERIOD_24H, PERIOD_7D, PERIOD_30D)
+# Séries du cours du marché, avec le titre affiché.
+SERIES = ((GRAIN_HOUR, "Par heure (24 h)"), (GRAIN_DAY, "Par jour"))
 HEARTBEAT_STALE_S = 15.0
 
 
@@ -127,6 +129,12 @@ def item_options(conn: sqlite3.Connection) -> dict[int, str]:
     return {item_id: f"{name} (niv. {level})" for item_id, name, level in rows}
 
 
+def _local_dates(seconds: pd.Series) -> pd.Series:
+    """Horodatages Unix -> dates à l'heure locale de la machine, comme les affiche le jeu."""
+    local = datetime.now().astimezone().tzinfo
+    return pd.to_datetime(seconds, unit="s", utc=True).dt.tz_convert(local).dt.tz_localize(None)
+
+
 def _ref_row(ref: PriceRef | None, now: float) -> tuple[int | None, str | None, float | None]:
     return (ref.price, ref.source, round(ref.age_hours(now), 1)) if ref else (None, None, None)
 
@@ -149,16 +157,16 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
         ).fetchall(),
         columns=["ts", "Prix moyen"],
     )
-    detail["snapshots"]["Date"] = pd.to_datetime(detail["snapshots"].pop("ts"), unit="s", utc=True).dt.tz_convert(None)
+    detail["snapshots"]["Date"] = _local_dates(detail["snapshots"].pop("ts"))
     detail["last_sales"] = pd.DataFrame(
         conn.execute(
-            "SELECT captured_at, price FROM last_sales WHERE item_id = ? ORDER BY captured_at", (item_id,)
+            "SELECT sold_at, price FROM last_sales WHERE item_id = ? ORDER BY sold_at", (item_id,)
         ).fetchall(),
         columns=["ts", "Dernier prix de vente"],
     )
-    detail["last_sales"]["Date"] = pd.to_datetime(detail["last_sales"].pop("ts"), unit="s", utc=True).dt.tz_convert(None)
+    detail["last_sales"]["Date"] = _local_dates(detail["last_sales"].pop("ts"))
     history = {}
-    for period in PERIODS:
+    for period, title in SERIES:
         frame = pd.DataFrame(
             conn.execute(
                 "SELECT bucket_ts, price, qty_sold FROM market_history WHERE item_id = ? AND period = ? ORDER BY bucket_ts",
@@ -167,9 +175,10 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
             columns=["ts", "Prix", "Quantité vendue"],
         )
         if not frame.empty:
-            frame["Date"] = pd.to_datetime(frame.pop("ts"), unit="s", utc=True).dt.tz_convert(None)
-            history[period] = frame
+            frame["Date"] = _local_dates(frame.pop("ts"))
+            history[title] = frame
     detail["history"] = history
+    detail["market_seen_at"] = ws.prices.market_seen_at(item_id)
 
     recipe = ws.calculator.recipes.get(item_id)
     detail["craft"] = None

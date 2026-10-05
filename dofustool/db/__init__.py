@@ -6,6 +6,10 @@ from pathlib import Path
 
 MARKET_PATH = Path(__file__).resolve().parents[2] / "data" / "market.sqlite"
 
+# Valeurs de market_history.period : le grain de la série envoyée par le serveur.
+GRAIN_HOUR = "hour"
+GRAIN_DAY = "day"
+
 STATIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
     id           INTEGER PRIMARY KEY,
@@ -54,8 +58,9 @@ CREATE INDEX IF NOT EXISTS avg_prices_item ON avg_prices (item_id, snapshot_id);
 CREATE TABLE IF NOT EXISTS last_sales (
     item_id     INTEGER NOT NULL,
     price       INTEGER NOT NULL,
+    sold_at     REAL NOT NULL,
     captured_at REAL NOT NULL,
-    PRIMARY KEY (item_id, captured_at)
+    PRIMARY KEY (item_id, sold_at)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS market_history (
     item_id     INTEGER NOT NULL,
@@ -78,6 +83,10 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
+    # Avant la phase 2b, last_sales n'avait pas la date de vente ; la table était encore vide.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(last_sales)")}
+    if columns and "sold_at" not in columns:
+        conn.execute("DROP TABLE last_sales")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -111,11 +120,12 @@ def save_snapshot(conn: sqlite3.Connection, ts: float, prices: dict[int, int]) -
     return snapshot_id
 
 
-def save_last_sale(conn: sqlite3.Connection, item_id: int, price: int, captured_at: float) -> None:
+def save_last_sale(conn: sqlite3.Connection, item_id: int, price: int, sold_at: float, captured_at: float) -> None:
+    """Enregistre une vente observée. sold_at est la date de la vente, captured_at celle de l'observation."""
     with conn:
         conn.execute(
-            "INSERT OR REPLACE INTO last_sales (item_id, price, captured_at) VALUES (?, ?, ?)",
-            (item_id, price, captured_at),
+            "INSERT OR REPLACE INTO last_sales (item_id, price, sold_at, captured_at) VALUES (?, ?, ?, ?)",
+            (item_id, price, sold_at, captured_at),
         )
 
 
@@ -126,7 +136,10 @@ def save_market_history(
     points: Iterable[tuple[int, int, int | None]],
     captured_at: float,
 ) -> None:
-    """Enregistre des points (bucket_ts, prix, quantité vendue). Pour une même tranche, le relevé le plus récent gagne."""
+    """Enregistre des points (bucket_ts, prix, quantité vendue) d'une série (period = grain, heure ou jour).
+
+    Pour une même tranche, le relevé le plus récent gagne : la tranche en cours grossit d'une capture à l'autre.
+    """
     with conn:
         conn.executemany(
             "INSERT INTO market_history (item_id, period, bucket_ts, price, qty_sold, captured_at) "
@@ -161,7 +174,18 @@ def snapshot_prices(conn: sqlite3.Connection, snapshot_id: int) -> dict[int, int
 
 
 def latest_last_sale(conn: sqlite3.Connection, item_id: int) -> tuple[int, float] | None:
-    """Renvoie (prix, captured_at) du dernier prix de vente connu de l'item."""
+    """Renvoie (prix, date de la vente) de la dernière vente connue de l'item."""
     return conn.execute(
-        "SELECT price, captured_at FROM last_sales WHERE item_id = ? ORDER BY captured_at DESC LIMIT 1", (item_id,)
+        "SELECT price, sold_at FROM last_sales WHERE item_id = ? ORDER BY sold_at DESC LIMIT 1", (item_id,)
     ).fetchone()
+
+
+def save_market(conn: sqlite3.Connection, history, captured_at: float) -> None:
+    """Enregistre un cours du marché décodé (messages.market_history.MarketHistory)."""
+    for grain, points, size in ((GRAIN_HOUR, history.hourly, 3600), (GRAIN_DAY, history.daily, 86400)):
+        save_market_history(
+            conn, history.item_id, grain, [(p.bucket(size), p.price, p.quantity) for p in points], captured_at
+        )
+    last = history.last_sale
+    if last is not None:
+        save_last_sale(conn, history.item_id, last.price, last.sold_at, captured_at)

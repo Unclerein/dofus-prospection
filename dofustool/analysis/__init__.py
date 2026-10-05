@@ -1,8 +1,7 @@
 """Analyse : prix de référence, marges de craft, liquidité, tendances."""
+from ..db import GRAIN_DAY, GRAIN_HOUR
 
-# Valeurs de market_history.period.
-PERIOD_24H = "24h"
-PERIOD_7D = "7d"
-PERIOD_30D = "30d"
+__all__ = ["DAY", "GRAIN_DAY", "GRAIN_HOUR", "HOUR"]
 
+HOUR = 3600.0
 DAY = 86400.0

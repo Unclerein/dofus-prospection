@@ -74,8 +74,16 @@ sortie attendue est un seul candidat avec au moins 90 % d'items connus.
 Repères du build du 5 octobre 2026, pour comparaison : clé `itn`, 8 924 entrées, champ répété 1,
 identifiant en champ 3, prix en champ 5.
 
-**Autres messages** (cours du marché, une fois la phase 2b faite) : même méthode, à partir de
-leurs fixtures et d'une étiquette saisie au moment de l'action.
+**Cours du marché : manuel.** Lancer `identify.py`, taper une étiquette, puis ouvrir l'onglet
+« Cours du marché » d'un objet. Le message cherché est la réponse du serveur (environ 2 Ko pour
+un objet très échangé) qui suit une requête du client ne contenant que l'identifiant de l'objet.
+Il porte deux champs répétés (série horaire, série journalière) dont chaque entrée contient une
+quantité, une date, un prix et l'identifiant de l'objet. Changer de période en jeu n'envoie rien.
+
+Repères du build du 5 octobre 2026 : clé `iuk` ; série horaire en champ 1, journalière en
+champ 2 ; dans une entrée, quantité en 1, date en 2, prix en 3, identifiant en 4. La fixture
+`tests/fixtures/market_history.bin` est le cours du Blé, et ses tests rappellent les valeurs
+lues à l'écran ce jour-là.
 
 ### 3. Mettre à jour `keymap.json`
 

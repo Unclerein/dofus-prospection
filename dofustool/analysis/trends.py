@@ -2,7 +2,7 @@
 import sqlite3
 from dataclasses import dataclass
 
-from . import DAY, PERIOD_7D, PERIOD_30D
+from . import DAY, GRAIN_DAY
 
 MARKET_HISTORY = "cours du marché"
 SNAPSHOTS = "relevés de prix moyens"
@@ -56,21 +56,22 @@ def compute_trends(
     """
     trends: dict[int, Trend] = {}
 
-    history: dict[int, dict[str, tuple[float, int]]] = {}
-    for item_id, period, mean, count in conn.execute(
-        "SELECT item_id, period, AVG(price), COUNT(*) FROM market_history WHERE period IN (?, ?) GROUP BY item_id, period",
-        (PERIOD_7D, PERIOD_30D),
-    ):
-        history.setdefault(item_id, {})[period] = (mean, count)
+    # Moyennes simples des prix journaliers, comme le « prix moyen » affiché par le jeu.
+    history: dict[int, tuple[float | None, float | None, int]] = {
+        item_id: (mean_7d, mean_30d, count)
+        for item_id, mean_7d, mean_30d, count in conn.execute(
+            "SELECT item_id, AVG(CASE WHEN bucket_ts > :week THEN price END), AVG(price), COUNT(*) "
+            "FROM market_history WHERE period = :grain AND bucket_ts > :month GROUP BY item_id",
+            {"grain": GRAIN_DAY, "week": now - 7 * DAY, "month": now - 30 * DAY},
+        )
+    }
     for item_id, price, _ in conn.execute(
-        "SELECT item_id, price, MAX(captured_at) FROM last_sales WHERE captured_at >= ? GROUP BY item_id",
+        "SELECT item_id, price, MAX(sold_at) FROM last_sales WHERE sold_at >= ? GROUP BY item_id",
         (now - last_sale_max_age_hours * 3600,),
     ):
-        periods = history.get(item_id)
-        if periods:
-            mean_7d, n7 = periods.get(PERIOD_7D, (None, 0))
-            mean_30d, n30 = periods.get(PERIOD_30D, (None, 0))
-            trends[item_id] = Trend(item_id, MARKET_HISTORY, price, mean_7d, mean_30d, n7 + n30)
+        if item_id in history:
+            mean_7d, mean_30d, count = history[item_id]
+            trends[item_id] = Trend(item_id, MARKET_HISTORY, price, mean_7d, mean_30d, count)
 
     latest = conn.execute("SELECT id, ts FROM snapshots ORDER BY ts DESC, id DESC LIMIT 1").fetchone()
     if latest is None:
