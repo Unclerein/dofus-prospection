@@ -9,10 +9,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Données statiques (non commitées), depuis la dernière release de `ledouxm/dofus-sqlite` :
+Données statiques (non commitées) : télécharge la dernière release de `ledouxm/dofus-sqlite`
+si elle a changé, puis importe items, recettes et métiers dans `data/market.sqlite`. À relancer
+après chaque mise à jour du jeu.
 
 ```powershell
-curl.exe -L -o data\static\dofus.sqlite https://github.com/ledouxm/dofus-sqlite/releases/latest/download/dofus.sqlite
+.\.venv\Scripts\python.exe -m dofustool.staticdata.update
 ```
 
 Tests :
