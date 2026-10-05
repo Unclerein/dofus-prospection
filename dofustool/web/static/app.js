@@ -90,7 +90,7 @@ function ageLabel(hours) {
 
 // ---------------------------------------------------------------- état et navigation
 
-const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, effect: null, amount: 1, start: 'base' } }, status: null, stamp: null };
+const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, effect: null, amount: 1, start: 'base', type: '' } }, status: null, stamp: null };
 
 const NAV = [
   ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z'],
@@ -289,12 +289,12 @@ function saveFilter(id, f) {
 
 async function forgeItem(id, options) {
   const d = await cached(`forge-${id}`, `/api/forge/item/${id}`);
-  const picker = itemPicker(options.map((o) => [o.id, o.name, o.level, o.icon, `${o.count} annonce${o.count > 1 ? 's' : ''}`]),
+  const picker = itemPicker(options.map((o) => [o.id, o.name, o.level, o.icon, `${o.type ? o.type + ' · ' : ''}${o.count} annonce${o.count > 1 ? 's' : ''}`]),
     { id: 'forge-search', placeholder: 'Chercher un équipement…', href: (itemId) => `#/forge/item/${itemId}`, browse: true });
   const header = h('section', { class: 'panel item-head', 'aria-label': 'Objet' },
     tile(d.icon, true),
     h('div', { class: 'info' }, h('div', { class: 'title' }, d.name),
-      h('div', { class: 'muted' }, `Niveau ${d.level}` + (d.template_known ? ` · ${d.listings.length} annonces relevées ${ago(d.captured_at, d.now)}` : ''))),
+      h('div', { class: 'muted' }, `${(options.find((o) => o.id === id) || {}).type || 'Équipement'} · niveau ${d.level}` + (d.template_known ? ` · ${d.listings.length} annonces relevées ${ago(d.captured_at, d.now)}` : ''))),
     picker,
     h('a', { class: 'btn', href: `#/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Fiche objet'));
   if (!d.template_known) {
@@ -476,7 +476,10 @@ async function forgeRanking() {
   const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` : ui.criterion === 'over' ? `${lineName} à +${ui.amount} ou plus` : 'Selon mes critères';
   const key = ui.start === 'base' ? 'Prime sur la base' : 'Gain sur le craft';
 
-  const rows = data.rows.filter((r) => r['Moins cher selon critère'] !== null)
+  const typeCounts = new Map();
+  for (const r of data.rows) if (r['Moins cher selon critère'] !== null) typeCounts.set(r.type || 'Autres', (typeCounts.get(r.type || 'Autres') || 0) + 1);
+  if (ui.type && !typeCounts.has(ui.type)) ui.type = '';
+  const rows = data.rows.filter((r) => r['Moins cher selon critère'] !== null && (!ui.type || (r.type || 'Autres') === ui.type))
     .sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
   const top = Math.max(1, ...rows.map((r) => r[key] || 0));
 
@@ -491,6 +494,10 @@ async function forgeRanking() {
         first.lines.map((x) => h('option', { value: x.id, selected: x.id === ui.effect }, `${x.name} · ${x.count} objet${x.count > 1 ? 's' : ''}`)))),
     ui.criterion === 'over' && h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 'rank-amount' }, 'Au-dessus du jet parfait'),
       h('input', { id: 'rank-amount', type: 'number', min: 1, value: ui.amount, class: 'set', onchange: (e) => set({ amount: Math.max(1, Number(e.target.value) || 1) }) })),
+    h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'rank-type' }, "Type d'objet"),
+      h('select', { id: 'rank-type', class: ui.type ? 'set' : '', onchange: (e) => set({ type: e.target.value }) },
+        h('option', { value: '' }, 'Tous les types'),
+        [...typeCounts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr')).map(([name, n]) => h('option', { value: name, selected: name === ui.type }, `${name} · ${n}`)))),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Point de départ'),
       segmented('Point de départ', [['base', 'Acheter de base'], ['craft', 'Fabriquer']], ui.start, (start) => set({ start }))),
     h('div', { class: 'muted small', style: 'flex: 1 1 260px' }, ui.start === 'base'
@@ -501,7 +508,7 @@ async function forgeRanking() {
     const value = r[key];
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/forge/item/${r.item_id}`; } },
       h('td', { class: 'muted' }, index + 1),
-      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''))),
+      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''))),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
       h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Moins cher selon critère'])),
         h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`)),
@@ -545,12 +552,26 @@ async function pageTrends() {
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Moy. 7 j'), h('th', {}, 'Moy. 30 j'), h('th', { class: 'sorted' }, 'Écart'))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], r['Base'])),
+          h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '))),
           h('td', { style: 'font-weight: 500' }, fmt(r['Prix'])), h('td', { class: 'soft' }, fmt(r['Moyenne 7 j'])), h('td', { class: 'soft' }, fmt(r['Moyenne 30 j'])),
           h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`)))))));
-  const under = data.rows.filter((r) => r['Signal'] === 'sous-coté').sort((a, b) => a['Écart %'] - b['Écart %']);
-  const over = data.rows.filter((r) => r['Signal'] === 'sur-coté').sort((a, b) => b['Écart %'] - a['Écart %']);
-  return [head, h('div', { class: 'grid2' }, table('Sous-cotés, à acheter', under, false), table('Sur-cotés, à vendre', over, true))];
+  const ui = S.ui.trends || (S.ui.trends = { category: '', type: '' });
+  const signalled = data.rows.filter((r) => r['Signal']);
+  const count = (list, key) => { const m = new Map(); for (const r of list) m.set(r[key] || 'Autres', (m.get(r[key] || 'Autres') || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const categories = count(signalled, 'category');
+  const inCategory = signalled.filter((r) => !ui.category || r.category === ui.category);
+  const types = count(inCategory, 'type');
+  if (ui.type && !types.some(([name]) => name === ui.type)) ui.type = '';
+  const kept = inCategory.filter((r) => !ui.type || (r.type || 'Autres') === ui.type);
+  const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Famille'),
+      segmented('Famille', [['', `Tout · ${signalled.length}`], ...categories.map(([name, n]) => [name, `${name} · ${n}`])], ui.category, (category) => { Object.assign(ui, { category, type: '' }); refresh(); })),
+    h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 't-type' }, 'Type'),
+      h('select', { id: 't-type', class: ui.type ? 'set' : '', onchange: (e) => { ui.type = e.target.value; refresh(); } },
+        h('option', { value: '' }, 'Tous les types'), types.map(([name, n]) => h('option', { value: name, selected: name === ui.type }, `${name} · ${n}`)))));
+  const under = kept.filter((r) => r['Signal'] === 'sous-coté').sort((a, b) => a['Écart %'] - b['Écart %']);
+  const over = kept.filter((r) => r['Signal'] === 'sur-coté').sort((a, b) => b['Écart %'] - a['Écart %']);
+  return [head, filters, h('div', { class: 'grid2' }, table('Sous-cotés, à acheter', under, false), table('Sur-cotés, à vendre', over, true))];
 }
 
 // ---------------------------------------------------------------- graphiques
@@ -630,7 +651,7 @@ function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un obje
     const q = norm(input.value.trim());
     if (q.length < 2 && !browse) { list.hidden = true; return; }
     const found = [];
-    for (const it of items) { if (norm(it[1]).includes(q)) { found.push(it); if (found.length >= (browse ? 60 : 12)) break; } }
+    for (const it of items) { if (norm(it[1]).includes(q) || (it[4] && norm(it[4]).includes(q))) { found.push(it); if (found.length >= (browse ? 60 : 12)) break; } }
     list.replaceChildren(...found.map((it) => h('li', {}, h('button', { onmousedown: (e) => e.preventDefault(), onclick: () => { list.hidden = true; input.value = ''; location.hash = href(it[0]); } },
       tile(it[3]), h('span', {}, it[1], h('span', { class: 'muted' }, ` · niv. ${it[2]}${it[4] ? ' · ' + it[4] : ''}`))))));
     list.hidden = found.length === 0;
@@ -663,6 +684,20 @@ async function pageItem(r) {
     kpi('Coût le plus bas', fmt(d.unit_cost.cost), d.unit_cost.mode ? `Par ${d.unit_cost.mode}` : 'Prix manquant'),
     kpi('Vendus sur 24 h', fmt(d.qty_24h), d.market_seen_at ? `Cours consulté ${ago(d.market_seen_at, now)}` : 'Cours du marché jamais consulté'),
     kpi('Vendus sur 7 j', fmt(d.qty_7d)));
+
+  // Écart entre le prix réellement demandé à l'HDV et le prix moyen annoncé par le jeu.
+  let gap = null;
+  if (d.hdv_unit !== null && d.hdv_unit !== undefined && d.avg_price) {
+    const diff = d.hdv_unit - d.avg_price.price, pct = d.avg_price.price ? diff / d.avg_price.price * 100 : 0;
+    const cheaper = diff < 0, flat = Math.abs(pct) < 0.5;
+    const unit = (v) => (Number.isInteger(v) ? fmt(v) : v.toFixed(2).replace('.', ','));
+    gap = h('section', { class: 'panel gap ' + (flat ? '' : cheaper ? 'under' : 'above'), 'aria-label': 'HDV contre prix moyen' },
+      h('div', { class: 'gap-side' }, h('div', { class: 'label' }, "Prix à l'HDV"), h('div', { class: 'value' }, unit(d.hdv_unit)), h('div', { class: 'hint' }, `Meilleur prix unitaire · relevé ${ago(d.hdv.captured_at, now)}`)),
+      h('div', { class: 'gap-mid' },
+        h('div', { class: 'gap-pct' }, flat ? '=' : `${cheaper ? '−' : '+'}${fmt(Math.abs(pct))} %`),
+        h('div', { class: 'gap-text' }, flat ? 'au prix moyen' : cheaper ? `${unit(Math.abs(diff))} sous le prix moyen` : `${unit(Math.abs(diff))} au-dessus du prix moyen`)),
+      h('div', { class: 'gap-side right' }, h('div', { class: 'label' }, 'Prix moyen du jeu'), h('div', { class: 'value' }, fmt(d.avg_price.price)), h('div', { class: 'hint' }, `Relevé ${ago(d.avg_price.ts, now)}`)));
+  }
 
   const noMarket = "Pas d'historique : ouvre l'onglet « Cours du marché » de cet objet en jeu pendant une capture.";
   const hourlyQty = new Map(d.hourly.map((p) => [p[0], p[2]]));
@@ -719,7 +754,7 @@ async function pageItem(r) {
           h('td', { class: 'soft' }, fmt(row['Quantité utilisée'])), h('td', {}, fmt(row['Prix de vente'])),
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
 
-  return [head, header, kpis, charts, hdvPanel, recipePanel, usedPanel];
+  return [head, header, kpis, gap, charts, hdvPanel, recipePanel, usedPanel];
 }
 
 // ---------------------------------------------------------------- page État

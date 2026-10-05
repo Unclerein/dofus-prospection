@@ -48,7 +48,8 @@ def test_crafts_trends_items(api):
 
     trends = api.trends()
     json.dumps(trends, allow_nan=False)
-    assert trends["rows"] and {"Objet", "Écart %", "Signal"} <= trends["rows"][0].keys()
+    assert trends["rows"] and {"Objet", "Écart %", "Signal", "type", "category"} <= trends["rows"][0].keys()
+    assert {row["category"] for row in trends["rows"]} == {"Ressources"}
 
     items = api.items()["items"]
     assert [3, "Pain (niv. 1)"[:4], 1, 9001] == [items[[i[0] for i in items].index(3)][0], "Pain", 1, 9001]
@@ -61,6 +62,12 @@ def test_item_detail(api):
     assert pain["ref"]["price"] == 180 and len(pain["daily"]) == 12 and len(pain["hourly"]) == 20
     assert len(pain["snapshots"]) == 5 and pain["qty_24h"] == 60
     assert pain["craft"]["job"] == "Paysan" and len(pain["craft"]["ingredients"]) == 2
+    assert pain["category"] == "Ressources" and pain["avg_price"]["price"] == 400 and pain["hdv_unit"] is None
+    conn = api.connect()
+    conn.execute("INSERT INTO hdv_listings VALUES (3, 1, 300, 2500, 0, 0, '[]', 9e9, 9e9)")
+    conn.commit()
+    conn.close()
+    assert api.item(3)["hdv_unit"] == 250  # le lot de 10 revient à 250 l'unité, sous le prix moyen de 400
     assert pain["craft"]["ingredients"][0]["Mode"] in ("achat", "craft")
     ble = api.item(1)
     assert ble["craft"] is None and len(ble["used_in"]) == 5
@@ -70,6 +77,7 @@ def test_item_detail(api):
 def test_forge_item_and_filter(api):
     options = api.forge_options()["items"]
     assert [(o["id"], o["count"], o["template_known"], o["icon"]) for o in options] == [(500, 4, True, 9002)]
+    assert options[0]["type"] == "Anneau"
 
     item = api.forge_item(500)
     json.dumps(item, allow_nan=False)
@@ -114,7 +122,7 @@ def test_forge_ranking(api):
     exo = api.forge_ranking("exo", 123)
     json.dumps(exo, allow_nan=False)
     row = exo["rows"][0]
-    assert row["Objet"] == "Anneau test" and row["icon"] == 9002
+    assert row["Objet"] == "Anneau test" and row["icon"] == 9002 and row["type"] == "Anneau"
     assert row["Moins cher de base"] == 50_000 and row["Moins cher selon critère"] == 400_000
     assert row["Prime sur la base"] == 350_000 and row["Attention"] == "le moins cher a perdu : Vitalité"
     assert exo["exos"] == [{"id": 123, "name": "Chance", "count": 1}] and exo["known"] == 1

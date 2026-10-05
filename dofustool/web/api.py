@@ -21,6 +21,9 @@ from ..staticdata import effects as base_effects
 
 log = logging.getLogger("dofustool.web")
 
+# Grandes familles d'objets (items.category_id), pour les filtres de l'interface.
+CATEGORIES = {0: "Équipements", 1: "Consommables", 2: "Ressources", 3: "Objets de quête", 4: "Autres", 5: "Cosmétiques"}
+
 
 def data_stamp(conn: sqlite3.Connection) -> list:
     """Empreinte des données : change dès qu'une capture écrit du nouveau ou que la config est modifiée."""
@@ -110,6 +113,10 @@ class Api:
                     "trends": trends,
                     "insufficient": insufficient,
                     "icons": dict(conn.execute("SELECT item_id, icon_id FROM item_icons")),
+                    "meta": {
+                        item_id: (type_name, CATEGORIES.get(category_id, "Autres"))
+                        for item_id, type_name, category_id in conn.execute("SELECT id, type_name, category_id FROM items")
+                    },
                     "effects": forge.effect_names(conn),
                 }
                 self._stamp = stamp
@@ -164,6 +171,7 @@ class Api:
             rows = records(state["trends"]) if not state["trends"].empty else []
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
+                row["type"], row["category"] = state["meta"].get(row["item_id"], (None, "Autres"))
             return {"rows": rows, "insufficient": state["insufficient"]}
         finally:
             conn.close()
@@ -220,14 +228,25 @@ class Api:
             for row in used_in:
                 row["icon"] = state["icons"].get(row["item_id"])
             hdv = detail["hdv"]
+            hdv_unit = None
             if hdv is not None:
+                if hdv["kind"] == "lots" and not hdv["frame"].empty:
+                    hdv_unit = float(hdv["frame"]["Prix unitaire"].min())
                 hdv = {**hdv, "frame": records(hdv["frame"])}
+            avg = conn.execute(
+                "SELECT p.price, s.ts FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
+                "WHERE p.item_id = ? ORDER BY s.ts DESC LIMIT 1",
+                (item_id,),
+            ).fetchone()
             return clean(
                 {
                     "id": item_id,
                     "name": item.name,
                     "level": item.level,
                     "type": detail["type"],
+                    "category": state["meta"].get(item_id, (None, "Autres"))[1],
+                    "avg_price": {"price": avg[0], "ts": avg[1]} if avg else None,
+                    "hdv_unit": hdv_unit,
                     "exchangeable": item.exchangeable,
                     "equipment": ws.prices.is_equipment(item_id),
                     "icon": state["icons"].get(item_id),
@@ -268,7 +287,7 @@ class Api:
             return {
                 "items": [
                     {"id": i, "name": name, "level": level, "count": count, "icon": state["icons"].get(i),
-                     "template_known": i in fetched}
+                     "template_known": i in fetched, "type": state["meta"].get(i, (None, None))[0]}
                     for i, name, level, count in rows
                 ]
             }  # fmt: skip
@@ -353,6 +372,7 @@ class Api:
             rows = records(frame) if not frame.empty else []
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
+                row["type"] = state["meta"].get(row["item_id"], (None, None))[0]
             return {
                 "rows": rows,
                 "exos": [
