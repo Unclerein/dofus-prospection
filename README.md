@@ -36,7 +36,8 @@ http://localhost:8600 et se met à jour toute seule pendant une capture :
 .\.venv\Scripts\python.exe -m dofustool.web
 ```
 
-Le lanceur l'ouvre avec le jeu tant que `start_dashboard` vaut `true` dans `config.toml`. Les
+Le raccourci bureau « dofustool » l'ouvre seule, sans jeu ni capture (`launcher\dashboard.ps1`,
+avec `-Stop` pour l'arrêter). Le lanceur l'ouvre avec le jeu tant que `start_dashboard` vaut `true` dans `config.toml`. Les
 icônes des objets sont téléchargées depuis DofusDB à leur premier affichage, puis gardées dans
 `data\icons`. L'ancien dashboard Streamlit reste disponible :
 `.\.venv\Scripts\streamlit.exe run dofustool\app\main.py`.
