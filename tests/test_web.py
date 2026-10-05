@@ -89,6 +89,27 @@ def test_forge_item_and_filter(api):
     assert api.forge_item(999_999) is None
 
 
+def test_base_effects_are_fetched_on_demand(api):
+    conn = api.connect()
+    conn.execute("INSERT INTO items VALUES (501, 'Cape neuve', 1, 'Cape', 100, 1, 0, 0)")
+    conn.execute("INSERT INTO hdv_listings VALUES (501, 1, 80000, 0, 0, 0, '[[125, 120], [123, 9]]', 5.0, 5.0)")
+    conn.commit()
+    conn.close()
+
+    def offline(item_id):
+        raise OSError("hors ligne")
+
+    api.fetch_effects = offline
+    assert api.forge_item(501)["template_known"] is False  # échec : rien n'est enregistré, on pourra réessayer
+    calls = []
+    api.fetch_effects = lambda item_id: calls.append(item_id) or [(125, 101, 150)]
+    item = api.forge_item(501)
+    assert item["template_known"] and item["lines"] == [{"id": 125, "name": "Vitalité", "min": 101, "max": 150}]
+    assert item["listings"][0]["label"] == "exo"
+    api.forge_item(501)
+    assert calls == [501]  # récupérées une seule fois, puis lues en base
+
+
 def test_forge_ranking(api):
     exo = api.forge_ranking("exo", 123)
     json.dumps(exo, allow_nan=False)

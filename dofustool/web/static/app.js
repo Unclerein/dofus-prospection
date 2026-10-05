@@ -298,7 +298,8 @@ async function forgeItem(id, options) {
     picker,
     h('a', { class: 'btn', href: `#/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Fiche objet'));
   if (!d.template_known) {
-    return [header, h('div', { class: 'note' }, "Les caractéristiques de base de cet objet ne sont pas encore connues : exos, overs et jets ne peuvent pas être lus. Elles sont récupérées à la fermeture du jeu par le raccourci, ou avec « python -m dofustool.staticdata.effects ».")];
+    return [header, h('div', { class: 'note' }, "Les caractéristiques de base de cet objet n'ont pas pu être récupérées sur DofusDB (service injoignable ?) : exos, overs et jets ne peuvent pas être lus pour l'instant. "),
+      h('button', { class: 'btn', onclick: () => { delete S.cache[`forge-${id}`]; refresh(); } }, 'Réessayer')];
   }
 
   const saved = d.filter || {};

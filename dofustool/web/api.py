@@ -4,6 +4,7 @@ Aucun calcul métier ici : tout vient de dofustool.analysis et des fonctions dé
 dofustool.app (data, forge). Ce module ne fait que mettre en forme et mettre en cache.
 """
 import json
+import logging
 import math
 import sqlite3
 import threading
@@ -16,6 +17,9 @@ from .. import config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR
 from ..analysis.forgemagie import Filter, base_lines
 from ..app import data, forge
+from ..staticdata import effects as base_effects
+
+log = logging.getLogger("dofustool.web")
 
 
 def data_stamp(conn: sqlite3.Connection) -> list:
@@ -55,6 +59,39 @@ class Api:
         self._lock = threading.Lock()
         self._stamp: list | None = None
         self._state: dict | None = None
+        self._fetching = threading.Lock()
+        self.fetch_effects = base_effects.fetch  # remplaçable dans les tests
+
+    def ensure_template(self, conn: sqlite3.Connection, item_id: int) -> bool:
+        """Récupère sur DofusDB les caractéristiques de base d'un item si elles manquent. Renvoie True si connues."""
+        if forge.load_template(conn, item_id) is not None:
+            return True
+        try:
+            base_effects.store(conn, item_id, self.fetch_effects(item_id))
+            return True
+        except Exception as exc:  # DofusDB injoignable : l'interface l'indique, on réessaiera
+            log.warning("Caractéristiques de base de l'item %s non récupérées : %s", item_id, exc)
+            return False
+
+    def fetch_missing_templates(self) -> None:
+        """En arrière-plan : complète les équipements vus à l'HDV. Un seul passage à la fois."""
+        if not self._fetching.acquire(blocking=False):
+            return
+
+        def work() -> None:
+            try:
+                conn = self.connect()
+                try:
+                    for item_id in base_effects.missing_items(conn):
+                        if not self.ensure_template(conn, item_id):
+                            break  # inutile d'insister si le service ne répond pas
+                        time.sleep(0.2)
+                finally:
+                    conn.close()
+            finally:
+                self._fetching.release()
+
+        threading.Thread(target=work, daemon=True).start()
 
     def connect(self) -> sqlite3.Connection:
         return db.connect(self.db_path)
@@ -221,6 +258,8 @@ class Api:
         conn = self.connect()
         try:
             state = self._load(conn)
+            if base_effects.missing_items(conn):
+                self.fetch_missing_templates()
             fetched = {row[0] for row in conn.execute("SELECT item_id FROM item_effects_fetched")}
             rows = conn.execute(
                 "SELECT i.id, i.name, i.level, COUNT(*) FROM hdv_current h JOIN items i ON i.id = h.item_id "
@@ -246,6 +285,8 @@ class Api:
                 return None
             item = ws.items[item_id]
             head = {"id": item_id, "name": item.name, "level": item.level, "icon": state["icons"].get(item_id)}
+            if ws.prices.is_equipment(item_id):
+                self.ensure_template(conn, item_id)  # premier affichage d'un équipement tout juste vu à l'HDV
             template = forge.load_template(conn, item_id)
             if template is None:
                 return {**head, "template_known": False}
