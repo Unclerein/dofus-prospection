@@ -30,5 +30,27 @@
       "effect_id": 1,
       "effect_value": 10
     }
+  },
+  "inventory": {
+    "key": "isb",
+    "fields": {
+      "kamas": 1,
+      "entries": 2,
+      "position": 3,
+      "object": 5,
+      "quantity": 2,
+      "item_id": 5
+    }
+  },
+  "bank": {
+    "key": "iuo",
+    "fields": {
+      "entries": 1,
+      "kamas": 3,
+      "position": 3,
+      "object": 5,
+      "quantity": 2,
+      "item_id": 5
+    }
   }
 }

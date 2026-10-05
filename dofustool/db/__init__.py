@@ -11,6 +11,11 @@ MARKET_PATH = Path(__file__).resolve().parents[2] / "data" / "market.sqlite"
 GRAIN_HOUR = "hour"
 GRAIN_DAY = "day"
 
+# Valeurs de holdings.container.
+INVENTORY = "inventory"
+BANK = "bank"
+ALL = "all"  # liste fusionnée inventaire + banque, envoyée à l'ouverture de l'HDV
+
 STATIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
     id           INTEGER PRIMARY KEY,
@@ -128,6 +133,21 @@ CREATE TABLE IF NOT EXISTS fm_filters (
     item_id INTEGER PRIMARY KEY,
     config  TEXT NOT NULL
 );
+-- Objets possédés par le joueur. Donnée personnelle, comme le reste de data/ : jamais partagée.
+-- Chaque liste complète reçue remplace la précédente de son conteneur.
+CREATE TABLE IF NOT EXISTS holdings (
+    container TEXT NOT NULL,
+    item_id   INTEGER NOT NULL,
+    equipped  INTEGER NOT NULL,
+    quantity  INTEGER NOT NULL,
+    PRIMARY KEY (container, item_id, equipped)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS holdings_meta (
+    container   TEXT PRIMARY KEY,
+    captured_at REAL NOT NULL,
+    kamas       INTEGER NOT NULL,
+    stacks      INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -240,6 +260,30 @@ def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None
                 for l in hdv.listings
             ),
         )
+
+
+def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at: float) -> bool:
+    """Remplace le contenu d'un conteneur par une liste décodée (messages.storage.Storage).
+
+    Renvoie False sans rien écrire si une liste plus récente est déjà enregistrée (rejeu d'archive).
+    """
+    row = conn.execute("SELECT captured_at FROM holdings_meta WHERE container = ?", (container,)).fetchone()
+    if row is not None and row[0] > captured_at:
+        return False
+    totals: dict[tuple[int, bool], int] = {}
+    for stack in storage.stacks:
+        totals[(stack.item_id, stack.equipped)] = totals.get((stack.item_id, stack.equipped), 0) + stack.quantity
+    with conn:
+        conn.execute("DELETE FROM holdings WHERE container = ?", (container,))
+        conn.executemany(
+            "INSERT INTO holdings VALUES (?, ?, ?, ?)",
+            ((container, item_id, int(equipped), quantity) for (item_id, equipped), quantity in totals.items()),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO holdings_meta VALUES (?, ?, ?, ?)",
+            (container, captured_at, storage.kamas, len(storage.stacks)),
+        )
+    return True
 
 
 def load_fm_filter(conn: sqlite3.Connection, item_id: int) -> dict:

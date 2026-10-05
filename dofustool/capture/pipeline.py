@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .. import db
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, hdv_listings, market_history
+from ..messages import Mapping, avg_prices, hdv_listings, market_history, storage
 from ..protocol.session import Message, Session
 from . import Segment
 
@@ -26,6 +26,7 @@ class _ConnWatch:
     archive_id: int | None
     got_prices: bool = False
     alerted: bool = False
+    inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
 
 
 class Pipeline:
@@ -74,6 +75,27 @@ class Pipeline:
                     len(history.hourly),
                     len(history.daily),
                 )
+            return
+
+        mapping = self.keymap.get("bank")
+        if mapping is not None and msg.key == mapping.key:
+            bank = storage.parse(msg.body, mapping)
+            if bank is not None and db.save_holdings(self.market, db.BANK, bank, msg.ts):
+                log.info("Banque enregistrée : %d piles.", len(bank.stacks))
+            return
+
+        mapping = self.keymap.get("inventory")
+        if mapping is not None and msg.key == mapping.key:
+            listing = storage.parse(msg.body, mapping)
+            if listing is not None:
+                # Même clé pour l'inventaire et pour la liste fusionnée envoyée à l'ouverture de l'HDV.
+                if storage.looks_merged(listing, watch.inventory):
+                    db.save_holdings(self.market, db.ALL, listing, msg.ts)
+                else:
+                    first = watch.inventory is None
+                    watch.inventory = listing
+                    if db.save_holdings(self.market, db.INVENTORY, listing, msg.ts) and first:
+                        log.info("Inventaire enregistré : %d piles.", len(listing.stacks))
             return
 
         mapping = self.keymap.get("hdv_listings")

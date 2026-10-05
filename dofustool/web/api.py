@@ -16,6 +16,7 @@ import pandas as pd
 from .. import config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR
 from ..analysis.forgemagie import Filter, base_lines
+from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
 from ..staticdata import effects as base_effects
 
@@ -31,6 +32,7 @@ def data_stamp(conn: sqlite3.Connection) -> list:
         "SELECT (SELECT COUNT(*) FROM snapshots), (SELECT MAX(captured_at) FROM market_history), "
         "(SELECT MAX(captured_at) FROM hdv_listings), (SELECT COUNT(*) FROM hdv_listings), "
         "(SELECT COUNT(*) FROM item_effects_fetched), (SELECT value FROM static_meta WHERE key = 'imported_at'), "
+        "(SELECT MAX(captured_at) FROM holdings_meta), "
         "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
         " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
     ).fetchone()
@@ -106,7 +108,12 @@ class Api:
                 cfg = config.load()
                 ws = data.build_workspace(conn, cfg, time.time())
                 trends, insufficient = data.trends_frame(conn, cfg, ws)
+                stock = Stock(conn)
+                crafts_from_stock = stock_crafts(conn, ws.calculator, stock)
                 self._state = {
+                    "stock": stock,
+                    "stock_crafts": crafts_from_stock,
+                    "craftable": {c.result.item.id: c.craftable for c in crafts_from_stock if c.craftable},
                     "cfg": cfg,
                     "ws": ws,
                     "crafts": data.crafts_frame(conn, ws),
@@ -163,7 +170,12 @@ class Api:
             rows = records(frame) if not frame.empty else []
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
-            return {"rows": rows, "jobs": sorted(frame["Métier"].unique()) if not frame.empty else []}
+                row["craftable"] = state["craftable"].get(row["item_id"], 0)
+            return {
+                "rows": rows,
+                "jobs": sorted(frame["Métier"].unique()) if not frame.empty else [],
+                "stock_known": state["stock"].known,
+            }
         finally:
             conn.close()
 
@@ -217,7 +229,9 @@ class Api:
                 ingredients = records(detail["craft"]["ingredients"])
                 for row in ingredients:
                     row["icon"] = state["icons"].get(row["item_id"])
+                    row["have"] = state["stock"].get(row["item_id"]).total
                 craft = {
+                    "craftable": state["craftable"].get(item_id, 0),
                     "job": result.job,
                     "level": result.recipe.level,
                     "own_job": result.own_job,
@@ -250,6 +264,11 @@ class Api:
                     "type": detail["type"],
                     "category": state["meta"].get(item_id, (None, "Autres"))[1],
                     "avg_price": {"price": avg[0], "ts": avg[1]} if avg else None,
+                    "owned": {
+                        "inventory": state["stock"].get(item_id).inventory,
+                        "bank": state["stock"].get(item_id).bank,
+                        "known": state["stock"].known,
+                    },
                     "hdv_unit": hdv_unit,
                     "exchangeable": item.exchangeable,
                     "equipment": ws.prices.is_equipment(item_id),
@@ -269,6 +288,93 @@ class Api:
                     "hdv": hdv,
                     "craft": craft,
                     "used_in": used_in,
+                    "now": ws.now,
+                }
+            )
+        finally:
+            conn.close()
+
+    # --- stock ---------------------------------------------------------------
+
+    def stock(self) -> dict:
+        """Objets possédés (inventaire et banque), valorisés au prix de référence."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, stock = state["ws"], state["stock"]
+            rows = []
+            for item_id, owned in stock.items().items():
+                item = ws.items.get(item_id)
+                ref = ws.prices.get(item_id) if item is not None and item.exchangeable else None
+                type_name, category = state["meta"].get(item_id, (None, "Autres"))
+                rows.append(
+                    {
+                        "item_id": item_id,
+                        "name": item.name if item else f"#{item_id}",
+                        "level": item.level if item else None,
+                        "icon": state["icons"].get(item_id),
+                        "type": type_name,
+                        "category": category,
+                        "inventory": owned.inventory,
+                        "bank": owned.bank,
+                        "total": owned.total,
+                        "price": ref.price if ref else None,
+                        "source": ref.source if ref else None,
+                        "value": ref.price * owned.total if ref else None,
+                        "recipes": state["recipe_uses"].get(item_id, 0),
+                    }
+                )
+            rows.sort(key=lambda r: -(r["value"] or 0))
+            return clean({"rows": rows, "meta": stock.meta, "bank_inferred": stock.bank_inferred, "now": ws.now})
+        finally:
+            conn.close()
+
+    def stock_crafts(self) -> dict:
+        """Recettes dont au moins un ingrédient est possédé, avec ce qui est disponible et ce qui manque."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws = state["ws"]
+            rows = []
+            for c in state["stock_crafts"]:
+                r = c.result
+                rows.append(
+                    {
+                        "item_id": r.item.id,
+                        "name": r.item.name,
+                        "icon": state["icons"].get(r.item.id),
+                        "job": r.job,
+                        "level": r.recipe.level,
+                        "own_job": r.own_job,
+                        "sell": r.sell.price if r.sell else None,
+                        "source": r.sell.source if r.sell else None,
+                        "margin": r.recursive_margin,
+                        "craftable": c.craftable,
+                        "total_margin": c.total_margin,
+                        "covered": c.covered,
+                        "lines": len(c.ingredients),
+                        "missing_cost": c.missing_cost,
+                        "flags": r.flags,
+                        "ingredients": [
+                            {
+                                "id": item_id,
+                                "name": ws.items[item_id].name if item_id in ws.items else f"#{item_id}",
+                                "icon": state["icons"].get(item_id),
+                                "need": need,
+                                "have": have,
+                            }
+                            for item_id, need, have in c.ingredients
+                        ],
+                    }
+                )
+            stock = state["stock"]
+            return clean(
+                {
+                    "rows": rows,
+                    "jobs": sorted({row["job"] for row in rows}),
+                    "meta": stock.meta,
+                    "bank_inferred": stock.bank_inferred,
+                    "has_jobs": bool(state["cfg"].jobs),
                     "now": ws.now,
                 }
             )

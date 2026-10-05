@@ -76,6 +76,41 @@ def test_item_detail(api):
     assert api.item(999_999) is None
 
 
+def test_stock_endpoints(api):
+    empty = api.stock_crafts()
+    assert empty["rows"] == [] and empty["meta"] == {}
+    assert api.item(3)["owned"] == {"inventory": 0, "bank": 0, "known": False}
+
+    from dofustool.messages.storage import Stack, Storage
+
+    conn = api.connect()
+    db.save_holdings(conn, db.INVENTORY, Storage(1500, (Stack(1, 9, False), Stack(2, 7, False), Stack(500, 1, True))), 100.0)
+    db.save_holdings(conn, db.BANK, Storage(900, (Stack(4, 1, False), Stack(1, 100, False))), 110.0)
+    conn.close()
+
+    stock = api.stock()
+    json.dumps(stock, allow_nan=False)
+    ble = next(r for r in stock["rows"] if r["name"] == "Blé")
+    assert (ble["inventory"], ble["bank"], ble["total"], ble["recipes"]) == (9, 100, 109, 5)
+    assert ble["value"] == ble["price"] * 109 and ble["category"] == "Ressources"
+    assert not any(r["item_id"] == 500 for r in stock["rows"])  # l'anneau porté n'est pas compté
+    assert stock["meta"]["inventory"]["kamas"] == 1500 and stock["meta"]["bank"]["kamas"] == 900
+
+    crafts = api.stock_crafts()
+    json.dumps(crafts, allow_nan=False)
+    pain = next(r for r in crafts["rows"] if r["name"] == "Pain")
+    assert pain["craftable"] == 1 and (pain["covered"], pain["lines"]) == (2, 2)
+    assert [(i["name"], i["have"], i["need"]) for i in pain["ingredients"]] == [("Farine", 7, 3), ("Eau", 1, 1)]
+    farine = next(r for r in crafts["rows"] if r["name"] == "Farine")
+    assert farine["craftable"] == 54 and farine["total_margin"] == pytest.approx(54 * farine["margin"])
+
+    # Le reste de l'interface en tient compte.
+    assert next(r for r in api.crafts()["rows"] if r["Objet"] == "Pain")["craftable"] == 1
+    detail = api.item(3)
+    assert detail["craft"]["craftable"] == 1 and [row["have"] for row in detail["craft"]["ingredients"]] == [7, 1]
+    assert api.item(1)["owned"] == {"inventory": 9, "bank": 100, "known": True}
+
+
 def test_forge_item_and_filter(api):
     options = api.forge_options()["items"]
     assert [(o["id"], o["count"], o["template_known"], o["icon"]) for o in options] == [(500, 4, True, 9002)]
@@ -175,6 +210,8 @@ def test_http_routes(server):
     status, content_type, body = get(server + "/api/status")
     assert status == 200 and content_type.startswith("application/json") and json.loads(body)["snapshots"] == 5
     assert json.loads(get(server + "/api/item/3")[2])["name"] == "Pain"
+    assert json.loads(get(server + "/api/stock")[2])["rows"] == []
+    assert "rows" in json.loads(get(server + "/api/stock/crafts")[2])
     assert json.loads(get(server + "/api/forge/ranking?criterion=exo&exo=123")[2])["rows"]
     assert json.loads(get(server + "/api/forge/ranking?criterion=over&effect=125&amount=2")[2])["rows"]
     status, content_type, body = get(server + "/")

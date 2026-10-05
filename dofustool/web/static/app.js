@@ -102,6 +102,7 @@ const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo
 
 const NAV = [
   ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z'],
+  ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6'],
   ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
   ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
@@ -142,7 +143,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
+  const pages = { crafts: pageCrafts, stock: pageStock, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -188,7 +189,7 @@ window.addEventListener('hashchange', () => { $tip.hidden = true; window.scrollT
 async function pageCrafts() {
   const data = await cached('crafts', '/api/crafts');
   const status = S.status || {};
-  const ui = S.ui.crafts || (S.ui.crafts = { q: '', job: '', min: 1, max: 200, capital: '', sold: status.min_liquidity || 0, own: false, incomplete: false, sort: 'margin', limit: 100 });
+  const ui = S.ui.crafts || (S.ui.crafts = { doable: false, q: '', job: '', min: 1, max: 200, capital: '', sold: status.min_liquidity || 0, own: false, incomplete: false, sort: 'margin', limit: 100 });
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
 
   const query = norm((ui.q || '').trim());
@@ -197,6 +198,7 @@ async function pageCrafts() {
     r['Niveau'] >= ui.min && r['Niveau'] <= ui.max &&
     (!ui.job || r['Métier'] === ui.job) &&
     (!ui.own || r['Mon métier'] === true) &&
+    (!ui.doable || r.craftable > 0) &&
     (ui.incomplete || r['Marge'] !== null) &&
     (!ui.capital || r['Coût'] === null || r['Coût'] <= Number(ui.capital)) &&
     (!(ui.sold > 0) || r['Vendus 7 j'] === null || r['Vendus 7 j'] >= ui.sold));
@@ -221,7 +223,8 @@ async function pageCrafts() {
       h('input', { id: 'f-cap', type: 'number', value: ui.capital, placeholder: 'Sans limite', onchange: (e) => set({ capital: e.target.value }) })),
     number('f-sold', 'Vendus sur 7 j, min.', ui.sold, (v) => set({ sold: Number(v) || 0 }), 'flex: 0 1 160px'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.own, disabled: !status.has_jobs, onchange: (e) => set({ own: e.target.checked }) }), 'Mes métiers seulement'),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.incomplete, onchange: (e) => set({ incomplete: e.target.checked }) }), 'Recettes incalculables'));
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.incomplete, onchange: (e) => set({ incomplete: e.target.checked }) }), 'Recettes incalculables'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.doable, disabled: !data.stock_known, onchange: (e) => set({ doable: e.target.checked }) }), 'Faisables avec mon stock'));
 
   const body = rows.slice(0, ui.limit).map((r) => {
     const tags = (r['Remarques'] || '').split(', ').filter(Boolean);
@@ -233,6 +236,7 @@ async function pageCrafts() {
       h('td', { class: 'strong ' + (r['Marge'] === null ? 'muted' : r['Marge'] >= 0 ? 'gain' : 'warn') }, signed(r['Marge'])),
       h('td', { class: 'soft' }, r['Marge %'] === null ? '—' : `${fmt(r['Marge %'])} %`),
       h('td', { class: r['Vendus 7 j'] === null ? 'muted' : 'soft' }, fmt(r['Vendus 7 j'])),
+      h('td', {}, r.craftable > 0 ? h('span', { class: 'tag good' }, `× ${fmt(r.craftable)}`) : h('span', { class: 'muted' }, '—')),
       h('td', { class: 'l wrap' }, h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag ' + (t.includes('sous-craft') ? 'info' : t.includes('manquant') || t.includes('non échangeable') ? 'bad' : '') }, t)))));
   });
 
@@ -247,11 +251,143 @@ async function pageCrafts() {
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, 'Métier'), h('th', {}, 'Prix de vente'), h('th', {}, 'Coût'),
             h('th', { class: ui.sort === 'margin' ? 'sorted' : '' }, 'Marge' + (ui.sort === 'margin' ? ' ↓' : '')),
-            h('th', { class: ui.sort === 'pct' ? 'sorted' : '' }, 'Marge %' + (ui.sort === 'pct' ? ' ↓' : '')), h('th', {}, 'Vendus 7 j'), h('th', { class: 'l' }, 'À savoir'))),
+            h('th', { class: ui.sort === 'pct' ? 'sorted' : '' }, 'Marge %' + (ui.sort === 'pct' ? ' ↓' : '')), h('th', {}, 'Vendus 7 j'), h('th', { title: 'Nombre faisable avec ton inventaire et ta banque' }, 'En stock'), h('th', { class: 'l' }, 'À savoir'))),
           h('tbody', {}, body))),
       h('div', { class: 'panel-foot' },
         h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'dot on' }), 'prix observé (HDV ou ventes)'), h('span', {}, h('span', { class: 'dot' }), 'prix moyen du jeu, moins fiable pour un équipement')),
         h('span', {}, `${fmt(Math.min(ui.limit, rows.length))} sur ${fmt(rows.length)} `, rows.length > ui.limit && h('button', { class: 'btn', onclick: () => set({ limit: ui.limit + 200 }) }, 'Afficher plus')))),
+  ];
+}
+
+// ---------------------------------------------------------------- page Mon stock
+
+/** « possédé / nécessaire », en vert si le compte y est, en orange sinon. */
+function haveTag(have, need) {
+  const cls = have >= need ? 'good' : have > 0 ? 'bad' : '';
+  return h('span', { class: 'tag ' + cls, title: have >= need ? 'En stock' : `Il en manque ${fmt(need - have)}` }, `${fmt(have)} / ${fmt(need)}`);
+}
+
+function stockFreshness(meta, bankInferred, now) {
+  const part = (key, label) => (meta[key] ? `${label} ${ago(meta[key].captured_at, now)}` : `${label} jamais lu`);
+  return `${part('inventory', 'Inventaire lu')} · ${bankInferred ? "banque déduite de la liste de l'HDV" : part('bank', 'banque lue')}`;
+}
+
+async function pageStock(r) {
+  const items = r.sub === 'items';
+  const tabs = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vue' },
+    h('a', { href: '#/stock', role: 'tab', 'aria-selected': String(!items) }, 'Crafts faisables'),
+    h('a', { href: '#/stock/items', role: 'tab', 'aria-selected': String(items) }, 'Inventaire et banque'));
+  const data = items ? await cached('stock', '/api/stock') : await cached('stockCrafts', '/api/stock/crafts');
+  const head = h('header', { class: 'head' },
+    h('div', {}, h('h1', {}, 'Mon stock'), h('div', { class: 'lead' }, Object.keys(data.meta).length ? stockFreshness(data.meta, data.bank_inferred, data.now) : 'Aucun inventaire lu pour l\'instant.')),
+    tabs);
+  if (!Object.keys(data.meta).length) {
+    return [head, h('div', { class: 'panel empty' }, "Ton inventaire est lu à chaque connexion pendant une capture, ta banque quand tu l'ouvres en jeu. Lance le jeu par le raccourci, ouvre ta banque une fois, et cette page se remplira.")];
+  }
+  return [head, ...(items ? stockItems(data) : stockCrafts(data))];
+}
+
+function stockCrafts(data) {
+  const ui = S.ui.stockCrafts || (S.ui.stockCrafts = { view: 'ready', q: '', job: '', own: false, limit: 100 });
+  const set = (patch) => { Object.assign(ui, patch); refresh(); };
+  const query = norm(ui.q.trim());
+  const base = data.rows.filter((row) =>
+    (!query || norm(row.name).includes(query) || row.ingredients.some((i) => norm(i.name).includes(query))) &&
+    (!ui.job || row.job === ui.job) && (!ui.own || row.own_job === true));
+  const ready = base.filter((row) => row.craftable > 0);
+  const close = base.filter((row) => row.craftable === 0 && row.lines - row.covered === 1);
+  let rows = ui.view === 'ready' ? ready : ui.view === 'close' ? close : base;
+  rows = rows.slice().sort(ui.view === 'ready'
+    ? (a, b) => (b.total_margin ?? -Infinity) - (a.total_margin ?? -Infinity)
+    : (a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity));
+  const gain = ready.reduce((sum, row) => sum + Math.max(0, row.total_margin || 0), 0);
+
+  let typing = null;
+  const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Recettes'),
+      segmented('Recettes', [['ready', `Faisables maintenant · ${ready.length}`], ['close', `Il manque un ingrédient · ${close.length}`], ['all', `Toutes · ${base.length}`]], ui.view, (view) => set({ view, limit: 100 }))),
+    h('div', { class: 'field', style: 'flex: 1 1 220px' }, h('label', { for: 's-q' }, 'Objet ou ingrédient'),
+      h('input', { id: 's-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
+        oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => set({ q: value, limit: 100 }), 220); } })),
+    h('div', { class: 'field', style: 'flex: 0 1 190px' }, h('label', { for: 's-job' }, 'Métier'),
+      h('select', { id: 's-job', onchange: (e) => set({ job: e.target.value, limit: 100 }) },
+        h('option', { value: '' }, 'Tous les métiers'), data.jobs.map((j) => h('option', { value: j, selected: j === ui.job }, j)))),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.own, disabled: !data.has_jobs, onchange: (e) => set({ own: e.target.checked }) }), 'Mes métiers seulement'));
+
+  const body = rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+    h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`)),
+    h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
+    h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
+      h('span', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), title: `${i.name} : ${fmt(i.have)} en stock, ${fmt(i.need)} par craft` },
+        tile(i.icon), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
+    h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
+    h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
+    h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—')));
+
+  return [
+    h('section', { class: 'kpis' },
+      kpi('Recettes faisables maintenant', fmt(ready.length), 'Tous les ingrédients sont en stock'),
+      kpi('Gain total possible', signed(gain), 'Somme des crafts rentables, chacun compté seul', 'gain'),
+      kpi('Il manque un seul ingrédient', fmt(close.length), 'Un achat suffit pour lancer le craft')),
+    filters,
+    h('section', { class: 'panel', 'aria-label': 'Recettes' },
+      rows.length === 0 ? h('div', { class: 'empty' }, 'Aucune recette ne correspond.')
+        : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 980px' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Faisables'), h('th', { class: 'l' }, 'Ingrédients : en stock / par craft'), h('th', {}, 'Coût du manquant'), h('th', {}, 'Marge par craft'), h('th', { class: ui.view === 'ready' ? 'sorted' : '' }, 'Gain total' + (ui.view === 'ready' ? ' ↓' : '')))),
+          h('tbody', {}, body))),
+      h('div', { class: 'panel-foot' },
+        h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'swatch', style: 'background: var(--gain)' }), 'en stock'), h('span', {}, h('span', { class: 'swatch', style: 'background: var(--warn)' }), 'pas assez'), h('span', {}, h('span', { class: 'swatch', style: 'background: var(--line-strong)' }), 'aucun'),
+          h('span', {}, 'Chaque recette est comptée comme si elle était la seule à puiser dans le stock.')),
+        h('span', {}, `${fmt(Math.min(ui.limit, rows.length))} sur ${fmt(rows.length)} `, rows.length > ui.limit && h('button', { class: 'btn', onclick: () => set({ limit: ui.limit + 200 }) }, 'Afficher plus')))),
+  ];
+}
+
+function stockItems(data) {
+  const ui = S.ui.stockItems || (S.ui.stockItems = { q: '', category: '', where: '', usedOnly: false, sort: 'value', limit: 150 });
+  const set = (patch) => { Object.assign(ui, patch); refresh(); };
+  const query = norm(ui.q.trim());
+  const counts = new Map();
+  for (const row of data.rows) counts.set(row.category, (counts.get(row.category) || 0) + 1);
+  let rows = data.rows.filter((row) =>
+    (!query || norm(row.name).includes(query)) && (!ui.category || row.category === ui.category) &&
+    (!ui.where || row[ui.where] > 0) && (!ui.usedOnly || row.recipes > 0));
+  rows = rows.slice().sort(ui.sort === 'value' ? (a, b) => (b.value ?? -1) - (a.value ?? -1) : ui.sort === 'total' ? (a, b) => b.total - a.total : (a, b) => a.name.localeCompare(b.name, 'fr'));
+  const sum = (list, key) => list.reduce((total, row) => total + (row[key] || 0), 0);
+  const kamas = (key) => (data.meta[key] ? data.meta[key].kamas : null);
+
+  let typing = null;
+  const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
+    h('div', { class: 'field', style: 'flex: 1 1 220px' }, h('label', { for: 'i-q' }, 'Objet'),
+      h('input', { id: 'i-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
+        oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => set({ q: value, limit: 150 }), 220); } })),
+    h('div', { class: 'field', style: 'flex: 0 1 220px' }, h('label', { for: 'i-cat' }, 'Famille'),
+      h('select', { id: 'i-cat', class: ui.category ? 'set' : '', onchange: (e) => set({ category: e.target.value, limit: 150 }) },
+        h('option', { value: '' }, 'Toutes'), [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => h('option', { value: name, selected: name === ui.category }, `${name} · ${n}`)))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Où'), segmented('Où', [['', 'Partout'], ['inventory', 'Inventaire'], ['bank', 'Banque']], ui.where, (where) => set({ where }))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Trier par'), segmented('Trier par', [['value', 'Valeur'], ['total', 'Quantité'], ['name', 'Nom']], ui.sort, (sort) => set({ sort }))),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.usedOnly, onchange: (e) => set({ usedOnly: e.target.checked }) }), 'Sert dans une recette'));
+
+  return [
+    h('section', { class: 'kpis' },
+      kpi('Valeur estimée du stock', fmt(sum(data.rows, 'value')), `${fmt(data.rows.length)} objets différents, au prix de référence`),
+      kpi('Kamas sur le personnage', fmt(kamas('inventory'))),
+      kpi('Kamas en banque', fmt(kamas('bank')), data.meta.bank ? `Lu ${ago(data.meta.bank.captured_at, data.now)}` : 'Banque jamais ouverte pendant une capture'),
+      kpi('Sélection affichée', fmt(sum(rows, 'value')), `${fmt(rows.length)} objets`)),
+    filters,
+    h('section', { class: 'panel', 'aria-label': 'Objets possédés' },
+      rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun objet ne correspond.')
+        : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
+          h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+            h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '))),
+            h('td', { class: row.inventory ? 'soft' : 'muted' }, row.inventory ? fmt(row.inventory) : '—'),
+            h('td', { class: row.bank ? 'soft' : 'muted' }, row.bank ? fmt(row.bank) : '—'),
+            h('td', { style: 'font-weight: 600' }, fmt(row.total)),
+            h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), row.source)]),
+            h('td', { class: 'strong ' + (row.value === null ? 'muted' : '') }, fmt(row.value)),
+            h('td', { class: row.recipes ? 'soft' : 'muted' }, row.recipes || '—')))))),
+      h('div', { class: 'panel-foot' }, h('span', {}, 'Objets portés exclus. Valeur = quantité × prix de référence ; les objets non échangeables ne sont pas valorisés.'),
+        h('span', {}, `${fmt(Math.min(ui.limit, rows.length))} sur ${fmt(rows.length)} `, rows.length > ui.limit && h('button', { class: 'btn', onclick: () => set({ limit: ui.limit + 300 }) }, 'Afficher plus')))),
   ];
 }
 
@@ -719,7 +855,11 @@ async function pageItem(r) {
   const now = d.now;
 
   const header = h('section', { class: 'panel item-head' }, tile(d.icon, true),
-    h('div', { class: 'info' }, h('div', { class: 'title' }, d.name), h('div', { class: 'muted' }, `${d.type || 'Objet'} · niveau ${d.level} · ${d.exchangeable ? 'échangeable' : 'non échangeable'}`)),
+    h('div', { class: 'info' }, h('div', { class: 'title' }, d.name), h('div', { class: 'muted' }, `${d.type || 'Objet'} · niveau ${d.level} · ${d.exchangeable ? 'échangeable' : 'non échangeable'}`),
+      d.owned.known && h('div', { class: 'tags', style: 'margin-top: 4px' },
+        d.owned.inventory + d.owned.bank > 0
+          ? [h('span', { class: 'tag good' }, `Tu en as ${fmt(d.owned.inventory + d.owned.bank)}`), h('span', { class: 'tag' }, `inventaire ${fmt(d.owned.inventory)}`), h('span', { class: 'tag' }, `banque ${fmt(d.owned.bank)}`)]
+          : h('span', { class: 'tag' }, "Tu n'en as pas"))),
     d.equipment && d.hdv && h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Voir en forgemagie'));
 
   const kpis = h('section', { class: 'kpis' },
@@ -774,12 +914,15 @@ async function pageItem(r) {
     recipe = [
       h('div', { class: 'kpis', style: 'border-radius: 0; border-left: 0; border-right: 0' },
         kpi('Vente nette de taxe', fmt(c.revenue)), kpi('Coût de fabrication', fmt(c.cost)),
-        kpi('Marge', signed(c.margin), c.margin_pct === null ? null : `${fmt(c.margin_pct * 100)} % du coût`, c.margin === null ? '' : c.margin >= 0 ? 'gain' : 'warn')),
+        kpi('Marge', signed(c.margin), c.margin_pct === null ? null : `${fmt(c.margin_pct * 100)} % du coût`, c.margin === null ? '' : c.margin >= 0 ? 'gain' : 'warn'),
+        d.owned.known && kpi('Faisable avec ton stock', c.craftable > 0 ? `× ${fmt(c.craftable)}` : '0', c.craftable > 0 ? 'Tous les ingrédients sont en stock' : 'Il manque au moins un ingrédient', c.craftable > 0 ? 'gain' : '')),
       h('div', { class: 'scroll' }, h('table', { style: 'min-width: 720px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Quantité'), h('th', {}, 'Prix unitaire'), h('th', { class: 'l' }, 'Obtenu par'), h('th', {}, 'Sous-total'))),
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Quantité'), h('th', {}, 'En stock'), h('th', {}, 'Prix unitaire'), h('th', { class: 'l' }, 'Obtenu par'), h('th', {}, 'Sous-total'))),
         h('tbody', {}, c.ingredients.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
           h('td', { class: 'l' }, itemCell(row.icon, row['Ingrédient'], row['Source'] ? `${row['Source']} · ${ageLabel(row['Âge (h)'])}` : null)),
-          h('td', { class: 'soft' }, fmt(row['Quantité'])), h('td', {}, fmt(row['Coût retenu'])),
+          h('td', { class: 'soft' }, fmt(row['Quantité'])),
+          h('td', {}, !d.owned.known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row['Quantité'])),
+          h('td', {}, fmt(row['Coût retenu'])),
           h('td', { class: 'l' }, h('span', { class: 'tag ' + (row['Mode'] === 'craft' ? 'info' : row['Mode'] === 'achat' ? '' : 'bad') }, row['Mode'])),
           h('td', { style: 'font-weight: 600' }, fmt(row['Sous-total'])))))))];
   }

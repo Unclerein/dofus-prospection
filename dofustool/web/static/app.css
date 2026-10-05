@@ -306,3 +306,19 @@ tbody tr:hover { background: var(--raised); }
 .tip-line.fixed { grid-template-columns: 70px minmax(0, 1fr) auto; }
 .tip-line.fixed .v { white-space: nowrap; }
 .tip-line { grid-template-columns: 48px minmax(0, 1fr) auto; }
+
+/* Ingrédients d'une recette, avec ce qui est en stock */
+.ingredients { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.ingredient {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 10px 3px 3px; border-radius: 9px;
+  background: var(--raised); border: 1px solid var(--line-strong); font-size: 13px;
+}
+.ingredient .tile { width: 28px; height: 28px; border-radius: 6px; }
+.ingredient .tile img { width: 24px; height: 24px; }
+.ingredient-name { color: var(--soft); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ingredient-qty { font-weight: 700; }
+.ingredient.ok { border-color: #2C6A59; background: #132A24; }
+.ingredient.ok .ingredient-qty { color: var(--gain); }
+.ingredient.part { border-color: #7A4433; background: #2A1B16; }
+.ingredient.part .ingredient-qty { color: var(--warn-soft); }
+.ingredient.none .ingredient-qty { color: var(--muted); }

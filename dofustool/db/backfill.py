@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, hdv_listings, load_keymap, market_history
+from ..messages import avg_prices, hdv_listings, load_keymap, market_history, storage
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -45,6 +45,31 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             if hdv is not None:
                 db.save_hdv_listings(market, hdv, ts)
                 counts["listes HDV enregistrées"] += 1
+    bank, inventory = keymap.get("bank"), keymap.get("inventory")
+    if bank is not None:
+        counts["banques lues"] = 0
+        for ts, body in archive.execute("SELECT ts, body FROM messages WHERE key = ? ORDER BY ts", (bank.key,)):
+            parsed = storage.parse(body, bank)
+            if parsed is not None:
+                db.save_holdings(market, db.BANK, parsed, ts)
+                counts["banques lues"] += 1
+    if inventory is not None:
+        counts.update({"inventaires lus": 0, "listes fusionnées lues": 0})
+        current: dict[int, storage.Storage] = {}  # dernier inventaire de chaque connexion
+        rows = archive.execute(
+            "SELECT connection_id, ts, body FROM messages WHERE key = ? ORDER BY connection_id, id", (inventory.key,)
+        )
+        for connection_id, ts, body in rows:
+            parsed = storage.parse(body, inventory)
+            if parsed is None:
+                continue
+            if storage.looks_merged(parsed, current.get(connection_id)):
+                db.save_holdings(market, db.ALL, parsed, ts)
+                counts["listes fusionnées lues"] += 1
+            else:
+                current[connection_id] = parsed
+                db.save_holdings(market, db.INVENTORY, parsed, ts)
+                counts["inventaires lus"] += 1
     return counts
 
 
