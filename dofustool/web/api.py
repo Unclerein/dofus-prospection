@@ -280,6 +280,7 @@ class Api:
                         for effect_id, count in forge.exo_counts(current).items()
                     ],
                     "names": {i: names.get(i, f"effet {i}") for i in used},
+                    "template": {effect_id: [low, high] for effect_id, (low, high) in template.items()},
                     "listings": [listing(entry) for entry in current],
                     "gone": [listing(entry) for entry in everything if latest is not None and entry[3] < latest],
                     "filter": db.load_fm_filter(conn, item_id),
@@ -297,13 +298,17 @@ class Api:
         finally:
             conn.close()
 
-    def forge_ranking(self, criterion: str, exo: int | None) -> dict:
+    def forge_ranking(
+        self, criterion: str, exo: int | None = None, effect: int | None = None, amount: int | None = None
+    ) -> dict:
+        """criterion : « saved » (critères de chaque objet), « exo », ou « over » (effect + amount)."""
         conn = self.connect()
         try:
             state = self._load(conn)
             names = state["effects"]
-            mode = {"saved": forge.SAVED, "perfect": forge.PERFECT, "exo": forge.EXO}.get(criterion, forge.SAVED)
-            frame = forge.ranking(conn, state["ws"], mode, exo)
+            mode = {"saved": forge.SAVED, "exo": forge.EXO, "over": forge.OVER}.get(criterion, forge.SAVED)
+            over = (effect, max(1, amount or 1)) if effect else None
+            frame = forge.ranking(conn, state["ws"], mode, exo, over)
             rows = records(frame) if not frame.empty else []
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
@@ -312,6 +317,10 @@ class Api:
                 "exos": [
                     {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
                     for effect_id, count in forge.all_exo_counts(conn).items()
+                ],
+                "lines": [
+                    {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
+                    for effect_id, count in forge.base_line_counts(conn).items()
                 ],
                 "known": len(forge.equipment_options(conn)),
             }

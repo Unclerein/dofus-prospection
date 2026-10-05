@@ -91,7 +91,14 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     payload = api.forge_item(int(match[1]))
                     return self._json(payload) if payload else self._not_found()
                 if path == "/api/forge/ranking":
-                    return self._json(api.forge_ranking(query.get("criterion", "saved"), to_int(query.get("exo"))))
+                    return self._json(
+                        api.forge_ranking(
+                            query.get("criterion", "saved"),
+                            to_int(query.get("exo")),
+                            to_int(query.get("effect")),
+                            to_int(query.get("amount")),
+                        )
+                    )
                 if match := re.fullmatch(r"/icons/(\d+)\.png", path):
                     content = fetch_icon(int(match[1]), icon_dir)
                     if content is None:

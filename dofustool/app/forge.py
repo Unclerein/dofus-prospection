@@ -17,6 +17,17 @@ from .data import Workspace, _local_dates
 SAVED = "Mes critères par objet"
 PERFECT = "Jets parfaits"
 EXO = "Un exo"
+OVER = "Un over"
+
+
+def base_line_counts(conn: sqlite3.Connection) -> dict[int, int]:
+    """Caractéristiques de base rencontrées sur les équipements connus, avec le nombre d'objets qui les portent."""
+    counts: dict[int, int] = {}
+    for item_id in equipment_options(conn):
+        template = load_template(conn, item_id)
+        for effect_id in base_lines(template or {}):
+            counts[effect_id] = counts.get(effect_id, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
 def effect_names(conn: sqlite3.Connection) -> dict[int, str]:
@@ -141,8 +152,18 @@ def gone_frame(conn: sqlite3.Connection, item_id: int, template: Template, names
     return frame
 
 
-def ranking(conn: sqlite3.Connection, ws: Workspace, criterion: str, exo: int | None = None) -> pd.DataFrame:
-    """Une ligne par équipement dont on connaît les annonces et les caractéristiques de base."""
+def ranking(
+    conn: sqlite3.Connection,
+    ws: Workspace,
+    criterion: str,
+    exo: int | None = None,
+    over: tuple[int, int] | None = None,
+) -> pd.DataFrame:
+    """Une ligne par équipement dont on connaît les annonces et les caractéristiques de base.
+
+    over : (caractéristique, valeur au-dessus du jet parfait). Les objets qui n'ont pas cette
+    caractéristique de base sont écartés : ce serait un exo, pas un over.
+    """
     names = effect_names(conn)
     rows = []
     for item_id in equipment_options(conn):
@@ -150,7 +171,12 @@ def ranking(conn: sqlite3.Connection, ws: Workspace, criterion: str, exo: int | 
         if template is None:
             continue
         listings = read_listings(conn, item_id, template)
-        if criterion == PERFECT:
+        if criterion == OVER:
+            lines = base_lines(template)
+            if over is None or over[0] not in lines:
+                continue
+            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]})
+        elif criterion == PERFECT:
             flt: Filter | None = perfect_filter(template)
         elif criterion == EXO:
             flt = Filter({}, exo=exo) if exo else None

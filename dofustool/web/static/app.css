@@ -250,3 +250,30 @@ details.panel > summary { padding: 14px 18px; cursor: pointer; font-weight: 500;
   .main { padding: 20px 16px 40px; }
   .criteria { max-width: none; }
 }
+
+/* En-têtes triables */
+.th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; }
+.th-sort:hover { color: var(--text); }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Infobulle d'un exemplaire */
+.item-tip {
+  position: fixed; z-index: 20; pointer-events: none; width: 340px; padding: 14px 16px;
+  border-radius: 12px; background: #0B1012; border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 10px;
+}
+.item-tip[hidden] { display: none; }
+.tip-head { display: flex; align-items: center; gap: 12px; }
+.tip-head > div { flex: 1 1 auto; min-width: 0; }
+.tip-name { font-family: var(--title); font-weight: 600; font-size: 16px; }
+.tip-lines { display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.tip-line { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; color: var(--soft); }
+.tip-line .v { text-align: right; font-weight: 600; color: var(--text); }
+.tip-line .r { color: var(--muted); font-size: 12px; }
+.tip-line.max .v, .tip-line.max .n { color: var(--accent); }
+.tip-line.over .v, .tip-line.over .n { color: #A8D2FA; }
+.tip-line.exo .v, .tip-line.exo .n { color: #CFC0FF; }
+.tip-line.low .v, .tip-line.low .n, .tip-line.malus .v, .tip-line.malus .n { color: var(--warn-soft); }
+.tip-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.tip-foot b { font-size: 16px; }
+tbody tr:hover { background: var(--raised); }

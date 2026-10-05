@@ -113,6 +113,14 @@ def test_ranking_by_criterion(conn):
     assert exo.loc["Anneau", "Prime sur la base"] == 350_000
     assert exo.loc["Bouclier", "Moins cher selon critère"] == 1_000_000  # exo sur un objet sans ligne de base
     assert pd_isna(exo.loc["Bouclier", "Coût de craft"])
+    # Over : Vitalité au moins 5 au-dessus du jet parfait (250). Le bouclier n'a pas cette ligne : écarté.
+    over = forge.ranking(conn, ws, forge.OVER, over=(VITA, 5)).set_index("Objet")
+    assert list(over.index) == ["Anneau"]
+    assert over.loc["Anneau", "Moins cher selon critère"] == 600_000 and over.loc["Anneau", "Correspondent"] == 1
+    assert over.loc["Anneau", "Prime sur la base"] == 550_000
+    assert pd_isna(forge.ranking(conn, ws, forge.OVER, over=(VITA, 20)).set_index("Objet").loc["Anneau", "Prime sur la base"])
+    assert forge.ranking(conn, ws, forge.OVER, over=(CHANCE, 1)).empty  # Chance n'est une ligne de base nulle part
+    assert forge.base_line_counts(conn) == {PA: 1, VITA: 1}
     perfect = forge.ranking(conn, ws, forge.PERFECT).set_index("Objet")
     assert perfect.loc["Anneau", "Moins cher selon critère"] == 90_000
     assert forge.all_exo_counts(conn) == {CHANCE: 2}

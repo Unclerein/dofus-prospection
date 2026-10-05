@@ -81,6 +81,7 @@ def test_forge_item_and_filter(api):
     assert item["exos"] == [{"id": 123, "name": "Chance", "count": 1}]
     assert [l["price"] for l in item["gone"]] == [70_000]  # vue hier, absente aujourd'hui
     assert item["filter"] == {} and item["names"]["125"] == "Vitalité"
+    assert item["template"] == {"111": [1, 1], "125": [201, 250]}
 
     saved = api.save_forge_filter(500, {"minimums": {"125": "240"}, "exo": 123, "exo_min": 10, "inconnu": 1})
     assert saved == {"saved": {"minimums": {"125": 240}, "exo": 123, "exo_min": 10}}
@@ -96,8 +97,12 @@ def test_forge_ranking(api):
     assert row["Moins cher de base"] == 50_000 and row["Moins cher selon critère"] == 400_000
     assert row["Prime sur la base"] == 350_000 and row["Attention"] == "le moins cher a perdu : Vitalité"
     assert exo["exos"] == [{"id": 123, "name": "Chance", "count": 1}] and exo["known"] == 1
-    assert api.forge_ranking("perfect", None)["rows"][0]["Moins cher selon critère"] == 90_000
-    assert api.forge_ranking("saved", None)["rows"][0]["Moins cher selon critère"] is None
+    assert api.forge_ranking("saved")["rows"][0]["Moins cher selon critère"] is None
+    assert exo["lines"] == [{"id": 111, "name": "PA", "count": 1}, {"id": 125, "name": "Vitalité", "count": 1}]
+    # Over : au moins N au-dessus du jet parfait. Ici aucune annonce ne dépasse 250 de Vitalité.
+    over = api.forge_ranking("over", effect=125, amount=5)["rows"]
+    assert len(over) == 1 and over[0]["Correspondent"] == 0 and over[0]["Moins cher selon critère"] is None
+    assert api.forge_ranking("over", effect=123, amount=1)["rows"] == []  # Chance n'est pas une ligne de base
 
 
 # --- serveur HTTP ------------------------------------------------------------
@@ -125,6 +130,7 @@ def test_http_routes(server):
     assert status == 200 and content_type.startswith("application/json") and json.loads(body)["snapshots"] == 5
     assert json.loads(get(server + "/api/item/3")[2])["name"] == "Pain"
     assert json.loads(get(server + "/api/forge/ranking?criterion=exo&exo=123")[2])["rows"]
+    assert json.loads(get(server + "/api/forge/ranking?criterion=over&effect=125&amount=2")[2])["rows"]
     status, content_type, body = get(server + "/")
     assert status == 200 and content_type.startswith("text/html") and b"dofustool" in body
     assert get(server + "/app.js")[1].startswith(("text/javascript", "application/javascript"))
