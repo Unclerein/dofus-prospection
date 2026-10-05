@@ -297,7 +297,12 @@ tbody tr:hover { background: var(--raised); }
 @media (max-width: 760px) { .gap { grid-template-columns: 1fr; } .gap-side.right { text-align: left; } }
 
 /* Images des caractéristiques */
-.stat-ico { width: 16px; height: 16px; object-fit: contain; flex: none; vertical-align: -3px; }
+.stat-ico { width: 20px; height: 20px; object-fit: contain; flex: none; vertical-align: -5px; }
 .with-ico { display: inline-flex; align-items: center; gap: 6px; }
 .line-row label.with-ico { display: flex; }
 .th-sort .stat-ico { margin-right: 4px; }
+
+.tag.trans { background: #3A1F36; color: #F3C6E8; border-color: transparent; }
+.tip-line.fixed { grid-template-columns: 70px minmax(0, 1fr) auto; }
+.tip-line.fixed .v { white-space: nowrap; }
+.tip-line { grid-template-columns: 48px minmax(0, 1fr) auto; }

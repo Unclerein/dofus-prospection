@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import DAY, GRAIN_DAY, GRAIN_HOUR, HOUR
-from .forgemagie import classify
+from .forgemagie import MARKERS, classify
 
 HDV = "HDV, annonce la moins chère"
 HDV_PLAIN = "HDV, moins cher sans exo ni over"
@@ -108,8 +108,11 @@ class PriceBook:
         templates: dict[int, dict[int, tuple[int, int]]] = {
             row[0]: {} for row in conn.execute("SELECT item_id FROM item_effects_fetched")
         }
+        # Les lignes qui ne se forgemagent pas (dégâts d'arme, propriétés) ne comptent ni comme exo ni comme ligne perdue.
+        non_stats = {row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0")} - MARKERS
         for item_id, effect_id, low, high in conn.execute("SELECT * FROM item_effects"):
-            templates.setdefault(item_id, {})[effect_id] = (low, high)
+            if effect_id not in non_stats:
+                templates.setdefault(item_id, {})[effect_id] = (low, high)
         self._hdv: dict[int, tuple[float, str, float]] = {}
         for item_id, p1, p10, p100, p1000, effects, captured_at in conn.execute(
             "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_current WHERE captured_at >= ?",
@@ -120,7 +123,8 @@ class PriceBook:
                 continue
             if item_id in self._equipment:
                 template = templates.get(item_id)
-                if template is None or not classify([tuple(e) for e in json.loads(effects)], template).plain:
+                listed = [tuple(e) for e in json.loads(effects) if e[0] not in non_stats]
+                if template is None or not classify(listed, template).plain:
                     continue
                 source = HDV_PLAIN
             else:

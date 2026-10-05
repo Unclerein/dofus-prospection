@@ -319,6 +319,7 @@ class Api:
                 return {
                     "price": price, "label": c.label, "plain": c.plain,
                     "quality": round(c.quality * 100) if c.quality is not None else None,
+                    "transcended": c.transcended,
                     "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
                     "first_seen": first_seen, "last_seen": last_seen,
                 }  # fmt: skip
@@ -326,7 +327,8 @@ class Api:
             current = forge.read_listings(conn, item_id, template)
             latest = max((entry[3] for entry in current), default=None)
             everything = forge.read_listings(conn, item_id, template, current=False)
-            used = {i for entry in everything for i in entry[1].values} | set(template)
+            fixed = forge.load_fixed_lines(conn, item_id)
+            used = {i for entry in everything for i in entry[1].values} | set(template) | set(fixed)
             return clean(
                 {
                     **head,
@@ -338,6 +340,11 @@ class Api:
                     "lines": [
                         {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "min": low, "max": high}
                         for effect_id, (low, high) in base_lines(template).items()
+                    ],
+                    # Lignes de base non forgemageables (dégâts d'une arme…), affichées telles quelles.
+                    "fixed": [
+                        {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "min": low, "max": high}
+                        for effect_id, (low, high) in fixed.items()
                     ],
                     "assets": {i: state["assets"][i] for i in used if i in state["assets"]},
                     "order": sorted(used, key=lambda i: (state["priorities"].get(i, 1_000_000), i)),

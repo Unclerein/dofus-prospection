@@ -9,7 +9,7 @@ import statistics
 import pandas as pd
 
 from .. import db
-from ..analysis.forgemagie import Classification, Filter, Template, base_lines, classify, perfect_filter
+from ..analysis.forgemagie import MARKERS, Classification, Filter, Template, base_lines, classify, perfect_filter
 from ..analysis.prices import EQUIPMENT
 from .data import Workspace, _local_dates
 
@@ -49,15 +49,30 @@ def load_template(conn: sqlite3.Connection, item_id: int) -> Template | None:
     if conn.execute("SELECT 1 FROM item_effects_fetched WHERE item_id = ?", (item_id,)).fetchone() is None:
         return None
     # Dans l'ordre d'une infobulle du jeu (priorité d'affichage de l'effet), pas par identifiant.
+    # Seules les vraies caractéristiques : les lignes de dégâts d'une arme sont dans load_fixed_lines.
+    return _template_lines(conn, item_id, stat=True)
+
+
+def _template_lines(conn: sqlite3.Connection, item_id: int, stat: bool) -> Template:
     return {
         effect_id: (low, high)
         for effect_id, low, high in conn.execute(
             "SELECT e.effect_id, e.min_value, e.max_value FROM item_effects e "
             "LEFT JOIN effect_meta m ON m.effect_id = e.effect_id "
-            "WHERE e.item_id = ? ORDER BY COALESCE(m.priority, 1000000), e.effect_id",
-            (item_id,),
+            "WHERE e.item_id = ? AND COALESCE(m.is_stat, 1) = ? ORDER BY COALESCE(m.priority, 1000000), e.effect_id",
+            (item_id, int(stat)),
         )
     }
+
+
+def load_fixed_lines(conn: sqlite3.Connection, item_id: int) -> Template:
+    """Lignes de base qui ne se forgemagent pas (dégâts d'une arme, « Arme de chasse »…) : affichées telles quelles."""
+    return _template_lines(conn, item_id, stat=False)
+
+
+def non_stat_effects(conn: sqlite3.Connection) -> frozenset[int]:
+    """Effets à ne jamais lire comme un exo, un over ou une ligne perdue. Les marqueurs restent lus à part."""
+    return frozenset(row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0")) - MARKERS
 
 
 def effect_assets(conn: sqlite3.Connection) -> dict[int, str]:
@@ -81,9 +96,15 @@ def read_listings(
     rows = conn.execute(
         f"SELECT p1, effects, first_seen, captured_at FROM {table} WHERE item_id = ? AND p1 > 0 ORDER BY p1", (item_id,)
     )
+    ignored = non_stat_effects(conn)
     return [
-        (price, classify([tuple(e) for e in json.loads(effects)], template), first_seen or seen, seen)
-        for price, effects, first_seen, seen in rows
+        (
+            price,
+            classify([tuple(e) for e in json.loads(effects) if e[0] not in ignored], template),
+            first_seen or seen,
+            seen,
+        )
+        for price, effects, first_seen, seen in rows.fetchall()
     ]
 
 

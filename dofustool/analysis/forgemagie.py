@@ -27,6 +27,7 @@ class Classification:
     missing: tuple[int, ...]  # caractéristiques de base absentes ou nulles
     quality: float | None  # moyenne des jets de base, 0 = tous au minimum, 1 = tous au maximum
     modified: bool  # porte la marque « Modifié par » : passé en forgemagie
+    transcended: bool = False  # porte « Empêche les futures forgemagies » : marque laissée par une rune de transcendance
 
     @property
     def plain(self) -> bool:
@@ -69,7 +70,8 @@ def classify(effects: list[tuple[int, int | None]], template: Template) -> Class
         if high > low
     ]
     quality = sum(rolls) / len(rolls) if rolls else None
-    return Classification(values, exo, over, missing, quality, any(e == MODIFIED_BY for e, _ in effects))
+    marks = {effect_id for effect_id, _ in effects}
+    return Classification(values, exo, over, missing, quality, MODIFIED_BY in marks, NO_MORE_FM in marks)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,7 @@ class Filter:
     minimums: dict[int, int]
     exo: int | None = None
     exo_min: int = 1
+    transcended: bool | None = None  # None = peu importe ; True = transcendés seulement ; False = sans transcendance
 
     @classmethod
     def from_config(cls, config: dict) -> "Filter":
@@ -91,13 +94,19 @@ class Filter:
             {int(k): int(v) for k, v in (config.get("minimums") or {}).items()},
             config.get("exo"),
             int(config.get("exo_min") or 1),
+            config.get("transcended") if isinstance(config.get("transcended"), bool) else None,
         )
 
     def to_config(self) -> dict:
-        return {"minimums": {str(k): v for k, v in self.minimums.items()}, "exo": self.exo, "exo_min": self.exo_min}
+        config = {"minimums": {str(k): v for k, v in self.minimums.items()}, "exo": self.exo, "exo_min": self.exo_min}
+        if self.transcended is not None:
+            config["transcended"] = self.transcended
+        return config
 
     def matches(self, item: Classification) -> bool:
         if any(item.values.get(effect_id, 0) < minimum for effect_id, minimum in self.minimums.items()):
+            return False
+        if self.transcended is not None and item.transcended != self.transcended:
             return False
         if self.exo == 0:
             return not item.exo

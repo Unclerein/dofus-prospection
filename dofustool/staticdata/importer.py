@@ -79,8 +79,11 @@ def import_static(
         tables = {row[0] for row in src.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         effect_columns = {row[1] for row in src.execute("PRAGMA table_info(EffectData)")} if "EffectData" in tables else set()
         if {"effectPriority", "characteristic"} <= effect_columns and "CharacteristicData" in tables:
+            # Une vraie caractéristique a un identifiant de caractéristique ; la catégorie 2 regroupe
+            # les lignes de dégâts des armes, qui ne se forgemagent pas.
+            is_stat = "e.characteristic > 0" + (" AND e.category != 2" if "category" in effect_columns else "")
             effect_meta = src.execute(
-                "SELECT e.id, e.effectPriority, NULLIF(c.asset, '') FROM EffectData e "
+                f"SELECT e.id, e.effectPriority, NULLIF(c.asset, ''), {is_stat} FROM EffectData e "
                 # 0 est la valeur par défaut des effets sans caractéristique : pas d'image plutôt qu'une fausse.
                 "LEFT JOIN CharacteristicData c ON c.id = e.characteristic AND e.characteristic > 0"
             ).fetchall()
@@ -107,7 +110,7 @@ def import_static(
             dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)", items)
             dst.executemany("INSERT INTO effects VALUES (?, ?)", effects)
             dst.executemany("INSERT OR REPLACE INTO item_icons VALUES (?, ?)", icons)
-            dst.executemany("INSERT OR REPLACE INTO effect_meta VALUES (?, ?, ?)", effect_meta)
+            dst.executemany("INSERT OR REPLACE INTO effect_meta VALUES (?, ?, ?, ?)", effect_meta)
             dst.executemany("INSERT INTO jobs VALUES (?, ?)", jobs)
             dst.executemany("INSERT INTO recipes VALUES (?, ?, ?)", recipes)
             dst.executemany("INSERT INTO recipe_ingredients VALUES (?, ?, ?)", ingredients)

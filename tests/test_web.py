@@ -93,13 +93,17 @@ def test_forge_item_and_filter(api):
     assert item["filter"] == {} and item["names"]["125"] == "Vitalité"
     assert item["assets"] == {} and item["order"] == [111, 123, 125]  # sans priorité connue : par identifiant
     conn = api.connect()
-    conn.executemany("INSERT INTO effect_meta VALUES (?, ?, ?)", [(125, 5000, "tx_vitality"), (123, 5700, "tx_chance"), (111, 7000, None)])
+    conn.executemany(
+        "INSERT INTO effect_meta (effect_id, priority, asset) VALUES (?, ?, ?)",
+        [(125, 5000, "tx_vitality"), (123, 5700, "tx_chance"), (111, 7000, None)],
+    )
     conn.commit()
     conn.close()
     api._stamp = None  # force le rechargement des métadonnées
     ordered = api.forge_item(500)
     assert [line["name"] for line in ordered["lines"]] == ["Vitalité", "PA"] and ordered["order"] == [125, 123, 111]
     assert ordered["assets"] == {"125": "tx_vitality", "123": "tx_chance"}
+    assert ordered["fixed"] == [] and ordered["listings"][0]["transcended"] is False
     assert item["template"] == {"111": [1, 1], "125": [201, 250]}
 
     saved = api.save_forge_filter(500, {"minimums": {"125": "240"}, "exo": 123, "exo_min": 10, "inconnu": 1})

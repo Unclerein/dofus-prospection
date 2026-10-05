@@ -57,11 +57,46 @@ def test_options_and_templates(conn):
 def test_lines_follow_game_tooltip_order(conn):
     # Par identifiant, PA (111) précède Vitalité (125) ; le jeu affiche la Vitalité d'abord.
     assert list(forge.load_template(conn, RING)) == [PA, VITA]
-    conn.executemany("INSERT INTO effect_meta VALUES (?, ?, ?)", [(VITA, 5000, "tx_vitality"), (PA, 7000, "tx_actionPoints")])
+    conn.executemany(
+        "INSERT INTO effect_meta (effect_id, priority, asset) VALUES (?, ?, ?)",
+        [(VITA, 5000, "tx_vitality"), (PA, 7000, "tx_actionPoints")],
+    )
     assert list(forge.load_template(conn, RING)) == [VITA, PA]
     frame = forge.listings_frame(forge.read_listings(conn, RING, forge.load_template(conn, RING)), forge.load_template(conn, RING), forge.effect_names(conn))
     assert list(frame.columns).index("Vitalité") < list(frame.columns).index("PA")
     assert forge.effect_assets(conn) == {VITA: "tx_vitality", PA: "tx_actionPoints"}
+
+
+def test_weapon_damage_lines_are_not_forgemagie(conn):
+    DAMAGE, HUNT, LOCK = 97, 795, 2825
+    conn.execute("INSERT INTO items VALUES (800, 'Épée', 1, 'Épée', 100, 1, 1, 0)")
+    conn.executemany("INSERT INTO item_effects VALUES (800, ?, ?, ?)", [(DAMAGE, 21, 30), (VITA, 101, 150)])
+    conn.execute("INSERT INTO item_effects_fetched VALUES (800, ?)", (NOW,))
+    conn.executemany(
+        "INSERT INTO effect_meta (effect_id, priority, asset, is_stat) VALUES (?, ?, ?, ?)",
+        [(DAMAGE, 200, None, 0), (HUNT, 900, None, 0), (VITA, 5000, "tx_vitality", 1), (LOCK, 96600, None, 0)],
+    )
+    conn.executemany(
+        "INSERT INTO hdv_listings VALUES (800, ?, ?, 0, 0, 0, ?, ?, ?)",
+        [
+            # La ligne de dégâts arrive sans valeur numérique, « Arme de chasse » avec une valeur : ni l'une ni
+            # l'autre ne doit faire croire à une ligne perdue ou à un exo.
+            (1, 90_000, f"[[{DAMAGE}, null], [{HUNT}, 1], [{VITA}, 120]]", NOW, NOW),
+            (2, 300_000, f"[[{DAMAGE}, null], [{VITA}, 150], [{CHANCE}, 12], [{LOCK}, null]]", NOW, NOW),
+        ],
+    )
+    assert forge.load_template(conn, 800) == {VITA: (101, 150)}
+    assert forge.load_fixed_lines(conn, 800) == {DAMAGE: (21, 30)}
+    plain, trans = (entry[1] for entry in forge.read_listings(conn, 800, forge.load_template(conn, 800)))
+    assert plain.plain and plain.label == "de base" and not plain.transcended and plain.values == {VITA: 120}
+    assert trans.exo == (CHANCE,) and trans.transcended and not trans.missing
+    # Le prix de référence retient bien l'exemplaire de base de l'arme.
+    assert data.build_workspace(conn, Config(), NOW).prices.get(800).price == 90_000
+
+    assert Filter({}, transcended=True).matches(trans) and not Filter({}, transcended=True).matches(plain)
+    assert Filter({}, transcended=False).matches(plain) and not Filter({}, transcended=False).matches(trans)
+    assert Filter.from_config(Filter({}, transcended=False).to_config()).transcended is False
+    assert "transcended" not in Filter({}).to_config()
 
 
 def test_listings_frame_reads_each_line(conn):

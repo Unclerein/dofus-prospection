@@ -277,6 +277,8 @@ async function pageForge(r) {
 
 function matches(listing, f) {
   for (const [effect, minimum] of Object.entries(f.minimums)) if ((listing.values[effect] || 0) < minimum) return false;
+  if (f.transcended === true && !listing.transcended) return false;
+  if (f.transcended === false && listing.transcended) return false;
   if (f.exo === 0) return listing.exo.length === 0;
   if (f.exo) return listing.exo.includes(f.exo) && (listing.values[f.exo] || 0) >= f.exo_min;
   return true;
@@ -284,7 +286,8 @@ function matches(listing, f) {
 
 function typeTag(listing) {
   const cls = listing.missing.length ? 'bad' : listing.exo.length ? 'exo' : listing.over.length ? 'over' : listing.label === 'jets parfaits' ? 'good' : '';
-  return h('span', { class: 'tag ' + cls }, listing.label);
+  const tag = h('span', { class: 'tag ' + cls }, listing.label);
+  return listing.transcended ? h('span', { class: 'tags', style: 'flex-wrap: nowrap' }, tag, h('span', { class: 'tag trans', title: 'Porte « Empêche les futures forgemagies », la marque laissée par une rune de transcendance' }, 'transcendé')) : tag;
 }
 
 let saveTimer = null;
@@ -314,8 +317,9 @@ async function forgeItem(id, options) {
   const f = S.ui.forge[id] || (S.ui.forge[id] = {
     minimums: Object.fromEntries(Object.entries(saved.minimums || {}).map(([k, v]) => [k, Number(v)])),
     exo: saved.exo === undefined ? null : saved.exo, exo_min: saved.exo_min || 1, showAll: false,
+    transcended: typeof saved.transcended === 'boolean' ? saved.transcended : null,
   });
-  const change = (mutate) => { mutate(f); saveFilter(id, { minimums: f.minimums, exo: f.exo, exo_min: f.exo_min });
+  const change = (mutate) => { mutate(f); saveFilter(id, { minimums: f.minimums, exo: f.exo, exo_min: f.exo_min, transcended: f.transcended });
     for (const key of Object.keys(S.cache)) if (key.startsWith('ranking')) delete S.cache[key]; // le classement dépend des critères
     refresh();
   };
@@ -327,7 +331,7 @@ async function forgeItem(id, options) {
   const matching = d.listings.filter((l) => matches(l, f));
   const best = matching[0] || null;
   const median = matching.length ? matching[Math.floor((matching.length - 1) / 2)].price : null;
-  const hasCriteria = Object.keys(f.minimums).length > 0 || f.exo !== null;
+  const hasCriteria = Object.keys(f.minimums).length > 0 || f.exo !== null || f.transcended !== null;
 
   const base = h('section', { class: 'kpis', 'aria-label': 'Craft contre hôtel de vente' },
     kpi('Coût de craft', fmt(d.craft_cost), d.craft_cost === null ? 'Pas de recette, ou prix manquant' : 'Au moins cher entre achat et craft'),
@@ -351,7 +355,7 @@ async function forgeItem(id, options) {
     h('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 12px' }, h('h2', {}, 'Critères'),
       h('div', { style: 'display: flex; gap: 8px' },
         h('button', { class: 'btn', onclick: () => change((x) => { x.minimums = Object.fromEntries(d.lines.map((l) => [l.id, l.max])); x.exo = 0; }) }, 'Jets parfaits'),
-        h('button', { class: 'btn quiet', onclick: () => change((x) => { x.minimums = {}; x.exo = null; x.exo_min = 1; }) }, 'Réinitialiser'))),
+        h('button', { class: 'btn quiet', onclick: () => change((x) => { x.minimums = {}; x.exo = null; x.exo_min = 1; x.transcended = null; }) }, 'Réinitialiser'))),
     h('div', {},
       h('div', { class: 'line-row head cap' }, h('span', {}, 'Ligne de base'), h('span', { style: 'text-align: right' }, 'De base'), h('span', { style: 'text-align: right' }, 'Minimum')),
       lineRows.length ? lineRows : h('div', { class: 'muted small' }, "Cet objet n'a pas de caractéristique de base à régler.")),
@@ -362,6 +366,8 @@ async function forgeItem(id, options) {
           d.exos.map((x) => h('option', { value: x.id, selected: f.exo === x.id }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
       h('div', { class: 'field' }, h('label', { for: 'exo-min', style: 'text-align: right' }, 'Minimum'),
         h('input', { id: 'exo-min', type: 'number', min: 1, value: f.exo_min, disabled: !f.exo, class: f.exo ? 'exo-set' : '', onchange: (e) => change((x) => { x.exo_min = Math.max(1, Number(e.target.value) || 1); }) }))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Rune de transcendance'),
+      segmented('Rune de transcendance', [[null, 'Peu importe'], [false, 'Sans'], [true, 'Seulement']], f.transcended, (value) => change((x) => { x.transcended = value; }))),
     h('div', { class: 'muted small' }, 'Enregistrés pour cet objet. Ils servent aussi au classement général.'));
 
   const result = h('div', { class: 'kpis strong' },
@@ -383,7 +389,8 @@ async function forgeItem(id, options) {
     h('span', { class: 'tag' }, `${count((l) => l.plain)} de base`),
     h('span', { class: 'tag exo' }, `${count((l) => l.exo.length && !l.missing.length)} exo`),
     h('span', { class: 'tag over' }, `${count((l) => l.over.length && !l.exo.length && !l.missing.length)} over`),
-    h('span', { class: 'tag bad' }, `${count((l) => l.missing.length)} avec une ligne perdue`));
+    h('span', { class: 'tag bad' }, `${count((l) => l.missing.length)} avec une ligne perdue`),
+    h('span', { class: 'tag trans' }, `${count((l) => l.transcended)} transcendés`));
 
   const gone = h('details', { class: 'panel' },
     h('summary', {}, `Annonces disparues depuis une visite précédente · ${d.gone.length || "aucune pour l'instant"}`),
@@ -407,6 +414,9 @@ const $tip = h('div', { class: 'item-tip', hidden: true, role: 'tooltip' });
 document.body.append($tip);
 
 function itemTooltip(l, d) {
+  // Ordre du jeu : les lignes de dégâts d'une arme, puis les exos, puis les caractéristiques de base.
+  const fixed = (d.fixed || []).map((line) => h('div', { class: 'tip-line fixed' },
+    h('span', { class: 'v' }, line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`), h('span', { class: 'n' }, line.name), h('span', { class: 'r' }, '')));
   const lines = [];
   for (const line of d.lines) {
     const v = l.values[line.id] || 0;
@@ -414,7 +424,7 @@ function itemTooltip(l, d) {
     const state = v <= 0 ? ['low', 'ligne perdue'] : v > line.max ? ['over', `over, +${v - line.max}`] : v >= line.max && line.max > line.min ? ['max', 'jet parfait'] : v < line.min ? ['low', 'sous le minimum'] : ['', ''];
     lines.push([line.id, h('div', { class: 'tip-line ' + state[0] }, h('span', { class: 'v' }, v), h('span', { class: 'n with-ico' }, statIcon(d.assets[line.id]), line.name), h('span', { class: 'r' }, `${range}${state[1] ? ' · ' + state[1] : ''}`))]);
   }
-  for (const effect of l.exo) lines.push([effect, h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, l.values[effect]), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'exo'))]);
+  const exos = l.exo.map((effect) => [effect, h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, l.values[effect]), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'exo'))]);
   for (const [effect, bounds] of Object.entries(d.template || {})) {
     if (bounds[1] > 0) continue; // malus de base
     const v = l.values[effect];
@@ -422,10 +432,14 @@ function itemTooltip(l, d) {
   }
   // Même ordre que l'infobulle du jeu : chaque ligne à sa place, exos compris.
   const rank = new Map((d.order || []).map((effect, index) => [Number(effect), index]));
-  lines.sort((a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9));
+  const byRank = (a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9);
+  lines.sort(byRank);
+  exos.sort(byRank);
+  const all = [...fixed, ...exos.map((entry) => entry[1]), ...lines.map((entry) => entry[1])];
   return [
     h('div', { class: 'tip-head' }, tile(d.icon), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niveau ${d.level}${l.quality !== null ? ` · jets à ${l.quality} %` : ''}`)), typeTag(l)),
-    h('div', { class: 'tip-lines' }, lines.length ? lines.map((entry) => entry[1]) : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
+    h('div', { class: 'tip-lines' }, all.length ? all : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
+    l.transcended && h('div', { class: 'small', style: 'color: #F3C6E8' }, 'Transcendé : ne peut plus être forgemagé.'),
     h('div', { class: 'tip-foot' }, h('span', { class: 'muted' }, 'Prix demandé'), h('b', {}, `${fmt(l.price)} kamas`)),
     h('div', { class: 'muted small' }, `En vente depuis au moins le ${when(l.first_seen)}`),
   ];

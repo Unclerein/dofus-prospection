@@ -32,10 +32,13 @@ CREATE TABLE IF NOT EXISTS effects (
     name TEXT NOT NULL
 );
 -- Ordre d'affichage d'un effet dans une infobulle du jeu, et nom de l'image de sa caractéristique.
+-- is_stat = 0 pour ce qui n'est pas une caractéristique forgemageable : lignes de dégâts d'une
+-- arme, propriétés comme « Arme de chasse », signatures.
 CREATE TABLE IF NOT EXISTS effect_meta (
     effect_id INTEGER PRIMARY KEY,
     priority  INTEGER NOT NULL,
-    asset     TEXT
+    asset     TEXT,
+    is_stat   INTEGER NOT NULL DEFAULT 1
 );
 -- Caractéristiques de base d'un item (source : DofusDB), pour repérer exos et overs.
 CREATE TABLE IF NOT EXISTS item_effects (
@@ -145,6 +148,9 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     if columns and "first_seen" not in columns:
         conn.execute("ALTER TABLE hdv_listings ADD COLUMN first_seen REAL")
         conn.execute("UPDATE hdv_listings SET first_seen = captured_at")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(effect_meta)")}
+    if columns and "is_stat" not in columns:  # renseignée au prochain import des données statiques
+        conn.execute("ALTER TABLE effect_meta ADD COLUMN is_stat INTEGER NOT NULL DEFAULT 1")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
     if columns and "category_id" not in columns:  # renseignée au prochain import des données statiques
         conn.execute("ALTER TABLE items ADD COLUMN category_id INTEGER")

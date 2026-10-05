@@ -19,7 +19,7 @@ def mini_source(tmp_path):
         CREATE TABLE WeaponData (id INTEGER PRIMARY KEY, m_flags INTEGER, nameId INTEGER, typeId INTEGER, level INTEGER);
         CREATE TABLE ItemTypeData (id INTEGER PRIMARY KEY, nameId INTEGER, categoryId INTEGER);
         CREATE TABLE EffectData (id INTEGER PRIMARY KEY, descriptionId INTEGER, effectPriority INTEGER,
-            characteristic INTEGER);
+            characteristic INTEGER, category INTEGER);
         CREATE TABLE CharacteristicData (id INTEGER PRIMARY KEY, asset TEXT);
         CREATE TABLE JobData (id INTEGER PRIMARY KEY, nameId INTEGER);
         CREATE TABLE RecipeData (id TEXT PRIMARY KEY, resultId INTEGER, resultLevel INTEGER, quantities TEXT, jobId INTEGER);
@@ -38,7 +38,10 @@ def mini_source(tmp_path):
     )
     c.execute("INSERT INTO WeaponData VALUES (200, ?, 3, 60, 30)", (1024 | EXCH,))
     c.execute("INSERT INTO ItemTypeData VALUES (50, 10, 2)")
-    c.execute("INSERT INTO EffectData VALUES (125, 30, 5000, 11)")
+    c.executemany(
+        "INSERT INTO EffectData VALUES (?, ?, ?, ?, ?)",
+        [(125, 30, 5000, 11, 0), (97, 31, 200, 0, 2), (795, 32, 900, 0, 0)],  # Vitalité, dégâts d'arme, « Arme de chasse »
+    )
     c.execute("INSERT INTO CharacteristicData VALUES (11, 'tx_vitality')")
     c.execute("INSERT INTO translations VALUES ('30', '#1{{~1~2 à }}#2 Vitalité', 'fr')")
     c.executemany("INSERT INTO JobData VALUES (?, ?)", [(28, 20), (11, 21)])
@@ -59,9 +62,13 @@ def mini_source(tmp_path):
 def test_import_static(mini_source):
     dst = sqlite3.connect(":memory:")
     counts = importer.import_static(mini_source, dst, version="v-test")
-    assert counts == {"items": 5, "jobs": 2, "recipes": 2, "recipe_ingredients": 3, "effects": 1}
+    assert counts == {"items": 5, "jobs": 2, "recipes": 2, "recipe_ingredients": 3, "effects": 1}  # seul 125 est traduit
     assert dst.execute("SELECT id, name FROM effects").fetchall() == [(125, "Vitalité")]
-    assert dst.execute("SELECT * FROM effect_meta").fetchall() == [(125, 5000, "tx_vitality")]
+    assert dst.execute("SELECT * FROM effect_meta ORDER BY effect_id").fetchall() == [
+        (97, 200, None, 0),
+        (125, 5000, "tx_vitality", 1),
+        (795, 900, None, 0),
+    ]
 
     items = {r[0]: r[1:] for r in dst.execute("SELECT * FROM items")}
     assert items[100] == ("Blé", 50, "Céréale", 1, 1, 0, 2)
