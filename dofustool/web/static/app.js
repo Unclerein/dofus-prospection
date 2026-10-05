@@ -542,7 +542,7 @@ async function pageTrends() {
   const data = await cached('trends', '/api/trends');
   const status = S.status || {};
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Tendances'),
-    h('div', { class: 'lead' }, `Prix courant comparé à sa moyenne passée, ou meilleure annonce HDV comparée au prix moyen du jeu · seuil de signal ${Math.round((status.trend_threshold || 0.15) * 100)} % · ${fmt(data.insufficient)} objets en données insuffisantes`)));
+    h('div', { class: 'lead' }, `Prix courant comparé à sa moyenne passée, ou meilleure annonce HDV comparée au prix moyen du jeu · écarts par unité · ${fmt(data.insufficient)} objets en données insuffisantes`)));
   if (!data.rows.length) {
     return [head, h('div', { class: 'panel empty' }, `Données insuffisantes. Une tendance demande au moins ${status.min_snapshots_for_trend || 5} relevés de prix moyens (${status.snapshots || 0} pour l'instant), ou l'historique du cours du marché de l'objet.`)];
   }
@@ -552,15 +552,24 @@ async function pageTrends() {
   const table = (title, rows, positive) => h('section', { class: 'panel' },
     h('div', { class: 'panel-head' }, h('h2', {}, title), h('span', { class: 'muted small' }, `${rows.length} objet${rows.length > 1 ? 's' : ''}`)),
     rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun pour le moment.')
-      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', { class: 'sorted' }, 'Écart'))),
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '))),
           h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
           h('td', {}, h('div', { class: 'soft' }, fmt(reference(r)[0])), h('div', { class: 'muted small' }, reference(r)[1])),
-          h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`)))))));
-  const ui = S.ui.trends || (S.ui.trends = { category: '', type: '' });
-  const signalled = data.rows.filter((r) => r['Signal']);
+          h('td', { class: 'soft' }, `${positive ? '+' : '−'}${price(kamasGap(r))}`),
+          h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`),
+          h('td', { class: r.recipes ? 'soft' : 'muted' }, r.recipes || '—')))))),
+    rows.length > 150 ? h('div', { class: 'panel-foot' }, h('span', {}, `Les 150 plus grands écarts sur ${fmt(rows.length)}. Monte l'écart minimum pour resserrer.`)) : null);
+  const ui = S.ui.trends || (S.ui.trends = { category: '', type: '', usedOnly: false, pct: Math.round((status.trend_threshold || 0.15) * 100), kamas: 0 });
+  const refValue = (r) => (r['Prix moyen'] !== null && r['Prix moyen'] !== undefined ? r['Prix moyen'] : r['Moyenne 30 j'] !== null ? r['Moyenne 30 j'] : r['Moyenne 7 j']);
+  const kamasGap = (r) => Math.abs(r['Prix'] - refValue(r));
+  // L'écart minimum remplace le seuil de signal fixe : c'est toi qui le règles.
+  const signalled = data.rows.filter((r) =>
+    Math.abs(r['Écart %']) >= Math.max(ui.pct, 0.5) &&
+    (!(ui.kamas > 0) || kamasGap(r) >= ui.kamas) &&
+    (!ui.usedOnly || r.recipes > 0));
   const count = (list, key) => { const m = new Map(); for (const r of list) m.set(r[key] || 'Autres', (m.get(r[key] || 'Autres') || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
   const categories = count(signalled, 'category');
   const inCategory = signalled.filter((r) => !ui.category || r.category === ui.category);
@@ -570,11 +579,16 @@ async function pageTrends() {
   const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Famille'),
       segmented('Famille', [['', `Tout · ${signalled.length}`], ...categories.map(([name, n]) => [name, `${name} · ${n}`])], ui.category, (category) => { Object.assign(ui, { category, type: '' }); refresh(); })),
-    h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 't-type' }, 'Type'),
+    h('div', { class: 'field', style: 'flex: 0 1 240px' }, h('label', { for: 't-type' }, 'Type'),
       h('select', { id: 't-type', class: ui.type ? 'set' : '', onchange: (e) => { ui.type = e.target.value; refresh(); } },
-        h('option', { value: '' }, 'Tous les types'), types.map(([name, n]) => h('option', { value: name, selected: name === ui.type }, `${name} · ${n}`)))));
-  const under = kept.filter((r) => r['Signal'] === 'sous-coté').sort((a, b) => a['Écart %'] - b['Écart %']);
-  const over = kept.filter((r) => r['Signal'] === 'sur-coté').sort((a, b) => b['Écart %'] - a['Écart %']);
+        h('option', { value: '' }, 'Tous les types'), types.map(([name, n]) => h('option', { value: name, selected: name === ui.type }, `${name} · ${n}`)))),
+    h('div', { class: 'field', style: 'flex: 0 1 130px' }, h('label', { for: 't-pct' }, 'Écart min. en %'),
+      h('input', { id: 't-pct', type: 'number', min: 0, value: ui.pct, class: 'set', onchange: (e) => { ui.pct = Math.max(0, Number(e.target.value) || 0); refresh(); } })),
+    h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 't-kamas' }, 'Écart min. en kamas'),
+      h('input', { id: 't-kamas', type: 'number', min: 0, value: ui.kamas || '', placeholder: 'Sans minimum', class: ui.kamas > 0 ? 'set' : '', onchange: (e) => { ui.kamas = Math.max(0, Number(e.target.value) || 0); refresh(); } })),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.usedOnly, onchange: (e) => { ui.usedOnly = e.target.checked; refresh(); } }), 'Masquer ce qui ne sert dans aucune recette'));
+  const under = kept.filter((r) => r['Écart %'] < 0).sort((a, b) => a['Écart %'] - b['Écart %']);
+  const over = kept.filter((r) => r['Écart %'] > 0).sort((a, b) => b['Écart %'] - a['Écart %']);
   return [head, filters, h('div', { class: 'grid2' }, table('Sous-cotés, à acheter', under, false), table('Sur-cotés, à vendre', over, true))];
 }
 

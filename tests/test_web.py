@@ -50,6 +50,8 @@ def test_crafts_trends_items(api):
     json.dumps(trends, allow_nan=False)
     assert trends["rows"] and {"Objet", "Écart %", "Signal", "type", "category"} <= trends["rows"][0].keys()
     assert {row["category"] for row in trends["rows"]} == {"Ressources"}
+    uses = {row["Objet"]: row["recipes"] for row in trends["rows"]}
+    assert uses["Blé"] == 5 and uses["Pain"] == 0  # le Blé entre dans cinq recettes, le Pain dans aucune
 
     items = api.items()["items"]
     assert [3, "Pain (niv. 1)"[:4], 1, 9001] == [items[[i[0] for i in items].index(3)][0], "Pain", 1, 9001]

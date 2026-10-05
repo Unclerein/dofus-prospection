@@ -118,6 +118,7 @@ class Api:
                         for item_id, type_name, category_id in conn.execute("SELECT id, type_name, category_id FROM items")
                     },
                     "effects": forge.effect_names(conn),
+                    "recipe_uses": dict(conn.execute("SELECT item_id, COUNT(*) FROM recipe_ingredients GROUP BY item_id")),
                 }
                 self._stamp = stamp
             return self._state
@@ -172,6 +173,7 @@ class Api:
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
                 row["type"], row["category"] = state["meta"].get(row["item_id"], (None, "Autres"))
+                row["recipes"] = state["recipe_uses"].get(row["item_id"], 0)  # nombre de recettes qui l'utilisent
             return {"rows": rows, "insufficient": state["insufficient"]}
         finally:
             conn.close()
