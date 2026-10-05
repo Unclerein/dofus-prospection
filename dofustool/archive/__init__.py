@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS messages (
     correlation   INTEGER,
     body          BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS labels (
+    ts   REAL NOT NULL,
+    text TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS messages_key ON messages (key, ts);
 CREATE INDEX IF NOT EXISTS messages_conn ON messages (connection_id, id);
 """
@@ -55,6 +59,14 @@ class Archive:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (connection_id, msg.ts, msg.direction, msg.key, msg.size, msg.frame_field, msg.correlation, msg.body),
         )
+
+    def add_label(self, ts: float, text: str) -> None:
+        """Étiquette saisie par l'utilisateur au moment d'une action en jeu (identify.py)."""
+        self._db.execute("INSERT INTO labels (ts, text) VALUES (?, ?)", (ts, text))
+
+    def latest_body(self, key: str) -> bytes | None:
+        row = self._db.execute("SELECT body FROM messages WHERE key = ? ORDER BY ts DESC LIMIT 1", (key,)).fetchone()
+        return row[0] if row else None
 
     def commit(self) -> None:
         self._db.commit()
