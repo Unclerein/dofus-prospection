@@ -2,7 +2,7 @@
 
 [server]
 # Nom de ton serveur de jeu (informatif : la v1 ne gère qu'un seul serveur).
-name = ""
+name = "Kourial"
 
 [jobs]
 # Tes métiers et leur niveau (facultatif). Ils ne limitent pas le classement : un craft peut être
@@ -34,4 +34,4 @@ ankama_path = 'C:\Program Files\Ankama\Ankama Launcher\Ankama Launcher.exe'
 # Nom du processus du jeu, sans « .exe ».
 dofus_process = "Dofus"
 # Ouvrir le dashboard Streamlit au lancement.
-start_dashboard = false
+start_dashboard = true

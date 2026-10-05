@@ -1,10 +1,34 @@
 {
   "avg_prices": {
     "key": "itn",
-    "fields": { "entries": 1, "item_id": 3, "price": 5 }
+    "fields": {
+      "entries": 1,
+      "item_id": 3,
+      "price": 5
+    }
   },
   "market_history": {
     "key": "iuk",
-    "fields": { "hourly": 1, "daily": 2, "quantity": 1, "date": 2, "price": 3, "item_id": 4 }
+    "fields": {
+      "hourly": 1,
+      "daily": 2,
+      "quantity": 1,
+      "date": 2,
+      "price": 3,
+      "item_id": 4
+    }
+  },
+  "hdv_listings": {
+    "key": "jzn",
+    "fields": {
+      "item_id": 1,
+      "entries": 2,
+      "effects": 1,
+      "entry_item": 2,
+      "uid": 5,
+      "prices": 6,
+      "effect_id": 1,
+      "effect_value": 10
+    }
   }
 }

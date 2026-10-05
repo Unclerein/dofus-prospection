@@ -1,5 +1,6 @@
 """Base de travail data/market.sqlite : schéma et accès."""
 import hashlib
+import json
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -18,7 +19,24 @@ CREATE TABLE IF NOT EXISTS items (
     type_name    TEXT,
     level        INTEGER NOT NULL,
     exchangeable INTEGER NOT NULL,
-    is_weapon    INTEGER NOT NULL
+    is_weapon    INTEGER NOT NULL,
+    category_id  INTEGER
+);
+CREATE TABLE IF NOT EXISTS effects (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+-- Caractéristiques de base d'un item (source : DofusDB), pour repérer exos et overs.
+CREATE TABLE IF NOT EXISTS item_effects (
+    item_id   INTEGER NOT NULL,
+    effect_id INTEGER NOT NULL,
+    min_value INTEGER NOT NULL,
+    max_value INTEGER NOT NULL,
+    PRIMARY KEY (item_id, effect_id)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS item_effects_fetched (
+    item_id    INTEGER PRIMARY KEY,
+    fetched_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id   INTEGER PRIMARY KEY,
@@ -71,6 +89,18 @@ CREATE TABLE IF NOT EXISTS market_history (
     captured_at REAL NOT NULL,
     PRIMARY KEY (item_id, period, bucket_ts)
 ) WITHOUT ROWID;
+-- Dernier état connu des annonces HDV d'un item (remplacé à chaque consultation).
+CREATE TABLE IF NOT EXISTS hdv_listings (
+    item_id     INTEGER NOT NULL,
+    uid         INTEGER NOT NULL,
+    p1          INTEGER NOT NULL,
+    p10         INTEGER NOT NULL,
+    p100        INTEGER NOT NULL,
+    p1000       INTEGER NOT NULL,
+    effects     TEXT NOT NULL,
+    captured_at REAL NOT NULL,
+    PRIMARY KEY (item_id, uid)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -87,6 +117,9 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(last_sales)")}
     if columns and "sold_at" not in columns:
         conn.execute("DROP TABLE last_sales")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
+    if columns and "category_id" not in columns:  # renseignée au prochain import des données statiques
+        conn.execute("ALTER TABLE items ADD COLUMN category_id INTEGER")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -148,6 +181,19 @@ def save_market_history(
             "price = excluded.price, qty_sold = excluded.qty_sold, captured_at = excluded.captured_at "
             "WHERE excluded.captured_at >= market_history.captured_at",
             ((item_id, period, bucket_ts, price, qty, captured_at) for bucket_ts, price, qty in points),
+        )
+
+
+def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None:
+    """Remplace les annonces connues d'un item par celles d'un message décodé (messages.hdv_listings)."""
+    with conn:
+        conn.execute("DELETE FROM hdv_listings WHERE item_id = ?", (hdv.item_id,))
+        conn.executemany(
+            "INSERT OR REPLACE INTO hdv_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (hdv.item_id, l.uid, *l.prices, json.dumps([list(e) for e in l.effects]), captured_at)
+                for l in hdv.listings
+            ),
         )
 
 

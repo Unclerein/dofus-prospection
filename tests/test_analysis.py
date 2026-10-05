@@ -33,7 +33,7 @@ AVG = {1: 10, 2: 50, 3: 200, 4: 5, 6: 300, 9: 1000, 10: 100, 11: 500}
 def conn():
     c = db.connect(":memory:")
     c.executemany(
-        "INSERT INTO items VALUES (?, ?, 1, 'type', 1, ?, 0)", [(i, name, exch) for i, (name, exch) in ITEMS.items()]
+        "INSERT INTO items VALUES (?, ?, 1, 'type', 1, ?, 0, 2)", [(i, name, exch) for i, (name, exch) in ITEMS.items()]
     )
     c.executemany("INSERT INTO jobs VALUES (?, ?)", [(28, "Paysan"), (11, "Forgeron")])
     for result, (job, level, ingredients) in RECIPES.items():

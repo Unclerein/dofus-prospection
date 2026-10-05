@@ -39,10 +39,31 @@ def when(ts: float | None) -> str:
     return "—" if ts is None else datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
 
 
-def data_version() -> tuple[float, float]:
-    """Change dès que la base ou la configuration est modifiée : invalide le cache."""
-    paths = (DB_PATH, DB_PATH.with_name(DB_PATH.name + "-wal"), config.CONFIG_PATH)
-    return tuple(p.stat().st_mtime if p.exists() else 0.0 for p in paths)
+def data_version() -> tuple:
+    """Empreinte des données affichées : change dès qu'une capture écrit quelque chose de nouveau.
+
+    Requête légère, appelée toutes les quelques secondes par l'actualisation automatique.
+    """
+    conn = db.connect(DB_PATH)
+    try:
+        stamp = conn.execute(
+            "SELECT (SELECT COUNT(*) FROM snapshots), (SELECT MAX(captured_at) FROM market_history), "
+            "(SELECT MAX(captured_at) FROM hdv_listings), (SELECT COUNT(*) FROM item_effects_fetched), "
+            "(SELECT value FROM static_meta WHERE key = 'imported_at'), "
+            "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
+            " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
+        ).fetchone()
+    finally:
+        conn.close()
+    cfg_mtime = config.CONFIG_PATH.stat().st_mtime if config.CONFIG_PATH.exists() else 0.0
+    return (*stamp, cfg_mtime)
+
+
+@st.fragment(run_every=5)
+def watch_for_new_data(shown: tuple) -> None:
+    """Relance l'affichage quand la base a changé depuis le dernier rendu."""
+    if data_version() != shown:
+        st.rerun()
 
 
 @st.cache_resource(ttl=120, max_entries=2, show_spinner="Calcul des marges…")
@@ -60,7 +81,6 @@ def load(version: tuple) -> dict:
             "trends": trends,
             "insufficient": insufficient,
             "options": data.item_options(conn),
-            "status": data.status(conn, now),
         }
     finally:
         conn.close()
@@ -208,6 +228,29 @@ def page_item(state: dict) -> None:
     else:
         st.caption("Pas d'historique : ouvre l'onglet « Cours du marché » de cet objet en jeu pendant une capture.")
 
+    st.subheader("Hôtel de vente")
+    hdv = detail["hdv"]
+    if hdv is None:
+        st.caption("Pas d'annonce connue : ouvre la fiche d'achat de cet objet à l'HDV pendant une capture.")
+    elif hdv["kind"] == "lots":
+        st.caption(f"Prix les plus bas par taille de lot, relevés {ago(hdv['captured_at'], ws.now)}.")
+        st.dataframe(
+            hdv["frame"],
+            hide_index=True,
+            column_config={"Prix du lot": KAMAS, "Prix unitaire": st.column_config.NumberColumn(format="%.2f")},
+        )
+    else:
+        counts = ", ".join(f"{n} {label}" for label, n in hdv["counts"].items())
+        st.caption(f"{len(hdv['frame'])} exemplaires en vente, relevés {ago(hdv['captured_at'], ws.now)} : {counts}.")
+        if hdv["template_known"]:
+            st.caption(f"Caractéristiques de base : {hdv['base'] or 'aucune'}.")
+        else:
+            st.warning(
+                "Caractéristiques de base inconnues : exos et overs ne peuvent pas être repérés. "
+                "Lance « python -m dofustool.staticdata.effects »."
+            )
+        st.dataframe(hdv["frame"], hide_index=True, width="stretch", column_config={"Prix": KAMAS})
+
     st.subheader("Prix moyen au fil des relevés")
     price_chart(detail["snapshots"], "Prix moyen", "Cet objet n'apparaît dans aucun relevé de prix moyens.")
 
@@ -258,11 +301,12 @@ def page_status(state: dict) -> None:
         {
             "Élément": [
                 "Dernière connexion au jeu captée", "Objets avec un dernier prix de vente",
-                "Objets avec un historique du cours du marché", "Version des données statiques",
+                "Objets avec un historique du cours du marché", "Objets avec des annonces HDV",
+                "Version des données statiques",
                 "Import des données statiques", "Objets connus", "Recettes connues",
             ],
             "Valeur": [
-                when(s["last_connection_ts"]), str(s["last_sales"]), str(s["history_items"]),
+                when(s["last_connection_ts"]), str(s["last_sales"]), str(s["history_items"]), str(s["hdv_items"]),
                 s["static_version"] or "non importées", when(s["static_imported_at"]), str(s["items"]), str(s["recipes"]),
             ],
         },
@@ -282,13 +326,21 @@ def page_status(state: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="dofustool", layout="wide")
-    state = load(data_version())
+    version = data_version()
+    conn = db.connect(DB_PATH)
+    try:
+        # L'état de la capture (en cours ou non) dépend de l'heure : jamais mis en cache.
+        state = {**load(version), "status": data.status(conn, time.time())}
+    finally:
+        conn.close()
     with st.sidebar:
         st.header("dofustool")
         page = st.radio("Page", PAGES, key="page", label_visibility="collapsed")
         s = state["status"]
         st.caption(f"Relevé : {ago(s['last_snapshot_ts'], time.time())}")
         st.caption("Capture en cours" if s["running"] else "Capture arrêtée")
+        if st.toggle("Actualisation automatique", value=True, help="Affiche les nouvelles données dès leur capture."):
+            watch_for_new_data(version)
         if st.button("Recharger les données"):
             load.clear()
             st.rerun()

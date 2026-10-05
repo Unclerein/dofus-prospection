@@ -11,10 +11,10 @@ import sys
 from pathlib import Path
 
 from ..archive import Archive
-from ..messages import avg_prices, load_keymap, market_history
+from ..messages import avg_prices, hdv_listings, load_keymap, market_history
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
-PARSERS = {"avg_prices": avg_prices.parse, "market_history": market_history.parse}
+PARSERS = {"avg_prices": avg_prices.parse, "market_history": market_history.parse, "hdv_listings": hdv_listings.parse}
 
 
 def main() -> int:
@@ -29,7 +29,12 @@ def main() -> int:
     if body is None:
         print(f"Aucun message de clé {mapping.key} dans l'archive.")
         return 1
-    if PARSERS[args.name](body, mapping) is None:
+    parsed = PARSERS[args.name](body, mapping)
+    if args.name == "hdv_listings" and parsed is not None and any(l.effects for l in parsed.listings):
+        # Les annonces d'équipement peuvent porter le nom d'un joueur : jamais dans une fixture commitée.
+        print("La dernière liste HDV concerne un équipement : ouvre une ressource à l'HDV puis relance.")
+        return 1
+    if parsed is None:
         print(f"Le message {mapping.key} n'a pas la forme attendue pour {args.name} : rien n'est écrit.")
         return 1
     target = FIXTURES / f"{args.name}.bin"

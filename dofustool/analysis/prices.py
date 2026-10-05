@@ -1,16 +1,24 @@
 """Prix de référence d'un item et liquidité."""
+import json
 import sqlite3
 from dataclasses import dataclass
 
 from . import DAY, GRAIN_DAY, GRAIN_HOUR, HOUR
+from .forgemagie import classify
 
+HDV = "HDV, annonce la moins chère"
+HDV_PLAIN = "HDV, moins cher sans exo ni over"
 LAST_SALE = "dernier prix de vente"
+MEDIAN_24H = "prix médian sur 24 h"
 AVG_PRICE = "prix moyen"
+
+EQUIPMENT = 0  # items.category_id
+LOT_SIZES = (1, 10, 100, 1000)
 
 
 @dataclass(frozen=True, slots=True)
 class PriceRef:
-    price: int
+    price: float  # prix unitaire
     source: str
     ts: float
 
@@ -28,49 +36,113 @@ class Liquidity:
         return self.qty_24h is not None or self.qty_7d is not None
 
 
-class PriceBook:
-    """Prix de référence : le dernier prix de vente s'il est assez récent, sinon le prix moyen du dernier relevé.
+def weighted_median(points: list[tuple[float, int]]) -> float | None:
+    """Médiane des prix pondérée par les quantités, comme le « prix médian » du jeu."""
+    total = sum(max(qty, 1) for _, qty in points)
+    seen = 0
+    for price, qty in sorted(points):
+        seen += max(qty, 1)
+        if seen * 2 >= total:
+            return price
+    return None
 
-    La fraîcheur se juge sur la date de la vente elle-même, pas sur celle de la consultation :
-    une vente vieille de trois semaines n'est pas un prix courant, même vue aujourd'hui.
+
+def unit_price(prices: tuple[int, ...]) -> float | None:
+    """Meilleur prix unitaire parmi les lots x1, x10, x100, x1000 (0 = pas de lot de cette taille)."""
+    candidates = [price / size for price, size in zip(prices, LOT_SIZES) if price > 0]
+    return min(candidates) if candidates else None
+
+
+class PriceBook:
+    """Prix de référence d'un item, par ordre de préférence, tant que l'information est assez récente.
+
+    Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix moyen.
+    Équipements : annonce HDV la moins chère sans exo ni over, puis prix médian sur 24 h, puis prix moyen.
+    Le prix d'un équipement dépend de ses jets et de sa forgemagie : une vente isolée ou une
+    annonce exotique ne dit rien du prix d'un exemplaire tout juste fabriqué.
+
+    La fraîcheur d'une vente se juge sur la date de la vente, pas sur celle de la consultation.
     """
 
     def __init__(self, conn: sqlite3.Connection, now: float, last_sale_max_age_hours: float) -> None:
         self.now = now
+        oldest = now - last_sale_max_age_hours * 3600
         self.snapshot_ts: float | None = None
         self._avg: dict[int, int] = {}
         latest = conn.execute("SELECT id, ts FROM snapshots ORDER BY ts DESC, id DESC LIMIT 1").fetchone()
         if latest is not None:
             self.snapshot_ts = latest[1]
             self._avg = dict(conn.execute("SELECT item_id, price FROM avg_prices WHERE snapshot_id = ?", (latest[0],)))
+        self._equipment = {row[0] for row in conn.execute("SELECT id FROM items WHERE category_id = ?", (EQUIPMENT,))}
+        self._seen = dict(conn.execute("SELECT item_id, MAX(captured_at) FROM market_history GROUP BY item_id"))
+
         self._last_sales: dict[int, tuple[int, float]] = {
             item_id: (price, ts)
             for item_id, price, ts in conn.execute(
-                "SELECT item_id, price, MAX(sold_at) FROM last_sales WHERE sold_at >= ? GROUP BY item_id",
-                (now - last_sale_max_age_hours * 3600,),
+                "SELECT item_id, price, MAX(sold_at) FROM last_sales WHERE sold_at >= ? GROUP BY item_id", (oldest,)
             )
         }
-        # Volumes sur les 24 h et les 7 j qui précèdent la dernière consultation de l'item en jeu.
+
+        # Tranches alignées sur l'heure et le jour UTC : la fenêtre glissante de 24 h du serveur
+        # déborde sur une 25e tranche horaire ; 7 j = aujourd'hui et les 6 jours d'avant.
         self._liquidity: dict[int, dict[str, int]] = {}
-        for item_id, period, qty in conn.execute(
-            "SELECT h.item_id, h.period, SUM(h.qty_sold) FROM market_history h "
+        hourly: dict[int, list[tuple[float, int]]] = {}
+        for item_id, period, price, qty in conn.execute(
+            "SELECT h.item_id, h.period, h.price, COALESCE(h.qty_sold, 0) FROM market_history h "
             "JOIN (SELECT item_id, MAX(captured_at) AS seen FROM market_history GROUP BY item_id) l "
             "  ON l.item_id = h.item_id "
-            "WHERE h.qty_sold IS NOT NULL AND ("
-            # Les tranches sont alignées sur l'heure et le jour UTC : la fenêtre glissante de 24 h
-            # du serveur déborde sur une 25e tranche horaire ; 7 j = aujourd'hui et les 6 jours d'avant.
-            "  (h.period = :hour AND h.bucket_ts >= (CAST(l.seen / :h AS INTEGER) - 24) * :h) OR "
-            "  (h.period = :daily AND h.bucket_ts >= (CAST(l.seen / :day AS INTEGER) - 6) * :day)) "
-            "GROUP BY h.item_id, h.period",
+            "WHERE (h.period = :hour AND h.bucket_ts >= (CAST(l.seen / :h AS INTEGER) - 24) * :h) OR "
+            "      (h.period = :daily AND h.bucket_ts >= (CAST(l.seen / :day AS INTEGER) - 6) * :day)",
             {"hour": GRAIN_HOUR, "daily": GRAIN_DAY, "day": int(DAY), "h": int(HOUR)},
         ):
-            self._liquidity.setdefault(item_id, {})[period] = qty
-        self._seen = dict(conn.execute("SELECT item_id, MAX(captured_at) FROM market_history GROUP BY item_id"))
+            sold = self._liquidity.setdefault(item_id, {})
+            sold[period] = sold.get(period, 0) + qty
+            if period == GRAIN_HOUR:
+                hourly.setdefault(item_id, []).append((price, qty))
+        self._median: dict[int, tuple[float, float]] = {
+            item_id: (weighted_median(points), self._seen[item_id])
+            for item_id, points in hourly.items()
+            if item_id in self._equipment and self._seen[item_id] >= oldest
+        }
+
+        templates: dict[int, dict[int, tuple[int, int]]] = {
+            row[0]: {} for row in conn.execute("SELECT item_id FROM item_effects_fetched")
+        }
+        for item_id, effect_id, low, high in conn.execute("SELECT * FROM item_effects"):
+            templates.setdefault(item_id, {})[effect_id] = (low, high)
+        self._hdv: dict[int, tuple[float, str, float]] = {}
+        for item_id, p1, p10, p100, p1000, effects, captured_at in conn.execute(
+            "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_listings WHERE captured_at >= ?",
+            (oldest,),
+        ):
+            price = unit_price((p1, p10, p100, p1000))
+            if price is None:
+                continue
+            if item_id in self._equipment:
+                template = templates.get(item_id)
+                if template is None or not classify([tuple(e) for e in json.loads(effects)], template).plain:
+                    continue
+                source = HDV_PLAIN
+            else:
+                source = HDV
+            if item_id not in self._hdv or price < self._hdv[item_id][0]:
+                self._hdv[item_id] = (price, source, captured_at)
+
+    def is_equipment(self, item_id: int) -> bool:
+        return item_id in self._equipment
 
     def get(self, item_id: int) -> PriceRef | None:
-        sale = self._last_sales.get(item_id)
-        if sale is not None:
-            return PriceRef(sale[0], LAST_SALE, sale[1])
+        hdv = self._hdv.get(item_id)
+        if hdv is not None:
+            return PriceRef(*hdv)
+        if item_id in self._equipment:
+            median = self._median.get(item_id)
+            if median is not None and median[0] is not None:
+                return PriceRef(median[0], MEDIAN_24H, median[1])
+        else:
+            sale = self._last_sales.get(item_id)
+            if sale is not None:
+                return PriceRef(sale[0], LAST_SALE, sale[1])
         avg = self._avg.get(item_id)
         if avg is not None and self.snapshot_ts is not None:
             return PriceRef(avg, AVG_PRICE, self.snapshot_ts)

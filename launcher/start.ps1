@@ -37,7 +37,6 @@ while (-not (Test-Path $ready)) {
 }
 Say "Capture prête (processus $($capture.Id))."
 
-$dashboard = $null
 try {
     # 2. Launcher Ankama.
     if (-not $NoLauncher) {
@@ -52,9 +51,13 @@ try {
     # 3. Dashboard (optionnel).
     $app = Join-Path $root 'dofustool\app\main.py'
     if ($cfg.start_dashboard -and (Test-Path $app)) {
-        $streamlit = Join-Path $root '.venv\Scripts\streamlit.exe'
-        $dashboard = Start-Process -FilePath $streamlit -ArgumentList 'run', "`"$app`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
-        Say "Dashboard lancé."
+        if (Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue) {
+            Say "Dashboard déjà ouvert : http://localhost:8501"
+        } else {
+            $streamlit = Join-Path $root '.venv\Scripts\streamlit.exe'
+            Start-Process -FilePath $streamlit -ArgumentList 'run', "`"$app`"", '--server.port', '8501', '--browser.gatherUsageStats', 'false' -WorkingDirectory $root -WindowStyle Hidden
+            Say "Dashboard lancé : http://localhost:8501 (il reste ouvert après la fermeture du jeu)."
+        }
     }
 
     # 4. Attendre le jeu, puis sa fermeture.
@@ -86,6 +89,7 @@ finally {
             Remove-Item $ready, $stop -ErrorAction SilentlyContinue
         }
     }
-    if ($dashboard -and -not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force }
     Say "Capture arrêtée."
+    # Caractéristiques de base des équipements vus à l'HDV (DofusDB) : après la capture, jamais pendant.
+    try { & $python -m dofustool.staticdata.effects | ForEach-Object { Say $_ } } catch { Say "DofusDB injoignable : à relancer plus tard." }
 }

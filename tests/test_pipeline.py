@@ -56,7 +56,7 @@ def test_snapshot_saved_archived_and_logged(pipeline, caplog):
 def test_market_history_saved_and_logged(pipeline, caplog):
     caplog.set_level(logging.INFO, logger="dofustool.capture")
     pipeline.keymap["market_history"] = MARKET_MAPPING
-    pipeline.market.execute("INSERT INTO items VALUES (289, 'Blé', 1, 'Céréale', 1, 1, 0)")
+    pipeline.market.execute("INSERT INTO items VALUES (289, 'Blé', 1, 'Céréale', 1, 1, 0, 2)")
     body = entry(1, T0, 9, 100) + entry(2, T0, 9, 100) + entry(2, T0 - timedelta(days=1), 8, 900)
     feed(pipeline, framed(any_frame("xxx", body)) + framed(any_frame("xxx", b"\x08\x01")))  # le 2e est rejeté
     assert [r.getMessage() for r in caplog.records] == [

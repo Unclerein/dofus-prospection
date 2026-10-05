@@ -1,5 +1,6 @@
 """Import des données statiques de dofus.sqlite vers les tables de data/market.sqlite."""
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -17,13 +18,20 @@ EXCHANGEABLE_FLAG = 0x4
 SCHEMA = db.STATIC_SCHEMA
 
 _ITEMS = """
-SELECT i.id, t.value, i.typeId, tt.value, i.level, (i.m_flags & {flag}) != 0, {weapon}
+SELECT i.id, t.value, i.typeId, tt.value, i.level, (i.m_flags & {flag}) != 0, {weapon}, ty.categoryId
 FROM {table} i
 LEFT JOIN translations t ON t.id = CAST(i.nameId AS TEXT) AND t.lang = :lang
 LEFT JOIN ItemTypeData ty ON ty.id = i.typeId
 LEFT JOIN translations tt ON tt.id = CAST(ty.nameId AS TEXT) AND tt.lang = :lang
 """
 # translations.id est de type TEXT : sans le CAST, SQLite n'utilise pas sa clé primaire.
+
+
+def _effect_name(description: str) -> str:
+    """« #1{{~1~2 à }}#2 Vitalité » -> « Vitalité » : retire les gabarits de valeur du libellé du jeu."""
+    text = re.sub(r"\{\{.*?\}\}", "", description)
+    text = re.sub(r"#\d", "", text)
+    return " ".join(text.replace(":", " ").split()).strip(" -+") or text.strip()
 
 
 def read_version(path: Path = VERSION_FILE) -> str:
@@ -54,6 +62,14 @@ def import_static(
                 (lang,),
             )
         ]
+        effects = []
+        if src.execute("SELECT 1 FROM sqlite_master WHERE name = 'EffectData'").fetchone():
+            for effect_id, description in src.execute(
+                "SELECT e.id, t.value FROM EffectData e "
+                "JOIN translations t ON t.id = CAST(e.descriptionId AS TEXT) AND t.lang = ?",
+                (lang,),
+            ):
+                effects.append((effect_id, _effect_name(description) or f"effet {effect_id}"))
         recipes, ingredients = [], []
         by_recipe: dict[str, list[int]] = {}
         # quantities[i] correspond au i-ème ingrédient dans l'ordre d'insertion de la jonction.
@@ -72,9 +88,10 @@ def import_static(
 
         with dst:  # une seule transaction : l'ancien contenu reste en place si l'import échoue
             dst.executescript(SCHEMA)
-            for table in ("items", "jobs", "recipes", "recipe_ingredients"):
+            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects"):
                 dst.execute(f"DELETE FROM {table}")
-            dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?)", items)
+            dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)", items)
+            dst.executemany("INSERT INTO effects VALUES (?, ?)", effects)
             dst.executemany("INSERT INTO jobs VALUES (?, ?)", jobs)
             dst.executemany("INSERT INTO recipes VALUES (?, ?, ?)", recipes)
             dst.executemany("INSERT INTO recipe_ingredients VALUES (?, ?, ?)", ingredients)
@@ -82,7 +99,13 @@ def import_static(
                 "INSERT OR REPLACE INTO static_meta VALUES (?, ?)",
                 [("version", version or read_version()), ("imported_at", str(int(time.time()))), ("lang", lang)],
             )
-        return {"items": len(items), "jobs": len(jobs), "recipes": len(recipes), "recipe_ingredients": len(ingredients)}
+        return {
+            "items": len(items),
+            "jobs": len(jobs),
+            "recipes": len(recipes),
+            "recipe_ingredients": len(ingredients),
+            "effects": len(effects),
+        }
     finally:
         src.close()
         if own_dst:

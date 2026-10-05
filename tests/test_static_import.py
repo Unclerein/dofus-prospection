@@ -17,7 +17,8 @@ def mini_source(tmp_path):
         CREATE TABLE translations (id TEXT, value TEXT, lang TEXT, PRIMARY KEY (id, lang));
         CREATE TABLE ItemData (id INTEGER PRIMARY KEY, m_flags INTEGER, nameId INTEGER, typeId INTEGER, level INTEGER);
         CREATE TABLE WeaponData (id INTEGER PRIMARY KEY, m_flags INTEGER, nameId INTEGER, typeId INTEGER, level INTEGER);
-        CREATE TABLE ItemTypeData (id INTEGER PRIMARY KEY, nameId INTEGER);
+        CREATE TABLE ItemTypeData (id INTEGER PRIMARY KEY, nameId INTEGER, categoryId INTEGER);
+        CREATE TABLE EffectData (id INTEGER PRIMARY KEY, descriptionId INTEGER);
         CREATE TABLE JobData (id INTEGER PRIMARY KEY, nameId INTEGER);
         CREATE TABLE RecipeData (id TEXT PRIMARY KEY, resultId INTEGER, resultLevel INTEGER, quantities TEXT, jobId INTEGER);
         CREATE TABLE RecipeData_ingredientIds_junction (RecipeData_id INTEGER, target_id INTEGER,
@@ -34,7 +35,9 @@ def mini_source(tmp_path):
         [(100, 1024 | EXCH, 1, 50, 1), (101, 1024 | EXCH, 2, 50, 10), (102, 1024, 4, 50, 20), (103, EXCH, 999, 51, 5)],
     )
     c.execute("INSERT INTO WeaponData VALUES (200, ?, 3, 60, 30)", (1024 | EXCH,))
-    c.execute("INSERT INTO ItemTypeData VALUES (50, 10)")
+    c.execute("INSERT INTO ItemTypeData VALUES (50, 10, 2)")
+    c.execute("INSERT INTO EffectData VALUES (125, 30)")
+    c.execute("INSERT INTO translations VALUES ('30', '#1{{~1~2 à }}#2 Vitalité', 'fr')")
     c.executemany("INSERT INTO JobData VALUES (?, ?)", [(28, 20), (11, 21)])
     c.executemany(
         "INSERT INTO RecipeData VALUES (?, ?, ?, ?, ?)",
@@ -53,13 +56,14 @@ def mini_source(tmp_path):
 def test_import_static(mini_source):
     dst = sqlite3.connect(":memory:")
     counts = importer.import_static(mini_source, dst, version="v-test")
-    assert counts == {"items": 5, "jobs": 2, "recipes": 2, "recipe_ingredients": 3}
+    assert counts == {"items": 5, "jobs": 2, "recipes": 2, "recipe_ingredients": 3, "effects": 1}
+    assert dst.execute("SELECT id, name FROM effects").fetchall() == [(125, "Vitalité")]
 
     items = {r[0]: r[1:] for r in dst.execute("SELECT * FROM items")}
-    assert items[100] == ("Blé", 50, "Céréale", 1, 1, 0)
+    assert items[100] == ("Blé", 50, "Céréale", 1, 1, 0, 2)
     assert items[102][4] == 0  # Fer : non échangeable dans ce jeu d'essai
     assert items[103][:3] == ("#103", 51, None)  # ni traduction ni type connu
-    assert items[200] == ("Épée", 60, None, 30, 1, 1)
+    assert items[200] == ("Épée", 60, None, 30, 1, 1, None)
 
     assert dst.execute("SELECT job_id, level FROM recipes WHERE result_id = 200").fetchone() == (11, 30)
     assert dst.execute(

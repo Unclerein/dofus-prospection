@@ -1,4 +1,5 @@
 """Préparation des données du dashboard, sans dépendance à Streamlit (testable)."""
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,6 +7,7 @@ from datetime import datetime
 import pandas as pd
 
 from ..analysis import GRAIN_DAY, GRAIN_HOUR
+from ..analysis.forgemagie import MARKERS, classify
 from ..analysis.crafts import CraftCalculator, CraftResult, Item, load_items, load_recipes, rank_crafts, resolve_jobs
 from ..analysis.prices import PriceBook, PriceRef
 from ..analysis.trends import INSUFFICIENT, compute_trends
@@ -180,6 +182,8 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
     detail["history"] = history
     detail["market_seen_at"] = ws.prices.market_seen_at(item_id)
 
+    detail["hdv"] = hdv_detail(conn, ws, item_id)
+
     recipe = ws.calculator.recipes.get(item_id)
     detail["craft"] = None
     if recipe is not None:
@@ -227,6 +231,64 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
     return detail
 
 
+def hdv_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict | None:
+    """Dernières annonces HDV connues de l'item : lots pour une ressource, exemplaires pour un équipement."""
+    rows = conn.execute(
+        "SELECT p1, p10, p100, p1000, effects, captured_at FROM hdv_listings WHERE item_id = ? ORDER BY p1", (item_id,)
+    ).fetchall()
+    if not rows:
+        return None
+    captured_at = max(row[5] for row in rows)
+    if not ws.prices.is_equipment(item_id):
+        lots = []
+        for index, size in enumerate((1, 10, 100, 1000)):
+            prices = [row[index] for row in rows if row[index] > 0]
+            if prices:
+                lots.append({"Lot": f"x{size}", "Prix du lot": min(prices), "Prix unitaire": min(prices) / size})
+        return {"kind": "lots", "captured_at": captured_at, "frame": pd.DataFrame(lots)}
+
+    fetched = conn.execute("SELECT 1 FROM item_effects_fetched WHERE item_id = ?", (item_id,)).fetchone() is not None
+    template = {
+        effect_id: (low, high)
+        for effect_id, low, high in conn.execute(
+            "SELECT effect_id, min_value, max_value FROM item_effects WHERE item_id = ?", (item_id,)
+        )
+    }
+    names = dict(conn.execute("SELECT id, name FROM effects"))
+    listings = []
+    for p1, _, _, _, raw, _ in rows:
+        effects = [tuple(e) for e in json.loads(raw)]
+        verdict = classify(effects, template) if fetched else None
+
+        def describe(ids: tuple[int, ...]) -> str:
+            values = dict(effects)
+            return ", ".join(f"{names.get(i, f'effet {i}')} {values[i]}" for i in ids)
+
+        listings.append(
+            {
+                "Prix": p1,
+                "Forgemagie": verdict.label if verdict else "inconnue",
+                "Exo": describe(verdict.exo) if verdict else "",
+                "Over": describe(verdict.over) if verdict else "",
+                "Caractéristiques": ", ".join(
+                    f"{names.get(i, f'effet {i}')} {v}" for i, v in effects if i not in MARKERS and v is not None
+                ),
+            }
+        )
+    frame = pd.DataFrame(listings)
+    return {
+        "kind": "listings",
+        "captured_at": captured_at,
+        "frame": frame,
+        "template_known": fetched,
+        "base": ", ".join(
+            f"{names.get(i, f'effet {i}')} {low}" + (f" à {high}" if high != low else "")
+            for i, (low, high) in template.items()
+        ),
+        "counts": frame["Forgemagie"].value_counts().to_dict(),
+    }
+
+
 def status(conn: sqlite3.Connection, now: float) -> dict:
     raw = dict(conn.execute("SELECT key, value FROM capture_status"))
     meta = dict(conn.execute("SELECT key, value FROM static_meta"))
@@ -257,6 +319,7 @@ def status(conn: sqlite3.Connection, now: float) -> dict:
         ).fetchone()[0],
         "last_sales": conn.execute("SELECT COUNT(DISTINCT item_id) FROM last_sales").fetchone()[0],
         "history_items": conn.execute("SELECT COUNT(DISTINCT item_id) FROM market_history").fetchone()[0],
+        "hdv_items": conn.execute("SELECT COUNT(DISTINCT item_id) FROM hdv_listings").fetchone()[0],
         "static_version": meta.get("version"),
         "static_imported_at": float(meta["imported_at"]) if "imported_at" in meta else None,
         "items": conn.execute("SELECT COUNT(*) FROM items").fetchone()[0],

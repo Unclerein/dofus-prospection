@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .. import db
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, market_history
+from ..messages import Mapping, avg_prices, hdv_listings, market_history
 from ..protocol.session import Message, Session
 from . import Segment
 
@@ -73,6 +73,17 @@ class Pipeline:
                     row[0] if row else f"item {history.item_id}",
                     len(history.hourly),
                     len(history.daily),
+                )
+            return
+
+        mapping = self.keymap.get("hdv_listings")
+        if mapping is not None and msg.key == mapping.key:
+            hdv = hdv_listings.parse(msg.body, mapping)
+            if hdv is not None:  # une réponse vide (fiche refermée) n'efface pas les annonces connues
+                db.save_hdv_listings(self.market, hdv, msg.ts)
+                row = self.market.execute("SELECT name FROM items WHERE id = ?", (hdv.item_id,)).fetchone()
+                log.info(
+                    "Annonces HDV enregistrées : %s (%d).", row[0] if row else f"item {hdv.item_id}", len(hdv.listings)
                 )
             return
 

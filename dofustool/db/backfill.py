@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, load_keymap, market_history
+from ..messages import avg_prices, hdv_listings, load_keymap, market_history
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -35,6 +35,16 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             else:
                 db.save_market(market, history, ts)
                 counts["cours enregistrés"] += 1
+    mapping = keymap.get("hdv_listings")
+    if mapping is not None:
+        counts.update({"listes HDV lues": 0, "listes HDV enregistrées": 0})
+        # Dans l'ordre chronologique : la liste la plus récente d'un item remplace les précédentes.
+        for ts, body in archive.execute("SELECT ts, body FROM messages WHERE key = ? ORDER BY ts", (mapping.key,)):
+            counts["listes HDV lues"] += 1
+            hdv = hdv_listings.parse(body, mapping)
+            if hdv is not None:
+                db.save_hdv_listings(market, hdv, ts)
+                counts["listes HDV enregistrées"] += 1
     return counts
 
 

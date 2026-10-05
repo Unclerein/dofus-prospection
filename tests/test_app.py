@@ -82,7 +82,7 @@ def test_status(conn):  # noqa: F811
 def app_db(tmp_path, monkeypatch):
     path = tmp_path / "market.sqlite"
     c = db.connect(path)
-    c.executemany("INSERT INTO items VALUES (?, ?, 1, 'type', 1, ?, 0)", [(i, n, e) for i, (n, e) in ITEMS.items()])
+    c.executemany("INSERT INTO items VALUES (?, ?, 1, 'type', 1, ?, 0, 2)", [(i, n, e) for i, (n, e) in ITEMS.items()])
     c.executemany("INSERT INTO jobs VALUES (?, ?)", [(28, "Paysan"), (11, "Forgeron")])
     for result, (job, level, ingredients) in RECIPES.items():
         c.execute("INSERT INTO recipes VALUES (?, ?, ?)", (result, job, level))
