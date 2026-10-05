@@ -29,6 +29,14 @@ La capture seule, sans lanceur (Ctrl+C pour arrêter) :
 .\.venv\Scripts\python.exe -m dofustool.capture
 ```
 
+Le dashboard (crafts, tendances, fiche objet, état), ouvert dans le navigateur :
+
+```powershell
+.\.venv\Scripts\streamlit.exe run dofustool\app\main.py
+```
+
+Pour qu'il s'ouvre avec le lanceur, passe `start_dashboard` à `true` dans `config.toml`.
+
 Le journal est dans `data\capture.log` : une ligne par relevé enregistré et par alerte.
 
 Tests :
