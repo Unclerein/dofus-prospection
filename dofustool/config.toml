@@ -5,7 +5,8 @@
 name = ""
 
 [jobs]
-# Tes métiers et leur niveau, pour filtrer les recettes. Exemple :
+# Tes métiers et leur niveau (facultatif). Ils ne limitent pas le classement : un craft peut être
+# confié à un autre joueur. Ils servent à repérer et filtrer ce que tu peux faire toi-même. Exemple :
 # Bijoutier = 120
 # Paysan = 200
 
@@ -18,6 +19,8 @@ last_sale_max_age_hours = 24
 min_snapshots_for_trend = 5
 # Quantité vendue minimale sur 7 jours pour qu'un objet apparaisse par défaut.
 min_liquidity = 0
+# Écart à la tendance à partir duquel un objet est signalé sous-coté ou sur-coté (0.15 = 15 %).
+trend_threshold = 0.15
 
 [capture]
 # Interface réseau à écouter. Vide = interface par défaut.
