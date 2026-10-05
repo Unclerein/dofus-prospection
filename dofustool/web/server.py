@@ -22,12 +22,29 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 ICON_DIR = db.MARKET_PATH.parent / "icons"
 ICON_URL = "https://api.dofusdb.fr/img/items/{icon_id}.png"
 EFFECT_ICON_URL = "https://dofusdb.fr/icons/characteristics/{asset}.png"
+# Images que DofusDB range sous un autre nom que celui des données du jeu (vérifié le 05/10/2026).
+EFFECT_ICON_ALIASES = {
+    "tx_strengthRes": "tx_res_strength",
+    "tx_agilityRes": "tx_res_agility",
+    "tx_chanceRes": "tx_res_chance",
+    "tx_intelligenceRes": "tx_res_intelligence",
+    "tx_neutralRes": "tx_res_neutral",
+    "tx_resMelee": "tx_res_melee",
+    "tx_distanceRes": "tx_res_distance",
+    "tx_weaponRes": "tx_res_weapon",
+    "tx_spellsRes": "tx_res_spell",
+    "tx_damageMelee": "tx_meleeDamage",
+    "tx_distance": "tx_distanceDamage",
+    "tx_spells": "tx_spellDamage",
+    "tx_weapon": "tx_weaponDamage",
+}
 DEFAULT_PORT = 8600
 
 
 def fetch_effect_icon(asset: str, directory: Path = ICON_DIR) -> bytes | None:
     """Image d'une caractéristique (vitalité, force…), avec le même cache que les images d'items."""
-    return fetch_icon(asset, directory / "effects", EFFECT_ICON_URL.format(asset=asset))
+    remote = EFFECT_ICON_ALIASES.get(asset, asset)
+    return fetch_icon(asset, directory / "effects", EFFECT_ICON_URL.format(asset=remote))
 
 
 def fetch_icon(icon_id: int | str, directory: Path = ICON_DIR, url: str | None = None) -> bytes | None:
