@@ -56,11 +56,15 @@ def compute_trends(
     """
     trends: dict[int, Trend] = {}
 
-    # Moyennes simples des prix journaliers, comme le « prix moyen » affiché par le jeu.
+    # Moyennes des prix journaliers pondérées par les quantités vendues, comme le « prix moyen »
+    # affiché par le jeu (vérifié sur trois objets).
     history: dict[int, tuple[float | None, float | None, int]] = {
         item_id: (mean_7d, mean_30d, count)
         for item_id, mean_7d, mean_30d, count in conn.execute(
-            "SELECT item_id, AVG(CASE WHEN bucket_ts > :week THEN price END), AVG(price), COUNT(*) "
+            "SELECT item_id, "
+            " 1.0 * SUM(CASE WHEN bucket_ts > :week THEN price * MAX(qty_sold, 1) END) "
+            "   / SUM(CASE WHEN bucket_ts > :week THEN MAX(qty_sold, 1) END), "
+            " 1.0 * SUM(price * MAX(qty_sold, 1)) / SUM(MAX(qty_sold, 1)), COUNT(*) "
             "FROM market_history WHERE period = :grain AND bucket_ts > :month GROUP BY item_id",
             {"grain": GRAIN_DAY, "week": now - 7 * DAY, "month": now - 30 * DAY},
         )

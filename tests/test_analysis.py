@@ -181,7 +181,8 @@ def test_trend_from_snapshots(conn):
 
 def test_trend_from_market_history_is_immediate(conn):
     day = int(NOW) // 86400 * 86400
-    points = [(day, 100, 5), (day - 2 * 86400, 120, 5), (day - 10 * 86400, 90, 5), (day - 20 * 86400, 90, 5)]
+    # Moyennes pondérées par les quantités : 7 j = (100*30 + 140*10) / 40 = 110 ; 30 j = 100.
+    points = [(day, 100, 30), (day - 2 * 86400, 140, 10), (day - 10 * 86400, 90, 20), (day - 20 * 86400, 90, 20)]
     db.save_market_history(conn, 3, GRAIN_DAY, points + [(day - 40 * 86400, 5000, 5)], NOW)  # le dernier : hors 30 j
     db.save_last_sale(conn, 3, 150, NOW - HOUR, NOW)
     db.save_market_history(conn, 2, GRAIN_DAY, [(day, 100, 5)], NOW)  # historique sans dernier prix de vente

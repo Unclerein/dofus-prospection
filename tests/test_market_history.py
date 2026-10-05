@@ -122,7 +122,7 @@ def test_save_market_and_analysis(ble):
 
     trend = compute_trends(conn, CAPTURED + 3600, min_snapshots=5, last_sale_max_age_hours=24)[289]
     assert trend.basis == MARKET_HISTORY and trend.current == 9
-    assert trend.mean_30d == pytest.approx(sum(p.price for p in ble.daily[1:]) / 29, abs=0.6)
+    assert trend.mean_30d == pytest.approx(10.2, abs=0.2)  # le jeu affiche « prix moyen : 10 » sur 30 j
     assert trend.mean_7d == pytest.approx(9.3, abs=0.3)
     conn.close()
 
@@ -142,3 +142,34 @@ def test_growing_bucket_is_replaced_not_duplicated():
     assert conn.execute("SELECT COUNT(*) FROM last_sales").fetchone()[0] == 2  # deux ventes distinctes observées
     assert db.latest_last_sale(conn, 289)[0] == 10
     conn.close()
+
+
+# --- second objet : Gelano, cher et peu vendu (écran du 05/10/2026 17:31) -----------------
+
+def weighted_median(points):
+    total = sum(p.quantity for p in points)
+    seen = 0
+    for p in sorted(points, key=lambda p: p.price):
+        seen += p.quantity
+        if seen * 2 >= total:
+            return p.price
+
+
+def test_gelano_fixture_matches_screen():
+    gelano = market_history.parse(
+        FIXTURE.with_name("market_history_gelano.bin").read_bytes(), load_keymap()["market_history"]
+    )
+    paris = timezone(timedelta(hours=2))
+    assert gelano.item_id == 2469
+    assert sum(p.quantity for p in gelano.hourly) == 99  # « 99 articles vendus »
+    hovered = [p for p in gelano.hourly if p.price == 82_500][0]  # point survolé : 05/10 16:41, 2 objets vendus
+    assert hovered.quantity == 2
+    assert datetime.fromtimestamp(hovered.sold_at, paris).strftime("%d/%m %H:%M") == "05/10 16:41"
+    # Le prix moyen et le prix médian affichés par le jeu sont pondérés par les quantités.
+    weighted = sum(p.price * p.quantity for p in gelano.hourly) / 99
+    assert int(weighted) == 391_544  # « prix moyen : 391 544 »
+    assert weighted_median(gelano.hourly) == 292_747  # « prix médian : 292 747 »
+    assert max(p.price for p in gelano.hourly) == 1_073_999  # sommet de l'axe
+    sale = gelano.last_sale  # « dernier achat : 05/10 - 17:29 »
+    assert datetime.fromtimestamp(sale.sold_at, paris).strftime("%d/%m - %H:%M") == "05/10 - 17:29"
+    assert sale.price == 64_333
