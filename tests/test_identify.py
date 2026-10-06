@@ -376,8 +376,8 @@ def test_a_relisted_market_replaces_its_old_fingerprint():
     conn = db.connect(":memory:")
     db.save_sales(conn, SalesList(11, (Sale(1, 1000, 1, 50, 9000), Sale(2, 1001, 10, 500, 9000))), 100.0)
     db.save_sales(conn, SalesList(22, (Sale(9, 1002, 1, 70, 9000),)), 110.0)
-    # Après une mise à jour du jeu, le même HDV arrive sous une autre empreinte, avec un lot déjà connu.
-    db.save_sales(conn, SalesList(33, (Sale(2, 1001, 10, 500, 8000), Sale(3, 1003, 1, 80, 9000))), 200.0)
-    assert conn.execute("SELECT market, uid FROM my_sales ORDER BY market, uid").fetchall() == [(22, 9), (33, 2), (33, 3)]
+    # Après une mise à jour du jeu, le même HDV arrive sous une autre empreinte et ses lots sont renumérotés.
+    db.save_sales(conn, SalesList(33, (Sale(70, 1001, 10, 500, 8000), Sale(71, 1003, 1, 80, 9000))), 200.0)
+    assert conn.execute("SELECT market, uid FROM my_sales ORDER BY market, uid").fetchall() == [(22, 9), (33, 70), (33, 71)]
     assert [row[0] for row in conn.execute("SELECT market FROM my_sales_meta ORDER BY market")] == [22, 33]
     conn.close()

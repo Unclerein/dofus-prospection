@@ -342,14 +342,15 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
     if row is not None and row[0] > captured_at:
         return False
     with conn:
-        # L'empreinte d'un HDV peut changer avec une mise à jour du jeu : une liste enregistrée sous une
-        # autre empreinte qui contient l'un de ces lots est l'ancien relevé du même HDV.
-        uids = [s.uid for s in listing.sales]
-        marks = ",".join("?" * len(uids))
+        # L'empreinte d'un HDV peut changer avec une mise à jour du jeu (et les lots y sont renumérotés).
+        # Un objet ne se vend que dans un seul HDV : une liste enregistrée sous une autre empreinte
+        # qui contient l'un de ces objets est donc l'ancien relevé du même HDV.
+        ids = sorted({s.item_id for s in listing.sales})
+        marks = ",".join("?" * len(ids))
         same = [
             row[0]
             for row in conn.execute(
-                f"SELECT DISTINCT market FROM my_sales WHERE market != ? AND uid IN ({marks})", (listing.market, *uids)
+                f"SELECT DISTINCT market FROM my_sales WHERE market != ? AND item_id IN ({marks})", (listing.market, *ids)
             )
         ]
         for market in same:
