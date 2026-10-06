@@ -362,3 +362,9 @@ button.chip:hover { border-color: var(--accent); }
   color: var(--warn-soft); font-size: 18px; line-height: 1;
 }
 .chip-x:hover { background: #3A221B; }
+
+/* Infobulles compactes */
+.item-tip { width: 300px; gap: 8px; padding: 12px 14px; }
+.tip-price { grid-template-columns: 84px auto minmax(0, 1fr); }
+.tip-price .small { text-align: right; font-weight: 600; }
+.tip-lines { padding: 8px 0; }
