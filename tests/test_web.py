@@ -355,3 +355,19 @@ def test_icon_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fail)
     assert fetch_icon(9, tmp_path) is None and not (tmp_path / "9.png").exists()
+
+
+def test_harebourg_helper(api):
+    empty = api.harebourg({})
+    assert len(empty["layout"]) == 22 and empty["landing"] is None and empty["swap_map"] is None
+    me, comte = [6, 13], [8, 13]
+    out = api.harebourg({"me": me, "target": [6, 12], "comte": comte, "rotation": 90, "round": 2})
+    json.dumps(out, allow_nan=False)
+    assert out["shot"]["aim"] == [5, 13] and out["shot"]["clickable"]  # 90° horaire : on vise un quart de tour avant
+    assert out["landing"][12][6] == [7, 13, False]
+    assert out["swap"]["mover"] == "comte" and out["swap"]["destination"] == [4, 13] and out["swap"]["verdict"] == "SAFE"
+    assert [8, 13] in out["mi_temps"] and out["bumped"] == 180
+    with pytest.raises(ValueError):
+        api.harebourg({"me": [1, "a"]})
+    with pytest.raises(ValueError):
+        api.harebourg({"rotation": 45})

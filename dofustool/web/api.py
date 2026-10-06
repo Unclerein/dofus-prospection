@@ -20,6 +20,7 @@ from ..analysis.forgemagie import Filter, base_lines
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
+from ..fight import grid as fight_grid, harebourg
 from ..staticdata import effects as base_effects
 
 log = logging.getLogger("dofustool.web")
@@ -652,6 +653,64 @@ class Api:
             )
         finally:
             conn.close()
+
+    # --- combat du Comte Harebourg ------------------------------------------
+
+    def harebourg(self, state: dict) -> dict:
+        """Aide au combat du Comte pour une position donnée (saisie à la main en attendant la capture).
+
+        state : {"me", "target", "comte" : [col, row] ou null, "allies" : [[col, row]…],
+                 "rotation" : 0/90/180/270 (degrés horaires), "round" : numéro du tour}.
+        Tout le calcul est fait ici (dofustool.fight) ; l'interface ne fait qu'afficher.
+        """
+        layout = fight_grid.load("comte")
+
+        def cell(value) -> tuple[int, int] | None:
+            if value is None:
+                return None
+            if not (isinstance(value, list) and len(value) == 2 and all(isinstance(v, int) and -100 < v < 100 for v in value)):
+                raise ValueError("case attendue : [colonne, rangée]")
+            return value[0], value[1]
+
+        me, target, comte = cell(state.get("me")), cell(state.get("target")), cell(state.get("comte"))
+        allies = frozenset(c for c in (cell(v) for v in state.get("allies", [])[:16]) if c is not None)
+        rotation = harebourg.Rotation(int(state.get("rotation", 90)))
+        round_number = int(state.get("round", 1))
+        if round_number < 1:
+            raise ValueError("numéro de tour invalide")
+        occupied = allies | {c for c in (me, target) if c is not None}
+
+        out: dict = {
+            "layout": [line for line in layout.to_text().splitlines()],
+            "rotation": rotation.value,
+            "rotation_label": rotation.label,
+            "bumped": rotation.bumped().value,
+            "round": round_number,
+            "life_bands": [[floor, r.value, r.label] for floor, r in harebourg.LIFE_BANDS],
+            "rotations": [[r.value, r.label] for r in harebourg.Rotation],
+            "landing": None,
+            "shot": None,
+            "swap": None,
+            "swap_map": None,
+            "mi_temps": [],
+        }
+        if me is not None:
+            # Case d'arrivée pour chaque case visée, pour l'aperçu au survol : [colonne, rangée, échec critique].
+            out["landing"] = [
+                [list(s.landing) + [s.critical_failure] for s in (harebourg.cast_on(layout, me, (col, row), rotation) for col in range(layout.width))]
+                for row in range(layout.height)
+            ]
+            if target is not None:
+                s = harebourg.shot_at(layout, me, target, rotation)
+                out["shot"] = {"aim": list(s.aim), "clickable": s.clickable, "critical_failure": s.critical_failure, "melee": s.melee}
+        if comte is not None:
+            out["mi_temps"] = [list(c) for c in harebourg.mi_temps(layout, comte)]
+            plan = harebourg.swap_map(layout, round_number, comte, occupied - {me} if me else occupied)
+            out["swap_map"] = [[c[0], c[1], s.verdict.name] for c, s in plan.items()]
+            if me is not None and me != comte:
+                s = harebourg.swap(layout, round_number, me, comte, occupied - {me})
+                out["swap"] = {"mover": s.mover, "destination": list(s.destination), "verdict": s.verdict.name, "label": s.verdict.value}
+        return out
 
     # --- forgemagie ----------------------------------------------------------
 

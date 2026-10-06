@@ -28,3 +28,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## harebourg-ux
+
+`dofustool/fight/` s'inspire des idées de harebourg-ux (https://github.com/Drayken/harebourg-ux) :
+règles de confusion vérifiées en jeu, grille redressée en carré, projection isométrique. Aucun code
+n'en est repris : le dépôt n'a pas de licence. La disposition de la salle du Comte
+(`dofustool/fight/maps/comte.txt`) est un relevé de la carte du jeu, tel que le publie ce projet
+et que l'exporte le simulateur comteharebourg.com. Elle reste à vérifier sur une capture du combat.

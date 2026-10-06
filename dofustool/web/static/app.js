@@ -135,6 +135,7 @@ const NAV = [
   ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500'],
   ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
   ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
+  ['fight', 'Combat', 'M9 2.5l6.5 6.5L9 15.5 2.5 9zM9 6.5v5M6.5 9h5'],
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5'],
@@ -175,7 +176,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig };
+  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -1176,6 +1177,152 @@ async function pageItem(r) {
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
 
   return [head, header, ignoredNote, kpis, gap, charts, hdvPanel, recipePanel, usedPanel];
+}
+
+// ---------------------------------------------------------------- page Combat (Comte Harebourg)
+
+const FIGHT_CELL = { w: 34, h: 17 };
+const VERDICT_TEXT = {
+  SAFE: 'sans danger',
+  OCCUPIED: 'case occupée (effet à confirmer)',
+  RISKY: "destination impossible pour toi (effet à confirmer)",
+  WIPE: 'Air du Temps : toute l’équipe meurt',
+};
+
+async function pageFight() {
+  const ui = S.ui.fight || (S.ui.fight = { me: null, target: null, comte: null, allies: [], rotation: 90, round: 1, mode: 'me', heat: true, life: '' });
+  const d = await api('/api/fight/harebourg', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ me: ui.me, target: ui.target, comte: ui.comte, allies: ui.allies, rotation: ui.rotation, round: ui.round }),
+  });
+  const set = (patch) => { Object.assign(ui, patch); refresh(); };
+  const same = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
+  const label = (c) => `(${c[0]}, ${c[1]})`;
+
+  function place(cell) {
+    const occupied = (c) => same(c, ui.me) || same(c, ui.target) || same(c, ui.comte) || ui.allies.some((a) => same(a, c));
+    const clear = { me: same(cell, ui.me) ? null : ui.me, target: same(cell, ui.target) ? null : ui.target, comte: same(cell, ui.comte) ? null : ui.comte, allies: ui.allies.filter((a) => !same(a, cell)) };
+    if (ui.mode === 'erase') return set(clear);
+    if (ui.mode === 'ally') return set(occupied(cell) ? clear : { allies: [...ui.allies, cell] });
+    set({ ...clear, [ui.mode]: cell });
+  }
+
+  // Grille isométrique : x = (col - rang) * w/2, y = (col + rang) * h/2.
+  const rows = d.layout, W = FIGHT_CELL.w, H = FIGHT_CELL.h;
+  const used = [];
+  rows.forEach((line, r) => [...line].forEach((k, c) => { if (k !== '-') used.push([c, r]); }));
+  const px = (c, r) => [(c - r) * W / 2, (c + r) * H / 2];
+  const xs = used.map(([c, r]) => px(c, r)[0]), ys = used.map(([c, r]) => px(c, r)[1]);
+  const minX = Math.min(...xs) - W / 2 - 4, minY = Math.min(...ys) - H / 2 - 4;
+  const width = Math.max(...xs) - minX + W / 2 + 4, height = Math.max(...ys) - minY + H / 2 + 4;
+  const diamond = (c, r, inset = 0) => {
+    const [x, y] = px(c, r), w = W / 2 - inset, hh = H / 2 - inset / 2;
+    return `${x},${y - hh} ${x + w},${y} ${x},${y + hh} ${x - w},${y}`;
+  };
+  const kind = (c, r) => (rows[r] && rows[r][c]) || '-';
+
+  const verdicts = {};
+  if (d.swap_map && ui.heat) for (const [c, r, v] of d.swap_map) verdicts[`${c},${r}`] = v;
+  const miTemps = new Set(d.mi_temps.map(([c, r]) => `${c},${r}`));
+
+  const board = svg('svg', { viewBox: `${minX} ${minY} ${width} ${height}`, class: 'fight-board', role: 'img', 'aria-label': 'Salle du Comte Harebourg' });
+  const cells = svg('g', {});
+  for (const [c, r] of used) {
+    const k = kind(c, r);
+    const v = verdicts[`${c},${r}`];
+    const cls = ['cell', k === '#' ? 'wall' : 'floor', v && `v-${v.toLowerCase()}`, miTemps.has(`${c},${r}`) && 'mitemps'].filter(Boolean).join(' ');
+    const poly = svg('polygon', { points: diamond(c, r, 1), class: cls });
+    if (k !== '#') {
+      poly.addEventListener('click', () => place([c, r]));
+      poly.addEventListener('mouseenter', () => hover(c, r));
+    }
+    cells.append(poly);
+  }
+  const marks = svg('g', { class: 'marks' });
+  const hoverLayer = svg('g', { class: 'hover' });
+  board.append(cells, marks, hoverLayer);
+  board.addEventListener('mouseleave', () => hoverLayer.replaceChildren());
+
+  const piece = (cell, cls, text) => {
+    if (!cell) return;
+    const [x, y] = px(...cell);
+    marks.append(svg('g', { class: `piece ${cls}` }, svg('ellipse', { cx: x, cy: y - 2, rx: 9, ry: 9 }), svg('text', { x, y: y + 2, 'text-anchor': 'middle' }, text)));
+  };
+  if (d.shot) {
+    marks.append(svg('polygon', { points: diamond(...d.shot.aim, 1), class: 'aim' + (d.shot.clickable ? '' : ' bad') }));
+    const [x, y] = px(...d.shot.aim);
+    marks.append(svg('text', { x, y: y + 4, 'text-anchor': 'middle', class: 'aim-label' }, 'Vise'));
+  }
+  if (d.swap) {
+    const [x1, y1] = px(...(d.swap.mover === 'comte' ? ui.comte : ui.me)), [x2, y2] = px(...d.swap.destination);
+    marks.append(svg('line', { x1, y1, x2, y2, class: `swap-line v-${d.swap.verdict.toLowerCase()}` }));
+    marks.append(svg('polygon', { points: diamond(...d.swap.destination, 3), class: `swap-dest v-${d.swap.verdict.toLowerCase()}` }));
+  }
+  ui.allies.forEach((a) => piece(a, 'ally', 'A'));
+  piece(ui.comte, 'comte', 'H');
+  piece(ui.target, 'target', 'C');
+  piece(ui.me, 'me', 'M');
+
+  function hover(c, r) {
+    hoverLayer.replaceChildren(svg('polygon', { points: diamond(c, r, 1), class: 'cursor' }));
+    if (!d.landing) return;
+    const [lc, lr, critical] = d.landing[r][c];
+    hoverLayer.append(svg('polygon', { points: diamond(lc, lr, 2), class: 'landing' + (critical ? ' bad' : '') }));
+    if (critical) { const [x, y] = px(lc, lr); hoverLayer.append(svg('text', { x, y: y + 4, 'text-anchor': 'middle', class: 'aim-label bad' }, '×')); }
+  }
+
+  // Panneau de commandes
+  const lifeHint = () => {
+    const pct = Number(ui.life);
+    if (ui.life === '' || !(pct >= 0 && pct <= 100)) return null;
+    const band = d.life_bands.find(([floor]) => pct >= floor) || d.life_bands[d.life_bands.length - 1];
+    return h('button', { class: 'btn', onclick: () => set({ rotation: band[1] }) }, `${pct} % de PV : ${band[2]} (indicatif)`);
+  };
+  const controls = h('section', { class: 'panel pad fight-controls', 'aria-label': 'Réglages' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Placer'),
+      segmented('Placer', [['me', 'Moi'], ['target', 'Cible'], ['comte', 'Comte'], ['ally', 'Allié'], ['erase', 'Effacer']], ui.mode, (mode) => set({ mode }))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Ma confusion'),
+      h('div', { class: 'row-gap' },
+        segmented('Confusion', d.rotations.filter(([v]) => v !== 0).concat(d.rotations.filter(([v]) => v === 0)), ui.rotation, (rotation) => set({ rotation })),
+        h('button', { class: 'btn', title: 'Chaque ligne de dégâts au contact ajoute 90° horaire', onclick: () => set({ rotation: d.bumped }) }, '+1 coup au contact'))),
+    h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'f-life' }, 'Mes PV (%)'),
+      h('input', { id: 'f-life', type: 'number', min: 0, max: 100, value: ui.life, oninput: (e) => { ui.life = e.target.value; refresh(); } })),
+    lifeHint(),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Tour'),
+      h('div', { class: 'row-gap' },
+        h('button', { class: 'btn', 'aria-label': 'Tour précédent', onclick: () => set({ round: Math.max(1, ui.round - 1) }) }, '−'),
+        h('b', { class: 'round' }, String(ui.round)),
+        h('button', { class: 'btn', 'aria-label': 'Tour suivant', onclick: () => set({ round: ui.round + 1 }) }, '+'),
+        h('span', { class: 'muted small' }, ui.round % 2 ? 'impair : frapper le Comte te déplace' : 'pair : frapper le Comte le déplace'))),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.heat, onchange: (e) => set({ heat: e.target.checked }) }), "Danger de frapper le Comte depuis chaque case"));
+
+  // Ce qu'il faut retenir
+  const facts = [];
+  if (!ui.me) facts.push(h('p', { class: 'muted' }, 'Place ton personnage, ta cible et le Comte sur la grille.'));
+  if (d.shot) {
+    facts.push(h('p', {}, h('b', {}, 'Pour toucher la cible : '), d.shot.clickable ? `clique la case jaune ${label(d.shot.aim)}.` : `il faudrait cliquer ${label(d.shot.aim)}, hors de l'arène : change de place.`));
+    if (d.shot.critical_failure) facts.push(h('p', { class: 'warn' }, 'La cible est sur un obstacle : échec critique.'));
+    if (d.shot.melee) facts.push(h('p', { class: 'muted' }, `Au contact : après chaque ligne de dégâts, ta confusion passe à ${d.rotations.find(([v]) => v === d.bumped)[1]}.`));
+  } else if (ui.me) facts.push(h('p', { class: 'muted' }, 'Survole une case : le contour montre où tombera ton sort.'));
+  if (d.swap) {
+    const who = d.swap.mover === 'comte' ? `le Comte part en ${label(d.swap.destination)}` : `tu pars en ${label(d.swap.destination)}`;
+    facts.push(h('p', { class: d.swap.verdict === 'WIPE' ? 'warn strong' : d.swap.verdict === 'SAFE' ? '' : 'warn' }, h('b', {}, 'Si tu frappes le Comte : '), `${who} — ${VERDICT_TEXT[d.swap.verdict]}.`));
+  }
+  if (d.mi_temps.length && ui.me && miTemps.has(`${ui.me[0]},${ui.me[1]}`)) facts.push(h('p', { class: 'warn strong' }, 'Tu es dans la croix Mi-temps : ne commence pas ton tour ici.'));
+
+  const legend = h('div', { class: 'legend' },
+    h('span', {}, h('i', { class: 'sw me' }), 'Moi'), h('span', {}, h('i', { class: 'sw target' }), 'Cible'), h('span', {}, h('i', { class: 'sw comte' }), 'Comte'), h('span', {}, h('i', { class: 'sw ally' }), 'Allié'),
+    h('span', {}, h('i', { class: 'sw aim' }), 'Case à cliquer'), h('span', {}, h('i', { class: 'sw mitemps' }), 'Mi-temps'),
+    ui.heat && h('span', {}, h('i', { class: 'sw safe' }), 'Frapper le Comte d’ici : sans danger'),
+    ui.heat && h('span', {}, h('i', { class: 'sw wipe' }), 'Air du Temps si tu frappes d’ici'),
+    ui.heat && h('span', {}, h('i', { class: 'sw risky' }), 'À confirmer'));
+
+  return [
+    h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Comte Harebourg'),
+      h('div', { class: 'muted' }, 'Simulation à la main. Les positions et la confusion viendront de la capture du combat.'))),
+    controls,
+    h('section', { class: 'panel fight' }, h('div', { class: 'fight-wrap' }, board), h('div', { class: 'fight-facts' }, ...facts, legend)),
+  ];
 }
 
 // ---------------------------------------------------------------- page État

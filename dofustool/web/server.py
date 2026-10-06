@@ -193,6 +193,12 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if not isinstance(payload, dict):
                         raise ValueError("objet JSON attendu")
                     return self._json(api.save_forge_filter(int(match[1]), payload))
+                if path == "/api/fight/harebourg":
+                    length = min(int(self.headers.get("Content-Length") or 0), 16384)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("objet JSON attendu")
+                    return self._json(api.harebourg(payload))
                 if path == "/api/ignore-type":
                     length = min(int(self.headers.get("Content-Length") or 0), 4096)
                     payload = json.loads(self.rfile.read(length) or b"{}")

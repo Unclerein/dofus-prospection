@@ -93,6 +93,17 @@ harebourg-ux s'interdit de lire les paquets. C'est justement notre force, et ce 
 - Il faut faire le donjon au moins une fois avec la capture active pour les messages spécifiques.
 - CGU : un overlay purement informatif ne change pas la nature de l'outil, mais aucune action ne doit être automatisée.
 
+## Avancement (06/10/2026)
+- [x] **1. Lot du prix HDV.** Affiché partout où apparaît la source du prix (« HDV x100 »), avec le prix du lot en infobulle. L'option 1b reste à décider.
+- [x] **2. Badge de quantité** sur toutes les icônes (inventaire + banque), détail au survol. Il est masqué dans les puces d'ingrédients, qui affichent déjà « possédé / requis ».
+- [ ] **3. Harebourg** :
+  - [x] Moteur de règles testé : `dofustool/fight/harebourg.py`.
+  - [x] Géométrie et carte : `dofustool/fight/grid.py`, avec la conversion numéro de case ↔ grille et le calage de la salle sur les positions observées (`fit_offset`).
+  - [x] Page « Combat » : simulation à la main.
+  - [ ] Identifier les messages de combat sur la capture du combat.
+  - [ ] Écrire l'état du combat en direct depuis la capture, puis brancher la page dessus.
+  - [ ] Overlay au-dessus de Dofus (5b) : fenêtre transparente aux clics, calage de la grille par taille de fenêtre, alimentée par le même état.
+
 ## Ordre proposé
 1. Lot HDV (1), petit chantier.
 2. Badge de quantité (2), petit chantier.

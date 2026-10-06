@@ -382,3 +382,47 @@ button.chip:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #14181a; font-weight: 600; }
 .btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
 .btn:disabled { opacity: 0.45; cursor: default; filter: none; }
+
+/* Combat du Comte Harebourg */
+.fight-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 24px; }
+.row-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.round { min-width: 28px; text-align: center; font-size: 16px; }
+.panel.fight { display: flex; flex-wrap: wrap; }
+.fight-wrap { flex: 1 1 560px; min-width: 0; padding: 12px; }
+.fight-facts { flex: 1 1 260px; display: flex; flex-direction: column; gap: 10px; padding: 18px 22px; border-left: 1px solid var(--line); }
+.fight-facts p { margin: 0; }
+.fight-facts .warn { color: var(--warn); }
+.fight-facts .strong { font-weight: 700; }
+.fight-board { display: block; width: 100%; height: auto; max-height: 78vh; user-select: none; }
+.fight-board .cell { stroke: var(--line-strong); stroke-width: 0.8; }
+.fight-board .floor { fill: #1A2429; cursor: pointer; }
+.fight-board .floor:hover { fill: #22313A; }
+.fight-board .wall { fill: #3B4248; stroke: #59636B; }
+.fight-board .v-safe { fill: #1B3A31; }
+.fight-board .v-wipe { fill: #33201E; }
+.fight-board .v-risky { fill: #45351A; }
+.fight-board .v-occupied { fill: #2E2645; }
+.fight-board .mitemps { stroke: var(--warn); stroke-width: 1.6; stroke-dasharray: 3 2; }
+.fight-board .aim { fill: rgba(227, 179, 65, 0.55); stroke: var(--accent); stroke-width: 1.6; pointer-events: none; }
+.fight-board .aim.bad { fill: none; stroke: var(--warn); stroke-dasharray: 3 2; }
+.fight-board .aim-label { font-size: 8px; font-weight: 700; fill: var(--ground); pointer-events: none; }
+.fight-board .aim-label.bad { fill: var(--warn); font-size: 12px; }
+.fight-board .cursor { fill: none; stroke: var(--text); stroke-width: 1.2; pointer-events: none; }
+.fight-board .landing { fill: rgba(233, 238, 236, 0.25); stroke: var(--text); stroke-width: 1.6; pointer-events: none; }
+.fight-board .landing.bad { fill: rgba(240, 138, 107, 0.3); stroke: var(--warn); }
+.fight-board .swap-line { stroke-width: 1.4; stroke-dasharray: 4 3; pointer-events: none; }
+.fight-board .swap-dest { fill: none; stroke-width: 2; pointer-events: none; }
+.fight-board .swap-line.v-safe, .fight-board .swap-dest.v-safe { stroke: var(--gain); fill: none; }
+.fight-board .swap-line.v-wipe, .fight-board .swap-dest.v-wipe { stroke: var(--warn); fill: none; }
+.fight-board .swap-line.v-risky, .fight-board .swap-dest.v-risky, .fight-board .swap-line.v-occupied, .fight-board .swap-dest.v-occupied { stroke: var(--exo); fill: none; }
+.fight-board .piece { pointer-events: none; }
+.fight-board .piece text { font-size: 9px; font-weight: 700; fill: #0E1315; }
+.fight-board .piece.me ellipse { fill: #6FB3F2; }
+.fight-board .piece.target ellipse { fill: var(--warn); }
+.fight-board .piece.comte ellipse { fill: var(--exo); }
+.fight-board .piece.ally ellipse { fill: var(--gain); }
+.legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.sw.me { background: #6FB3F2; } .sw.target { background: var(--warn); } .sw.comte { background: var(--exo); } .sw.ally { background: var(--gain); }
+.sw.aim { background: var(--accent); } .sw.mitemps { border: 2px dashed var(--warn); }
+.sw.wipe { background: #5A2A24; } .sw.safe { background: #2A5A4B; } .sw.risky { background: #45351A; }
+@media (max-width: 720px) { .fight-facts { border-left: 0; border-top: 1px solid var(--line); } }
