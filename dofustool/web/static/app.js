@@ -111,13 +111,16 @@ function shortSource(source, lot) {
   if (source.startsWith('HDV')) return [source.includes('sans exo') ? 'HDV de base' : 'HDV', lotLabel(lot)].filter(Boolean).join(' ');
   if (source.startsWith('dernier')) return 'dernière vente';
   if (source.startsWith('prix médian')) return 'médiane 24 h';
+  if (source === 'prix estimé') return 'estimé';
   return 'prix moyen';
 }
 
 /** Un prix observé (HDV, vente) est plus fiable que le prix moyen du jeu. */
-const observed = (source) => !!source && source !== 'prix moyen';
+const observed = (source) => !!source && source !== 'prix moyen' && source !== 'prix estimé';
+const dotClass = (source) => (observed(source) ? 'on' : source === 'prix estimé' ? 'est' : '');
+const pct = (ratio) => `${Math.round(ratio * 100)} %`;
 const sourceLine = (source, ageHours, lot, unitPrice) =>
-  h('div', { class: 'source', title: lotTitle(lot, unitPrice) }, h('span', { class: 'dot ' + (observed(source) ? 'on' : '') }), `${shortSource(source, lot)} · ${ageLabel(ageHours)}`);
+  h('div', { class: 'source', title: lotTitle(lot, unitPrice) }, h('span', { class: 'dot ' + dotClass(source) }), `${shortSource(source, lot)} · ${ageLabel(ageHours)}`);
 function ageLabel(hours) {
   if (hours === null || hours === undefined) return '';
   if (hours < 1.5) return `${Math.max(1, Math.round(hours * 60))} min`;
@@ -452,7 +455,7 @@ function stockCrafts(data) {
   const body = rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
     h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`, row.item_id)),
     h('td', {}, row.sell === null ? h('span', { class: 'muted' }, '—')
-      : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source, row.lot))]),
+      : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
     h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
     h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
       h('a', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), href: `#/item/${i.id}`,
@@ -523,7 +526,7 @@ function stockItems(data) {
             h('td', { class: row.inventory ? 'soft' : 'muted' }, row.inventory ? fmt(row.inventory) : '—'),
             h('td', { class: row.bank ? 'soft' : 'muted' }, row.bank ? fmt(row.bank) : '—'),
             h('td', { style: 'font-weight: 600' }, fmt(row.total)),
-            h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), [row.source, lotLabel(row.lot)].filter(Boolean).join(' · '))]),
+            h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + dotClass(row.source) }), [row.source, lotLabel(row.lot)].filter(Boolean).join(' · '))]),
             h('td', { class: 'strong ' + (row.value === null ? 'muted' : '') }, fmt(row.value)),
             h('td', { class: row.recipes ? 'soft' : 'muted' }, row.recipes || '—')))))),
       h('div', { class: 'panel-foot' }, h('span', {}, 'Objets portés exclus.'),
@@ -616,7 +619,7 @@ async function pageJobs() {
           h('td', { class: 'soft' }, fmt(row.quantity)),
           h('td', {}, !plan.stock_known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row.quantity)),
           h('td', { style: 'font-weight: 600' }, row.to_buy ? fmt(row.to_buy) : h('span', { class: 'gain' }, '0')),
-          h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source, row.lot))]),
+          h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
           h('td', { class: 'strong' }, fmt(row.cost))))))));
 
   return [head, controls, excluded, blocked, kpis, steps, shopping];
@@ -1099,7 +1102,11 @@ async function pageItem(r) {
   const ignoredNote = d.ignored ? h('div', { class: 'note' }, 'Cet objet est ignoré : il n\'apparaît plus dans Crafts, Tendances et les recettes de Mon stock.')
     : d.type_ignored ? h('div', { class: 'note' }, `Le type « ${d.type} » est ignoré : cet objet n'apparaît plus dans Crafts, Tendances et les recettes de Mon stock. `, h('a', { href: '#/ignored', style: 'text-decoration: underline' }, 'Gérer les types ignorés')) : null;
   const kpis = h('section', { class: 'kpis' },
-    kpi('Prix de référence', fmt(d.ref && d.ref.price), d.ref ? h('span', { class: 'source', title: lotTitle(d.ref.lot, d.ref.price) }, h('span', { class: 'dot ' + (observed(d.ref.source) ? 'on' : '') }), `${shortSource(d.ref.source, d.ref.lot)} · ${ago(d.ref.ts, now)}`) : 'Aucun prix connu'),
+    kpi('Prix de référence', fmt(d.ref && d.ref.price), d.ref ? h('span', { class: 'source', title: lotTitle(d.ref.lot, d.ref.price) }, h('span', { class: 'dot ' + dotClass(d.ref.source) }), `${shortSource(d.ref.source, d.ref.lot)}${d.ref.spread ? ` ± ${pct(d.ref.spread)}` : ''} · ${ago(d.ref.ts, now)}`) : 'Aucun prix connu'),
+    d.estimate && kpi('Prix estimé', fmt(d.estimate.price),
+      h('span', { class: 'source', title: `Prix moyen ${fmt(d.estimate.avg)}, ${d.estimate.delta > 0 ? '+' : '−'}${fmt(Math.abs(d.estimate.delta))} en ${Math.round(d.estimate.hours)} h de relevés : les ventes récentes se font ${d.estimate.delta > 0 ? 'au-dessus' : 'en dessous'}.` },
+        h('span', { class: 'dot est' }), `${d.estimate.confidence} · ${fmt(d.estimate.price * (1 - d.estimate.spread))} à ${fmt(d.estimate.price * (1 + d.estimate.spread))}`),
+      d.estimate.delta > 0 ? 'warn' : 'gain'),
     kpi('Coût le plus bas', fmt(d.unit_cost.cost), d.unit_cost.mode || 'prix manquant'),
     kpi('Vendus sur 24 h', fmt(d.qty_24h), d.market_seen_at ? ago(d.market_seen_at, now) : 'cours non consulté'),
     kpi('Vendus sur 7 j', fmt(d.qty_7d)));
@@ -1327,6 +1334,29 @@ async function pageFight() {
 
 // ---------------------------------------------------------------- page État
 
+/** Ce que vaut le prix estimé : comparé aux annonces HDV relevées sur la même période. */
+function estimatePanel(s) {
+  const e = s.estimates;
+  if (!e) return null;
+  const row = (level) => {
+    const c = e.check[level];
+    return h('tr', {},
+      h('td', { class: 'l', style: 'font-weight: 500' }, level),
+      h('td', {}, fmt(c.points)),
+      h('td', { class: c.error !== null && c.error < c.avg_error ? 'gain' : '' }, c.error === null ? '—' : pct(c.error)),
+      h('td', { class: 'soft' }, c.avg_error === null ? '—' : pct(c.avg_error)),
+      h('td', { class: 'soft' }, c.within_20 === null ? '—' : pct(c.within_20)),
+      h('td', {}, `± ${pct(c.spread)}`, c.measured ? null : h('span', { class: 'muted' }, ' par défaut')));
+  };
+  return h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Prix estimé'),
+      h('span', { class: 'muted small' }, `${fmt(e.count)} objets estimés, dont ${fmt(e.reliable)} fiables · ${s.use_estimated_prices ? 'utilisé comme prix de référence' : 'affiché seulement'}`)),
+    e.count === 0 ? h('div', { class: 'empty' }, 'Pas encore d\'estimation : il faut au moins deux relevés de prix moyens espacés de 3 heures dans la même journée.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Confiance'), h('th', {}, 'Objets contrôlés à l\'HDV'), h('th', {}, 'Erreur médiane'), h('th', {}, 'Erreur du prix moyen'), h('th', {}, 'À ± 20 %'), h('th', {}, 'Fourchette affichée'))),
+        h('tbody', {}, row('fiable'), row('indicatif')))));
+}
+
 async function pageStatus() {
   S.status = await api('/api/status');
   renderCapture();
@@ -1348,6 +1378,7 @@ async function pageStatus() {
       kpi('Décodage', s.decode_alert ? 'Alerte' : 'Normal', s.decode_alert ? 'voir MAINTENANCE.md' : null, s.decode_alert ? 'warn' : 'gain')),
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Données')),
       h('table', {}, h('tbody', {}, rows.map(([label, value]) => h('tr', {}, h('td', { class: 'l soft' }, label), h('td', { style: 'font-weight: 500' }, value)))))),
+    estimatePanel(s),
     h('section', { class: 'panel pad' }, h('h2', { style: 'margin-bottom: 12px' }, 'Limites à garder en tête'),
       h('ul', { class: 'list' },
         h('li', {}, 'Les prix moyens sont théoriques : lissés, en retard sur le marché, sans distinction de lot ni de forgemagie.'),
@@ -1431,7 +1462,8 @@ async function pageConfig() {
       number('c-age', 'Dernière vente valable (h)', d.last_sale_max_age_hours, (v) => { d.last_sale_max_age_hours = v; }, { min: 1, step: 1 }),
       number('c-snap', 'Relevés pour une tendance', d.min_snapshots_for_trend, (v) => { d.min_snapshots_for_trend = v; }, { min: 1, step: 1 }),
       number('c-liq', 'Vendus sur 7 j, minimum', d.min_liquidity, (v) => { d.min_liquidity = v; }, { min: 0, step: 10 }),
-      number('c-thr', 'Seuil de signal %', percent(d.trend_threshold), (v) => { d.trend_threshold = v === null ? null : v / 100; }, { min: 1, max: 500, step: 1 }))));
+      number('c-thr', 'Seuil de signal %', percent(d.trend_threshold), (v) => { d.trend_threshold = v === null ? null : v / 100; }, { min: 1, max: 500, step: 1 }),
+      h('label', { class: 'check' }, h('input', { id: 'c-est', type: 'checkbox', checked: d.use_estimated_prices, onchange: (e) => { d.use_estimated_prices = e.target.checked; sync(); } }), 'Utiliser le prix estimé à défaut de relevé HDV'))));
 
   const system = h('section', { class: 'panel' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Capture et lanceur'), h('span', { class: 'muted small' }, 'Pris en compte au prochain lancement')),

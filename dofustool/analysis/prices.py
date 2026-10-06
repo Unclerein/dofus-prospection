@@ -4,12 +4,14 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import DAY, GRAIN_DAY, GRAIN_HOUR, HOUR
+from . import estimate as estimation
 from .forgemagie import MARKERS, classify
 
 HDV = "HDV, annonce la moins chère"
 HDV_PLAIN = "HDV, moins cher sans exo ni over"
 LAST_SALE = "dernier prix de vente"
 MEDIAN_24H = "prix médian sur 24 h"
+ESTIMATED = "prix estimé"
 AVG_PRICE = "prix moyen"
 
 EQUIPMENT = 0  # items.category_id
@@ -22,6 +24,7 @@ class PriceRef:
     source: str
     ts: float
     lot: int | None = None  # taille du lot HDV d'où vient le prix unitaire (1, 10, 100, 1000)
+    spread: float | None = None  # prix estimé : fourchette relative (0.15 = ± 15 %)
 
     def age_hours(self, now: float) -> float:
         return max(0.0, now - self.ts) / 3600
@@ -60,7 +63,8 @@ def unit_price(prices: tuple[int, ...]) -> tuple[float, int] | None:
 class PriceBook:
     """Prix de référence d'un item, par ordre de préférence, tant que l'information est assez récente.
 
-    Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix moyen.
+    Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix
+    estimé (s'il est jugé fiable et que `use_estimates` est vrai), puis prix moyen.
     Équipements : annonce HDV la moins chère sans exo ni over, puis prix médian sur 24 h, puis prix moyen.
     Le prix d'un équipement dépend de ses jets et de sa forgemagie : une vente isolée ou une
     annonce exotique ne dit rien du prix d'un exemplaire tout juste fabriqué.
@@ -68,9 +72,17 @@ class PriceBook:
     La fraîcheur d'une vente se juge sur la date de la vente, pas sur celle de la consultation.
     """
 
-    def __init__(self, conn: sqlite3.Connection, now: float, last_sale_max_age_hours: float) -> None:
+    def __init__(
+        self, conn: sqlite3.Connection, now: float, last_sale_max_age_hours: float, use_estimates: bool = False
+    ) -> None:
         self.now = now
         oldest = now - last_sale_max_age_hours * 3600
+        self.use_estimates = use_estimates
+        # Estimations de tous les objets, pour l'affichage ; un relevé trop ancien ne s'extrapole pas.
+        self.estimates = estimation.estimate_prices(conn)
+        self.estimate_check = estimation.check(conn, self.estimates)
+        if any(e.ts < oldest for e in self.estimates.values()):
+            self.estimates = {}
         self.snapshot_ts: float | None = None
         self._avg: dict[int, int] = {}
         latest = conn.execute("SELECT id, ts FROM snapshots ORDER BY ts DESC, id DESC LIMIT 1").fetchone()
@@ -154,10 +166,21 @@ class PriceBook:
             sale = self._last_sales.get(item_id)
             if sale is not None:
                 return PriceRef(sale[0], LAST_SALE, sale[1])
+            guess = self.estimates.get(item_id)
+            if self.use_estimates and guess is not None and guess.confidence == estimation.RELIABLE:
+                return PriceRef(guess.price, ESTIMATED, guess.ts, None, self.estimate_spread(guess.confidence))
         avg = self._avg.get(item_id)
         if avg is not None and self.snapshot_ts is not None:
             return PriceRef(avg, AVG_PRICE, self.snapshot_ts)
         return None
+
+    def estimate(self, item_id: int) -> estimation.Estimate | None:
+        """Prix du moment estimé d'une ressource ou d'un consommable, quel que soit son niveau de confiance."""
+        return None if item_id in self._equipment else self.estimates.get(item_id)
+
+    def estimate_spread(self, confidence: str) -> float:
+        """Fourchette relative à afficher pour ce niveau de confiance (mesurée si assez de points de contrôle)."""
+        return self.estimate_check[confidence]["spread"]
 
     def hdv_ask(self, item_id: int) -> tuple[float, float] | None:
         """(meilleur prix unitaire demandé à l'HDV, date du relevé) d'une ressource ou d'un consommable."""

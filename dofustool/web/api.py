@@ -149,6 +149,21 @@ class Api:
         meta = state["meta"]
         return lambda item_id: item_id in items or meta.get(item_id, (None, None))[0] in types
 
+    @staticmethod
+    def _estimate(ws, item_id: int) -> dict | None:
+        guess = ws.prices.estimate(item_id)
+        if guess is None:
+            return None
+        return {
+            "price": guess.price,
+            "avg": guess.avg,
+            "delta": guess.delta,
+            "hours": guess.hours,
+            "confidence": guess.confidence,
+            "spread": ws.prices.estimate_spread(guess.confidence),
+            "ts": guess.ts,
+        }
+
     # --- pages ---------------------------------------------------------------
 
     def version(self) -> dict:
@@ -174,6 +189,12 @@ class Api:
                     "trend_threshold": cfg.trend_threshold,
                     "min_snapshots_for_trend": cfg.min_snapshots_for_trend,
                     "min_liquidity": cfg.min_liquidity,
+                    "use_estimated_prices": cfg.use_estimated_prices,
+                    "estimates": {
+                        "count": len(state["ws"].prices.estimates),
+                        "reliable": sum(1 for e in state["ws"].prices.estimates.values() if e.confidence == "fiable"),
+                        "check": state["ws"].prices.estimate_check,
+                    },
                     # Quantités possédées, pour le badge des icônes : {item_id: [inventaire, banque]}.
                     "owned": {item_id: [o.inventory, o.bank] for item_id, o in state["stock"].items().items()},
                 }
@@ -302,7 +323,10 @@ class Api:
                     "exchangeable": item.exchangeable,
                     "equipment": ws.prices.is_equipment(item_id),
                     "icon": state["icons"].get(item_id),
-                    "ref": {"price": ref.price, "source": ref.source, "ts": ref.ts, "lot": ref.lot} if ref else None,
+                    "ref": {"price": ref.price, "source": ref.source, "ts": ref.ts, "lot": ref.lot, "spread": ref.spread}
+                    if ref
+                    else None,
+                    "estimate": self._estimate(ws, item_id),
                     "unit_cost": {"cost": cost.cost, "mode": cost.mode},
                     "qty_24h": liquidity.qty_24h,
                     "qty_7d": liquidity.qty_7d,

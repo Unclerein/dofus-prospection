@@ -59,6 +59,7 @@ h1, h2 { margin: 0; }
 .capture .sub { color: var(--muted); font-size: 13px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.on { background: var(--gain); }
+.dot.est { background: var(--accent); }
 .dot.alert { background: var(--warn); }
 
 /* Contenu */

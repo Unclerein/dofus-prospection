@@ -20,6 +20,7 @@ class Config:
     min_snapshots_for_trend: int = 5
     min_liquidity: int = 0
     trend_threshold: float = 0.15
+    use_estimated_prices: bool = True
     iface: str | None = None
     avg_prices_timeout_s: float = 60.0
     ankama_path: str = ""
@@ -45,6 +46,7 @@ def _from_raw(raw: dict) -> Config:
         min_snapshots_for_trend=int(market.get("min_snapshots_for_trend", defaults.min_snapshots_for_trend)),
         min_liquidity=int(market.get("min_liquidity", defaults.min_liquidity)),
         trend_threshold=float(market.get("trend_threshold", defaults.trend_threshold)),
+        use_estimated_prices=bool(market.get("use_estimated_prices", defaults.use_estimated_prices)),
         iface=capture.get("iface") or None,
         avg_prices_timeout_s=float(capture.get("avg_prices_timeout_s", defaults.avg_prices_timeout_s)),
         ankama_path=launcher.get("ankama_path", defaults.ankama_path),
@@ -93,6 +95,7 @@ def from_values(values: dict) -> Config:
         min_snapshots_for_trend=_number(values, "min_snapshots_for_trend", "Relevés pour une tendance", 1, 1000, integer=True),
         min_liquidity=_number(values, "min_liquidity", "Liquidité minimale", 0, 10**9, integer=True),
         trend_threshold=_number(values, "trend_threshold", "Seuil de tendance", 0.01, 5),
+        use_estimated_prices=bool(values.get("use_estimated_prices", True)),
         iface=_text(values, "iface", "Interface réseau") or None,
         avg_prices_timeout_s=_number(values, "avg_prices_timeout_s", "Délai d'alerte", 5, 3600),
         ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
@@ -138,6 +141,8 @@ min_snapshots_for_trend = {cfg.min_snapshots_for_trend}
 min_liquidity = {cfg.min_liquidity}
 # Écart à la tendance à partir duquel un objet est signalé sous-coté ou sur-coté (0.15 = 15 %).
 trend_threshold = {repr(cfg.trend_threshold)}
+# Sans annonce HDV ni vente récente, utiliser le prix estimé (jugé fiable) plutôt que le prix moyen.
+use_estimated_prices = {"true" if cfg.use_estimated_prices else "false"}
 
 [capture]
 # Interface réseau à écouter. Vide = interface par défaut.

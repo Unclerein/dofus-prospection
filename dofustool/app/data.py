@@ -32,7 +32,7 @@ class Workspace:
 
 def build_workspace(conn: sqlite3.Connection, cfg: Config, now: float) -> Workspace:
     items = load_items(conn)
-    prices = PriceBook(conn, now, cfg.last_sale_max_age_hours)
+    prices = PriceBook(conn, now, cfg.last_sale_max_age_hours, cfg.use_estimated_prices)
     job_levels, unknown = resolve_jobs(conn, cfg.jobs)
     calculator = CraftCalculator(items, load_recipes(conn), prices, cfg.hdv_tax, job_levels or None, cfg.min_liquidity)
     return Workspace(items, prices, calculator, dict(conn.execute("SELECT id, name FROM jobs")), unknown, now)
