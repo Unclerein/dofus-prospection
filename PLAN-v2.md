@@ -39,63 +39,61 @@ Le prix unitaire du x1000 est trompeur quand on n'a besoin que de 3 unités. La 
 
 ## 3. Overlay pour le combat du Comte Harebourg
 
-### Le combat (sources : guides communautaires, à confirmer en jeu sur Dofus 3)
-- **Salle du boss** : le Comte Harebourg, un Granduk, un Cycloïde et un Nocturlabe, plus des monstres supplémentaires selon la taille du groupe.
-- **Confusion horaire** : en début de tour, chaque personnage reçoit une confusion selon son pourcentage de PV. Ses sorts sont alors déviés : pour toucher une case, il faut viser la case tournée autour de soi.
+### Ce qui existe déjà : harebourg-ux
+[github.com/Drayken/harebourg-ux](https://github.com/Drayken/harebourg-ux), en Python avec la seule bibliothèque standard. Ses phases 1 à 3 tournent en jeu depuis le 27/09/2026.
+- **Fenêtre** : layered GDI, transparente aux clics, qui suit la fenêtre de Dofus et gère le DPI par écran.
+- **Grille** : calée une fois par carte et par taille de fenêtre (origine et largeur de case), avec la projection `écranX = oX + (x − y)·l/2` et `écranY = oY + (x + y)·h/2`.
+- **Confusion** : lue par **OCR du chat de combat**, avec l'OCR intégré de Windows, et corrigeable au clavier.
+- **Positions saisies à la main** : souris 4 marque sa propre case, à refaire après chaque déplacement ; souris 5 marque la cible. La case à viser s'affiche en direct.
+- **Abandonnés** : l'aperçu de la téléportation des tours pairs et impairs, les cartes des lieutenants, la ligne de vue.
+- **Licence** : **aucun fichier de licence**, donc tous droits réservés par défaut. On peut s'en inspirer et reprendre les faits de jeu, mais pas copier le code sans l'accord de l'auteur.
 
-  | PV restants | Déviation | Il faut viser |
-  |---|---|---|
-  | 100 – 91 % | 90° horaire | ¼ de tour anti-horaire |
-  | 90 – 75 % | 90° anti-horaire | ¼ de tour horaire |
-  | 74 – 46 % | 180° | case opposée |
-  | 45 – 31 % | 90° anti-horaire | ¼ de tour horaire |
-  | 30 – 1 % | 90° horaire | ¼ de tour anti-horaire |
+### Règles du combat, corrigées par leurs tests en jeu
+- **La confusion est fixée en début de tour.** Les PV qui bougent pendant le tour ne la changent pas. Le chat fait foi ; le tableau des PV n'est qu'indicatif :
 
-  Aux valeurs limites, les deux confusions voisines sont possibles. Il vaut donc mieux **lire l'état réel dans les paquets** que le déduire des PV.
-- **Corps à corps** : chaque ligne de dégâts infligée au contact ajoute 90° à la confusion, dans la limite de 10 ajouts par monstre et par tour. Un sort sans dégâts n'ajoute rien.
-- **Invulnérabilité** : le Comte est invulnérable. On ne peut lever cette protection qu'aux **tours pairs**, en le frappant de façon à ce qu'il soit téléporté sur une case occupée par un allié.
-- **Téléportation symétrique** : aux tours impairs, frapper le Comte téléporte l'attaquant à l'opposé de lui (symétrie de centre le Comte). Aux tours pairs, c'est le Comte qui est téléporté à l'opposé de l'attaquant.
-- **Air du Temps** : si le Comte est téléporté sur un obstacle ou une case noire, toute l'équipe meurt. C'est l'erreur la plus fréquente.
-- **Mi-temps / Carillon** : en début de tour, un glyphe en croix de taille 3 se pose autour du Comte, centre compris, pour 1 tour. Un allié qui commence son tour dessus meurt.
-- **Monstres** : le Cycloïde attire et retire des PM, le Granduk frappe en ligne et vole de l'intelligence, le Nocturlabe rend la cible insoignable. L'ordre conseillé est Cycloïde, Nocturlabe, puis Granduk.
+  | PV en début de tour | Confusion |
+  |---|---|
+  | 100 – 90 % | 90° horaire |
+  | 89 – 75 % | 90° anti-horaire |
+  | 74 – 45 % | 180° |
+  | 44 – 30 % | 90° anti-horaire |
+  | 29 – 0 % | 90° horaire |
 
-### Faisabilité : oui, en lecture seule
-Tout ce qu'il faut est envoyé au client : carte, positions, PV, tour, états, glyphes. L'outil peut donc calculer et **afficher** où viser et quelles cases sont mortelles, sans rien envoyer ni cliquer. C'est ce que fait déjà manuellement le simulateur [comteharebourg.com](https://www.comteharebourg.com/simulator), mais ici sans saisie, puisque les positions viennent du flux.
+- **Comtoise** : en début de tour, chaque personnage lance « Comtoise » sur lui-même. La ligne de confusion qui l'accompagne donne l'angle absolu du tour.
+- **Corps à corps** : chaque ligne de dégâts au contact ajoute **+90° horaire**, en boucle : 90° horaire → 180° → 90° anti-horaire → **0°** → 90° horaire. Pour un sort à deux lignes, la ligne 1 part avec l'ancien angle et la ligne 2 avec le nouveau. Dans le chat, cet ajout s'affiche toujours comme « horaire : 1 Pi/2 », parce qu'il est relatif. Au-delà de 10 coups reçus, un monstre ne fait plus tourner.
+- **Les invocations ne sont jamais confuses.**
+- **Échec critique** : un sort projeté hors de la carte ou sur une case non marchable échoue en critique. Au corps à corps, l'échec critique termine le tour.
+- **Calcul**, en coordonnées de grille carrée (la carte iso tournée de 45°) :
+  - `atterrissage = rotation(curseur − moi) + moi`
+  - `à viser = rotation⁻¹(cible − moi) + moi`
+- **Symétries** : aux tours impairs, l'attaquant est envoyé à 180° autour du Comte ; aux tours pairs, c'est le Comte qui est envoyé à 180° autour de l'attaquant. Une destination impossible tue toute l'équipe.
+- **Carte de la salle** : grille carrée de 22 × 22 avec les cases vides, marchables et murs. Le mode Édition de comteharebourg.com l'exporte en JSON (`size` et `details`). **La question de la carte est donc réglée.**
 
-### Étapes
-1. **Identifier les messages de combat** avec `tools/identify.py`. Les messages génériques peuvent s'identifier dans n'importe quel combat, sans aller chez le Comte :
-   - début de combat et identifiant de la carte ;
-   - liste des combattants (id, équipe, case, PV, PV max) ;
-   - début de tour (combattant, numéro du tour) ;
-   - déplacements, téléportations, poussées ;
-   - variations de PV ;
-   - pose et retrait d'états ou de buffs ;
-   - glyphes posés ;
-   - fin de combat.
+### Ce que la capture réseau apporte en plus
+harebourg-ux s'interdit de lire les paquets. C'est justement notre force, et ce sont ses points faibles :
+1. **Positions automatiques** de tous les combattants, mises à jour à chaque déplacement, poussée ou téléportation. Plus de souris 4 à refaire après chaque déplacement.
+2. **Confusion lue dans le flux**, sur l'état posé par Comtoise ou la valeur numérique du buff, au lieu de l'OCR. On n'a plus à régler la zone de chat ni à subir ses erreurs de lecture. Les coups au corps à corps se comptent sur les dégâts réels, limite de 10 comprise.
+3. **Numéro du tour, donc sa parité**, plus la position du Comte : on peut prévisualiser la symétrie et marquer les coups qui déclencheraient **Air du Temps**, ce qu'ils ont abandonné. Même chose pour la croix **Mi-temps** : les cases où il ne faut pas finir son tour.
+4. **La cible** peut se choisir sur la mini-carte (clic sur un monstre), sans calage de la grille.
 
-   Les états propres au Comte (confusion, invulnérabilité), les identifiants de ses sorts et Mi-temps demandent **au moins une capture du vrai combat**. Il faudra aussi des fixtures `.bin` et des tests, comme pour les autres messages. On vérifiera au passage ce que SniffSniffSquared et dofus3-sniffer-tui décodent déjà.
-2. **La carte de la salle** : les numéros de case, ainsi que les cases noires et les obstacles. La source est à trouver : données de carte du client, DofusDB, ou à défaut un relevé fait une fois à la main dans une page de calibration. La salle ne change pas, donc on n'a besoin de cette carte qu'une seule fois.
-3. **Moteur de règles** (`fight/harebourg.py`, en Python pur et entièrement testé) :
-   - conversion entre numéro de case et coordonnées sur la grille isométrique ;
-   - rotation inverse : pour une case visée, la case à cliquer selon la confusion courante et les ajouts au corps à corps ;
-   - symétries des tours pairs et impairs ;
-   - pour chaque case d'où l'on peut frapper le Comte, un verdict :
-     - ✅ lève l'invulnérabilité,
-     - ⚠️ atterrit dans Mi-temps,
-     - ☠️ Air du Temps.
+### Étapes révisées
+1. **Identifier les messages de combat** avec `tools/identify.py` :
+   - messages génériques, dans n'importe quel combat : début de combat et carte, combattants, début de tour, déplacements et téléportations, PV, états et buffs, glyphes, sort lancé ;
+   - messages spécifiques, avec au moins une capture du vrai combat : Comtoise, état de confusion, compteur de corps à corps, invulnérabilité.
+2. **Conversion entre numéro de case Dofus et coordonnées de grille carrée.** On y cale la carte de la salle, ressaisie depuis le simulateur ou relevée en jeu, sans copier leur fichier.
+3. **Moteur de règles** (`fight/harebourg.py`, testé) : visée et atterrissage, cycle du corps à corps, échec critique, symétries pair et impair, Air du Temps, Mi-temps.
+4. **Mini-carte compagnon** dans l'appli web : positions en direct, confusion de chacun, case à viser pour la cible choisie, coups mortels en rouge.
+5. **Superposition au jeu, au choix** :
+   - **(a)** utiliser harebourg-ux tel quel à côté, la mini-carte ne servant qu'à vérifier ;
+   - **(b)** écrire notre propre overlay en reprenant ses idées : layered GDI, profil de calage par taille de fenêtre, projection iso ;
+   - **(c)** demander à l'auteur une licence, MIT par exemple, puis brancher son overlay sur notre flux via un petit fichier d'état local. C'est contraire à ses principes affichés (« pas de lecture de paquets »), donc ce serait un fork personnel, pas une contribution.
 
-   Les règles seront validées sur le simulateur, puis en jeu.
-4. **Affichage, en deux temps** :
-   - **4a. Mini-carte compagnon** dans l'appli web, sur un second écran ou le téléphone. On y voit la grille, les combattants, le numéro de tour et sa parité, la confusion de chaque personnage, la case à viser pour la cible choisie et les cases mortelles en rouge. C'est simple et robuste, sans fenêtre au-dessus du jeu.
-   - **4b. Vrai overlay** : une fenêtre transparente, toujours au premier plan et qui laisse passer les clics (fenêtre « layered » Windows), dessinée par-dessus la grille du jeu. Il faut caler la grille isométrique sur la fenêtre de Dofus (résolution, zoom de caméra). C'est plus fragile ; à faire seulement une fois la 4a validée.
-
-### Risques et inconnues
-- **Les guides datent souvent de Dofus 2.** Les seuils, les symétries et la limite de 10 ajouts sont à revérifier sur Dofus 3.
-- **Il faut faire le donjon pour capturer** : clé, équipe niveau 200, plusieurs passages. En multicompte sur un seul PC, une capture voit toute l'équipe, ce qui est un avantage.
-- **Le zoom et la caméra de Dofus 3** compliquent l'overlay superposé (4b).
-- **CGU** : la lecture passive est déjà en zone grise. Un overlay purement informatif ne change pas la nature de l'outil. Il reste interdit d'automatiser la moindre action.
+### Risques
+- Les messages de combat sont nombreux, et leurs clés changent à chaque mise à jour, comme les autres. Il faudra les ajouter à `MAINTENANCE.md`.
+- Il faut faire le donjon au moins une fois avec la capture active pour les messages spécifiques.
+- CGU : un overlay purement informatif ne change pas la nature de l'outil, mais aucune action ne doit être automatisée.
 
 ## Ordre proposé
 1. Lot HDV (1), petit chantier.
 2. Badge de quantité (2), petit chantier.
-3. Overlay : identification des messages génériques de combat lors de tes prochains combats, puis la carte, le moteur de règles, la mini-carte 4a et enfin l'overlay 4b.
+3. Overlay : identifier les messages génériques de combat lors de tes prochains combats, puis la conversion des cases, le moteur de règles, la mini-carte, et enfin la superposition (5a, 5b ou 5c).
