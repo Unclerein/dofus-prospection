@@ -163,6 +163,16 @@ td.strong { font-weight: 700; }
 .tile img { width: 34px; height: 34px; object-fit: contain; }
 .tile.big { width: 72px; height: 72px; border-radius: 14px; }
 .tile.big img { width: 60px; height: 60px; }
+.tile { position: relative; }
+/* Quantité possédée en bas à droite de l'icône, comme dans l'inventaire du jeu. */
+.tile .qty {
+  position: absolute; right: 1px; bottom: 0; padding: 0 2px;
+  font-size: 10px; font-weight: 700; line-height: 1.15; color: #FFFFFF; pointer-events: auto;
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+}
+.tile.big .qty { font-size: 13px; right: 4px; bottom: 2px; }
+/* Les puces d'ingrédients affichent déjà « possédé / requis » à côté de l'icône. */
+.ingredient .tile .qty { display: none; }
 .source { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }

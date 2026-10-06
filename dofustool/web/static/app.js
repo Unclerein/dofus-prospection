@@ -55,12 +55,25 @@ async function api(path, options) {
   return response.json();
 }
 
-function tile(iconId, big) {
+/** Quantité au format du jeu : 9 999 en entier, puis 12k, 1,2M. */
+function compactQty(n) {
+  if (n < 10000) return String(n);
+  if (n < 1e6) return `${Math.floor(n / 1000)}k`;
+  return `${(Math.floor(n / 1e5) / 10).toString().replace('.', ',')}M`;
+}
+
+/** Icône d'un objet, avec en bas à droite la quantité possédée (inventaire + banque), comme en jeu. */
+function tile(iconId, big, itemId) {
   const box = h('span', { class: big ? 'tile big' : 'tile' });
   if (iconId) {
     const img = h('img', { src: `/icons/${iconId}.png`, alt: '', loading: 'lazy' });
     img.addEventListener('error', () => img.remove());
     box.append(img);
+  }
+  const owned = itemId !== undefined && S.status && S.status.owned ? S.status.owned[itemId] : null;
+  if (owned && owned[0] + owned[1] > 0) {
+    const total = owned[0] + owned[1];
+    box.append(h('span', { class: 'qty', title: `Possédé : ${fmt(total)} (inventaire ${fmt(owned[0])}, banque ${fmt(owned[1])})` }, compactQty(total)));
   }
   return box;
 }
@@ -73,8 +86,8 @@ function statIcon(asset) {
   return img;
 }
 
-const itemCell = (iconId, name, sub) =>
-  h('div', { class: 'item-cell' }, tile(iconId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
+const itemCell = (iconId, name, sub, itemId) =>
+  h('div', { class: 'item-cell' }, tile(iconId, false, itemId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
 
 function kpi(label, value, hint, cls) {
   return h('div', { class: 'kpi' }, h('div', { class: 'label' }, label), h('div', { class: 'value ' + (cls || '') }, value), hint && h('div', { class: 'hint' }, hint));
@@ -85,10 +98,17 @@ function segmented(label, options, current, onPick) {
     options.map(([value, text]) => h('button', { 'aria-pressed': String(value === current), onclick: () => onPick(value) }, text)));
 }
 
-/** Libellé court de la source d'un prix. */
-function shortSource(source) {
+/** « x100 » quand le prix HDV vient d'un lot de plus d'un objet, sinon rien. */
+const lotLabel = (lot) => (lot > 1 ? `x${lot}` : '');
+
+/** Infobulle du prix d'un lot : le prix unitaire affiché n'est pas ce qu'on paie en une fois. */
+const lotTitle = (lot, unitPrice) =>
+  lot > 1 && unitPrice !== null && unitPrice !== undefined ? `Prix HDV d'un lot de ${lot} : ${fmt(unitPrice * lot)} kamas, ramené à l'unité` : null;
+
+/** Libellé court de la source d'un prix, avec la taille du lot HDV d'où vient le prix unitaire. */
+function shortSource(source, lot) {
   if (!source) return 'inconnu';
-  if (source.startsWith('HDV')) return source.includes('sans exo') ? 'HDV de base' : 'HDV';
+  if (source.startsWith('HDV')) return [source.includes('sans exo') ? 'HDV de base' : 'HDV', lotLabel(lot)].filter(Boolean).join(' ');
   if (source.startsWith('dernier')) return 'dernière vente';
   if (source.startsWith('prix médian')) return 'médiane 24 h';
   return 'prix moyen';
@@ -96,8 +116,8 @@ function shortSource(source) {
 
 /** Un prix observé (HDV, vente) est plus fiable que le prix moyen du jeu. */
 const observed = (source) => !!source && source !== 'prix moyen';
-const sourceLine = (source, ageHours) =>
-  h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(source) ? 'on' : '') }), `${shortSource(source)} · ${ageLabel(ageHours)}`);
+const sourceLine = (source, ageHours, lot, unitPrice) =>
+  h('div', { class: 'source', title: lotTitle(lot, unitPrice) }, h('span', { class: 'dot ' + (observed(source) ? 'on' : '') }), `${shortSource(source, lot)} · ${ageLabel(ageHours)}`);
 function ageLabel(hours) {
   if (hours === null || hours === undefined) return '';
   if (hours < 1.5) return `${Math.max(1, Math.round(hours * 60))} min`;
@@ -275,7 +295,7 @@ async function pageIgnored() {
     h('div', { class: 'scroll' }, h('table', { style: 'min-width: 520px' },
       h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Ignoré'), h('th', {}, ''))),
       h('tbody', {}, data.rows.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-        h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '))),
+        h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '), row.item_id)),
         h('td', { class: 'muted' }, ago(row.added_at, data.now)),
         h('td', {}, h('button', { class: 'btn', onclick: (event) => { event.stopPropagation(); setIgnored(row.item_id, row.name, false); } }, 'Rétablir'))))))))];
 }
@@ -325,9 +345,9 @@ async function pageCrafts() {
   const body = rows.slice(0, ui.limit).map((r) => {
     const tags = (r['Remarques'] || '').split(', ').filter(Boolean);
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
-      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'])),
+      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], null, r.item_id)),
       h('td', { class: 'l soft' }, r['Métier'], h('span', { class: 'muted' }, ` · ${r['Niveau']}`)),
-      h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'])),
+      h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente'])),
       h('td', { class: 'soft' }, fmt(r['Coût'])),
       h('td', { class: 'strong ' + (r['Marge'] === null ? 'muted' : r['Marge'] >= 0 ? 'gain' : 'warn') }, signed(r['Marge'])),
       h('td', { class: 'soft' }, r['Marge %'] === null ? '—' : `${fmt(r['Marge %'])} %`),
@@ -386,16 +406,16 @@ async function pageStock(r) {
 
 /** Infobulle d'un ingrédient : prix moyen du jeu, prix à l'HDV, et ce qu'il en faut. */
 function ingredientTooltip(i, data) {
-  const [avg, hdv] = data.prices[i.id] || [null, null];
+  const [avg, hdv, , lot] = data.prices[i.id] || [null, null, null, null];
   const unit = (v) => (v === null ? '—' : v < 100 && !Number.isInteger(v) ? v.toFixed(2).replace('.', ',') : fmt(v));
   const pct = avg && hdv !== null ? (hdv - avg) / avg * 100 : null;
   const missing = Math.max(0, i.need - i.have);
   const price = hdv !== null ? hdv : avg;
   return [
-    h('div', { class: 'tip-head' }, tile(i.icon), h('div', {}, h('div', { class: 'tip-name' }, i.name), h('div', { class: 'muted small' }, `${fmt(i.have)} / ${fmt(i.need)}`))),
+    h('div', { class: 'tip-head' }, tile(i.icon, false, i.id), h('div', {}, h('div', { class: 'tip-name' }, i.name), h('div', { class: 'muted small' }, `${fmt(i.have)} / ${fmt(i.need)}`))),
     h('div', { class: 'tip-lines' },
       h('div', { class: 'tip-price' }, h('span', { class: 'muted' }, 'Prix moyen'), h('b', {}, unit(avg))),
-      h('div', { class: 'tip-price' }, h('span', { class: 'muted' }, 'Prix HDV'), h('b', {}, unit(hdv)),
+      h('div', { class: 'tip-price' }, h('span', { class: 'muted', title: lotTitle(lot, hdv) }, lot > 1 ? `Prix HDV (lot ${lotLabel(lot)})` : 'Prix HDV'), h('b', {}, unit(hdv)),
         pct !== null && Math.abs(pct) >= 0.5 && h('span', { class: 'small ' + (pct < 0 ? 'gain' : 'warn') }, `${pct < 0 ? '−' : '+'}${fmt(Math.abs(pct))} %`))),
     missing > 0 && h('div', { class: 'tip-foot' }, h('span', { class: 'muted' }, `Manque ${fmt(missing)}`), h('b', {}, price === null ? '—' : `≈ ${fmt(missing * price)}`)),
   ];
@@ -429,16 +449,16 @@ function stockCrafts(data) {
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.own, disabled: !data.has_jobs, onchange: (e) => set({ own: e.target.checked }) }), 'Mes métiers seulement'));
 
   const body = rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-    h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`)),
+    h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`, row.item_id)),
     h('td', {}, row.sell === null ? h('span', { class: 'muted' }, '—')
-      : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source))]),
+      : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source, row.lot))]),
     h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
     h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
       h('a', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), href: `#/item/${i.id}`,
         'aria-label': `${i.name}, ${fmt(i.have)} en stock pour ${fmt(i.need)} par craft, ouvrir la fiche`,
         onclick: (event) => event.stopPropagation(), // ne pas ouvrir la fiche de la recette
         onmouseenter: (event) => showTip(event, ingredientTooltip(i, data)), onmousemove: placeTip, onmouseleave: () => { $tip.hidden = true; } },
-        tile(i.icon), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
+        tile(i.icon, false, i.id), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
     h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
     h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
     h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—'),
@@ -498,11 +518,11 @@ function stockItems(data) {
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
           h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-            h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '))),
+            h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '), row.item_id)),
             h('td', { class: row.inventory ? 'soft' : 'muted' }, row.inventory ? fmt(row.inventory) : '—'),
             h('td', { class: row.bank ? 'soft' : 'muted' }, row.bank ? fmt(row.bank) : '—'),
             h('td', { style: 'font-weight: 600' }, fmt(row.total)),
-            h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), row.source)]),
+            h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), [row.source, lotLabel(row.lot)].filter(Boolean).join(' · '))]),
             h('td', { class: 'strong ' + (row.value === null ? 'muted' : '') }, fmt(row.value)),
             h('td', { class: row.recipes ? 'soft' : 'muted' }, row.recipes || '—')))))),
       h('div', { class: 'panel-foot' }, h('span', {}, 'Objets portés exclus.'),
@@ -576,7 +596,7 @@ async function pageJobs() {
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Crafts'), h('th', {}, 'XP'), h('th', {}, saved.resale ? 'Coût net / craft' : 'Coût / craft'), h('th', {}, 'Coût'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
         h('tbody', {}, plan.steps.map((step) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${step.item_id}`; } },
           h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
-          h('td', { class: 'l' }, itemCell(step.icon, step.name, `niv. ${step.level} · ${step.ingredients} ingr.` + (step.ratio_pct !== 100 ? ` · XP ×${step.ratio_pct / 100}` : ''))),
+          h('td', { class: 'l' }, itemCell(step.icon, step.name, `niv. ${step.level} · ${step.ingredients} ingr.` + (step.ratio_pct !== 100 ? ` · XP ×${step.ratio_pct / 100}` : ''), step.item_id)),
           h('td', { style: 'font-weight: 600' }, `× ${fmt(step.crafts)}`),
           h('td', { class: 'soft' }, fmt(step.xp)),
           h('td', { class: 'soft' }, fmt(step.unit_cost)),
@@ -591,11 +611,11 @@ async function pageJobs() {
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
         h('tbody', {}, plan.shopping.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(row.icon, row.name)),
+          h('td', { class: 'l' }, itemCell(row.icon, row.name, null, row.item_id)),
           h('td', { class: 'soft' }, fmt(row.quantity)),
           h('td', {}, !plan.stock_known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row.quantity)),
           h('td', { style: 'font-weight: 600' }, row.to_buy ? fmt(row.to_buy) : h('span', { class: 'gain' }, '0')),
-          h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source))]),
+          h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source, row.lot))]),
           h('td', { class: 'strong' }, fmt(row.cost))))))));
 
   return [head, controls, excluded, blocked, kpis, steps, shopping];
@@ -649,7 +669,7 @@ async function forgeItem(id, options) {
   const picker = itemPicker(options.map((o) => [o.id, o.name, o.level, o.icon, `${o.type ? o.type + ' · ' : ''}${o.count} annonce${o.count > 1 ? 's' : ''}`]),
     { id: 'forge-search', placeholder: 'Chercher un équipement…', href: (itemId) => `#/forge/item/${itemId}`, browse: true });
   const header = h('section', { class: 'panel item-head', 'aria-label': 'Objet' },
-    tile(d.icon, true),
+    tile(d.icon, true, d.id),
     h('div', { class: 'info' }, h('div', { class: 'title' }, d.name),
       h('div', { class: 'muted' }, `${(options.find((o) => o.id === id) || {}).type || 'Équipement'} · niveau ${d.level}` + (d.template_known ? ` · ${d.listings.length} annonces relevées ${ago(d.captured_at, d.now)}` : ''))),
     picker,
@@ -783,7 +803,7 @@ function itemTooltip(l, d) {
   exos.sort(byRank);
   const all = [...fixed, ...exos.map((entry) => entry[1]), ...lines.map((entry) => entry[1])];
   return [
-    h('div', { class: 'tip-head' }, tile(d.icon), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niv. ${d.level}${l.quality !== null ? ` · jets ${l.quality} %` : ''}`)), typeTag(l)),
+    h('div', { class: 'tip-head' }, tile(d.icon, false, d.id), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niv. ${d.level}${l.quality !== null ? ` · jets ${l.quality} %` : ''}`)), typeTag(l)),
     h('div', { class: 'tip-lines' }, all.length ? all : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
     h('div', { class: 'tip-foot' }, h('span', { class: 'muted' }, 'Prix'), h('b', {}, fmt(l.price))),
   ];
@@ -880,7 +900,7 @@ async function forgeRanking() {
     const value = r[key];
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/forge/item/${r.item_id}`; } },
       h('td', { class: 'muted' }, index + 1),
-      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''))),
+      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
       h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Moins cher selon critère'])),
         h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`)),
@@ -927,7 +947,7 @@ async function pageTrends() {
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'), h('th', {}, ''))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '))),
+          h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '), r.item_id)),
           h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
           h('td', {}, h('div', { class: 'soft' }, fmt(reference(r)[0])), h('div', { class: 'muted small' }, reference(r)[1])),
           h('td', { class: 'soft' }, `${positive ? '+' : '−'}${price(kamasGap(r))}`),
@@ -1044,7 +1064,7 @@ function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un obje
     const found = [];
     for (const it of items) { if (norm(it[1]).includes(q) || (it[4] && norm(it[4]).includes(q))) { found.push(it); if (found.length >= (browse ? 60 : 12)) break; } }
     list.replaceChildren(...found.map((it) => h('li', {}, h('button', { onmousedown: (e) => e.preventDefault(), onclick: () => { list.hidden = true; input.value = ''; location.hash = href(it[0]); } },
-      tile(it[3]), h('span', {}, it[1], h('span', { class: 'muted' }, ` · niv. ${it[2]}${it[4] ? ' · ' + it[4] : ''}`))))));
+      tile(it[3], false, it[0]), h('span', {}, it[1], h('span', { class: 'muted' }, ` · niv. ${it[2]}${it[4] ? ' · ' + it[4] : ''}`))))));
     list.hidden = found.length === 0;
   };
   input.addEventListener('input', show);
@@ -1066,7 +1086,7 @@ async function pageItem(r) {
   const d = await cached(`item-${id}`, `/api/item/${id}`);
   const now = d.now;
 
-  const header = h('section', { class: 'panel item-head' }, tile(d.icon, true),
+  const header = h('section', { class: 'panel item-head' }, tile(d.icon, true, d.id),
     h('div', { class: 'info' }, h('div', { class: 'title' }, d.name), h('div', { class: 'muted' }, `${d.type || 'Objet'} · niveau ${d.level} · ${d.exchangeable ? 'échangeable' : 'non échangeable'}`),
       d.owned.known && h('div', { class: 'tags', style: 'margin-top: 4px' },
         d.owned.inventory + d.owned.bank > 0
@@ -1078,7 +1098,7 @@ async function pageItem(r) {
   const ignoredNote = d.ignored ? h('div', { class: 'note' }, 'Cet objet est ignoré : il n\'apparaît plus dans Crafts, Tendances et les recettes de Mon stock.')
     : d.type_ignored ? h('div', { class: 'note' }, `Le type « ${d.type} » est ignoré : cet objet n'apparaît plus dans Crafts, Tendances et les recettes de Mon stock. `, h('a', { href: '#/ignored', style: 'text-decoration: underline' }, 'Gérer les types ignorés')) : null;
   const kpis = h('section', { class: 'kpis' },
-    kpi('Prix de référence', fmt(d.ref && d.ref.price), d.ref ? h('span', { class: 'source' }, h('span', { class: 'dot ' + (observed(d.ref.source) ? 'on' : '') }), `${shortSource(d.ref.source)} · ${ago(d.ref.ts, now)}`) : 'Aucun prix connu'),
+    kpi('Prix de référence', fmt(d.ref && d.ref.price), d.ref ? h('span', { class: 'source', title: lotTitle(d.ref.lot, d.ref.price) }, h('span', { class: 'dot ' + (observed(d.ref.source) ? 'on' : '') }), `${shortSource(d.ref.source, d.ref.lot)} · ${ago(d.ref.ts, now)}`) : 'Aucun prix connu'),
     kpi('Coût le plus bas', fmt(d.unit_cost.cost), d.unit_cost.mode || 'prix manquant'),
     kpi('Vendus sur 24 h', fmt(d.qty_24h), d.market_seen_at ? ago(d.market_seen_at, now) : 'cours non consulté'),
     kpi('Vendus sur 7 j', fmt(d.qty_7d)));
@@ -1090,7 +1110,7 @@ async function pageItem(r) {
     const cheaper = diff < 0, flat = Math.abs(pct) < 0.5;
     const unit = (v) => (Number.isInteger(v) ? fmt(v) : v.toFixed(2).replace('.', ','));
     gap = h('section', { class: 'panel gap ' + (flat ? '' : cheaper ? 'under' : 'above'), 'aria-label': 'HDV contre prix moyen' },
-      h('div', { class: 'gap-side' }, h('div', { class: 'label' }, "Prix à l'HDV"), h('div', { class: 'value' }, unit(d.hdv_unit)), h('div', { class: 'hint' }, ago(d.hdv.captured_at, now))),
+      h('div', { class: 'gap-side' }, h('div', { class: 'label' }, "Prix à l'HDV"), h('div', { class: 'value', title: lotTitle(d.hdv_lot, d.hdv_unit) }, unit(d.hdv_unit)), h('div', { class: 'hint' }, [d.hdv_lot > 1 && `lot ${lotLabel(d.hdv_lot)}`, ago(d.hdv.captured_at, now)].filter(Boolean).join(' · '))),
       h('div', { class: 'gap-mid' },
         h('div', { class: 'gap-pct' }, flat ? '=' : `${cheaper ? '−' : '+'}${fmt(Math.abs(pct))} %`),
         h('div', { class: 'gap-text' }, flat ? 'égal' : `${cheaper ? '−' : '+'}${unit(Math.abs(diff))}`)),
@@ -1134,7 +1154,7 @@ async function pageItem(r) {
       h('div', { class: 'scroll' }, h('table', { style: 'min-width: 720px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Quantité'), h('th', {}, 'En stock'), h('th', {}, 'Prix unitaire'), h('th', { class: 'l' }, 'Obtenu par'), h('th', {}, 'Sous-total'))),
         h('tbody', {}, c.ingredients.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(row.icon, row['Ingrédient'], row['Source'] ? `${row['Source']} · ${ageLabel(row['Âge (h)'])}` : null)),
+          h('td', { class: 'l' }, itemCell(row.icon, row['Ingrédient'], row['Source'] ? [row['Source'], lotLabel(row['Lot']), ageLabel(row['Âge (h)'])].filter(Boolean).join(' · ') : null, row.item_id)),
           h('td', { class: 'soft' }, fmt(row['Quantité'])),
           h('td', {}, !d.owned.known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row['Quantité'])),
           h('td', {}, fmt(row['Coût retenu'])),
@@ -1151,7 +1171,7 @@ async function pageItem(r) {
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, 'Métier'), h('th', {}, 'Quantité utilisée'), h('th', {}, 'Prix de vente'), h('th', {}, 'Marge'))),
         h('tbody', {}, d.used_in.slice(0, 80).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(row.icon, row['Objet'])), h('td', { class: 'l soft' }, row['Métier'], h('span', { class: 'muted' }, ` · ${row['Niveau']}`)),
+          h('td', { class: 'l' }, itemCell(row.icon, row['Objet'], null, row.item_id)), h('td', { class: 'l soft' }, row['Métier'], h('span', { class: 'muted' }, ` · ${row['Niveau']}`)),
           h('td', { class: 'soft' }, fmt(row['Quantité utilisée'])), h('td', {}, fmt(row['Prix de vente'])),
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
 

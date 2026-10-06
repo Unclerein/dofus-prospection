@@ -173,6 +173,8 @@ class Api:
                     "trend_threshold": cfg.trend_threshold,
                     "min_snapshots_for_trend": cfg.min_snapshots_for_trend,
                     "min_liquidity": cfg.min_liquidity,
+                    # Quantités possédées, pour le badge des icônes : {item_id: [inventaire, banque]}.
+                    "owned": {item_id: [o.inventory, o.bank] for item_id, o in state["stock"].items().items()},
                 }
             )
         finally:
@@ -268,10 +270,11 @@ class Api:
             for row in used_in:
                 row["icon"] = state["icons"].get(row["item_id"])
             hdv = detail["hdv"]
-            hdv_unit = None
+            hdv_unit = hdv_lot = None
             if hdv is not None:
                 if hdv["kind"] == "lots" and not hdv["frame"].empty:
-                    hdv_unit = float(hdv["frame"]["Prix unitaire"].min())
+                    best = hdv["frame"].loc[hdv["frame"]["Prix unitaire"].idxmin()]  # à égalité, le plus petit lot
+                    hdv_unit, hdv_lot = float(best["Prix unitaire"]), int(best["Lot"].lstrip("x"))
                 hdv = {**hdv, "frame": records(hdv["frame"])}
             avg = conn.execute(
                 "SELECT p.price, s.ts FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
@@ -294,10 +297,11 @@ class Api:
                         "known": state["stock"].known,
                     },
                     "hdv_unit": hdv_unit,
+                    "hdv_lot": hdv_lot,
                     "exchangeable": item.exchangeable,
                     "equipment": ws.prices.is_equipment(item_id),
                     "icon": state["icons"].get(item_id),
-                    "ref": {"price": ref.price, "source": ref.source, "ts": ref.ts} if ref else None,
+                    "ref": {"price": ref.price, "source": ref.source, "ts": ref.ts, "lot": ref.lot} if ref else None,
                     "unit_cost": {"cost": cost.cost, "mode": cost.mode},
                     "qty_24h": liquidity.qty_24h,
                     "qty_7d": liquidity.qty_7d,
@@ -432,6 +436,7 @@ class Api:
                         "unit_cost": step.cost / step.crafts,
                         "sell": result.sell.price if result.sell else None,
                         "source": result.sell.source if result.sell else None,
+                        "lot": result.sell.lot if result.sell else None,
                         "ratio_pct": ratios.get(step.item_id, 100),
                         "ingredients": len(recipe.ingredients),
                     }
@@ -451,6 +456,7 @@ class Api:
                         "to_buy": max(0, quantity - have),
                         "price": ref.price if ref else None,
                         "source": ref.source if ref else None,
+                        "lot": ref.lot if ref else None,
                         "cost": ref.price * max(0, quantity - have) if ref else None,
                     }
                 )
@@ -567,6 +573,7 @@ class Api:
                         "total": owned.total,
                         "price": ref.price if ref else None,
                         "source": ref.source if ref else None,
+                        "lot": ref.lot if ref else None,
                         "value": ref.price * owned.total if ref else None,
                         "recipes": state["recipe_uses"].get(item_id, 0),
                     }
@@ -598,6 +605,7 @@ class Api:
                         "own_job": r.own_job,
                         "sell": r.sell.price if r.sell else None,
                         "source": r.sell.source if r.sell else None,
+                        "lot": r.sell.lot if r.sell else None,
                         "margin": r.recursive_margin,
                         "craftable": c.craftable,
                         "total_margin": c.total_margin,
@@ -618,7 +626,7 @@ class Api:
                     }
                 )
             stock = state["stock"]
-            # Prix de chaque ingrédient, une seule fois : [prix moyen du jeu, prix HDV, date du relevé HDV].
+            # Prix de chaque ingrédient, une seule fois : [prix moyen du jeu, prix HDV, date du relevé HDV, lot HDV].
             prices = {}
             for row in rows:
                 for ingredient in row["ingredients"]:
@@ -628,6 +636,7 @@ class Api:
                             ws.prices.avg_price(ingredient["id"]),
                             hdv[0] if hdv else None,
                             hdv[2] if hdv else None,
+                            hdv[3] if hdv else None,
                         ]
             return clean(
                 {

@@ -55,6 +55,7 @@ def _craft_row(r: CraftResult, now: float) -> dict:
         "Vendus 7 j": r.liquidity.qty_7d,
         "Vendus 24 h": r.liquidity.qty_24h,
         "Source du prix": r.sell.source if r.sell else None,
+        "Lot du prix": r.sell.lot if r.sell else None,
         "Âge du prix (h)": round(r.sell.age_hours(now), 1) if r.sell else None,
         "Mon métier": r.own_job,
         "Remarques": ", ".join(notes),
@@ -141,8 +142,8 @@ def _local_dates(seconds: pd.Series) -> pd.Series:
     return pd.to_datetime(seconds, unit="s", utc=True).dt.tz_convert(local).dt.tz_localize(None)
 
 
-def _ref_row(ref: PriceRef | None, now: float) -> tuple[int | None, str | None, float | None]:
-    return (ref.price, ref.source, round(ref.age_hours(now), 1)) if ref else (None, None, None)
+def _ref_row(ref: PriceRef | None, now: float) -> tuple[int | None, str | None, float | None, int | None]:
+    return (ref.price, ref.source, round(ref.age_hours(now), 1), ref.lot) if ref else (None, None, None, None)
 
 
 def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
@@ -195,7 +196,7 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
         rows = []
         for ingredient_id, quantity in recipe.ingredients:
             ingredient = ws.items.get(ingredient_id)
-            price, source, age = _ref_row(ws.prices.get(ingredient_id), ws.now)
+            price, source, age, lot = _ref_row(ws.prices.get(ingredient_id), ws.now)
             unit = ws.calculator.unit_cost(ingredient_id)
             rows.append(
                 {
@@ -204,6 +205,7 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
                     "Quantité": quantity,
                     "Prix unitaire": price,
                     "Source": source,
+                    "Lot": lot,
                     "Âge (h)": age,
                     "Coût retenu": unit.cost,
                     "Mode": unit.mode if unit.mode else "prix manquant",

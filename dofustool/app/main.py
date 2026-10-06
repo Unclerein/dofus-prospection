@@ -215,7 +215,8 @@ def page_item(state: dict) -> None:
     st.caption(f"{detail['type']} · niveau {item.level} · " + ("échangeable" if item.exchangeable else "non échangeable"))
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Prix de référence", kamas(ref.price if ref else None))
-    c1.caption(f"{ref.source}, {ago(ref.ts, ws.now)}" if ref else "Aucun prix connu.")
+    lot = f" (lot x{ref.lot})" if ref and ref.lot and ref.lot > 1 else ""
+    c1.caption(f"{ref.source}{lot}, {ago(ref.ts, ws.now)}" if ref else "Aucun prix connu.")
     cost = detail["unit_cost"]
     c2.metric("Coût le plus bas", kamas(cost.cost))
     c2.caption(f"par {cost.mode}" if cost.mode else "Prix manquant.")

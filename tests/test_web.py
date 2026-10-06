@@ -69,7 +69,9 @@ def test_item_detail(api):
     conn.execute("INSERT INTO hdv_listings VALUES (3, 1, 300, 2500, 0, 0, '[]', 9e9, 9e9)")
     conn.commit()
     conn.close()
-    assert api.item(3)["hdv_unit"] == 250  # le lot de 10 revient à 250 l'unité, sous le prix moyen de 400
+    pain = api.item(3)
+    assert (pain["hdv_unit"], pain["hdv_lot"]) == (250, 10)  # le lot de 10 revient à 250 l'unité, sous le prix moyen de 400
+    assert (pain["ref"]["price"], pain["ref"]["lot"]) == (250, 10)
     assert pain["craft"]["ingredients"][0]["Mode"] in ("achat", "craft")
     ble = api.item(1)
     assert ble["craft"] is None and len(ble["used_in"]) == 5
@@ -146,6 +148,8 @@ def test_stock_endpoints(api):
     assert (ble["inventory"], ble["bank"], ble["total"], ble["recipes"]) == (9, 100, 109, 5)
     assert ble["value"] == ble["price"] * 109 and ble["category"] == "Ressources"
     assert not any(r["item_id"] == 500 for r in stock["rows"])  # l'anneau porté n'est pas compté
+    owned = json.loads(json.dumps(api.status()))["owned"]  # badge des icônes : {item_id: [inventaire, banque]}
+    assert owned["1"] == [9, 100] and owned["4"] == [0, 1] and "500" not in owned
     assert stock["meta"]["inventory"]["kamas"] == 1500 and stock["meta"]["bank"]["kamas"] == 900
 
     crafts = api.stock_crafts()
@@ -154,13 +158,13 @@ def test_stock_endpoints(api):
     assert pain["craftable"] == 1 and (pain["covered"], pain["lines"]) == (2, 2)
     assert [(i["name"], i["have"], i["need"]) for i in pain["ingredients"]] == [("Farine", 7, 3), ("Eau", 1, 1)]
     farine_id = pain["ingredients"][0]["id"]
-    avg, hdv, hdv_ts = crafts["prices"][str(farine_id)]
-    assert avg is not None and hdv is None and hdv_ts is None  # prix moyen connu, fiche HDV jamais ouverte
+    avg, hdv, hdv_ts, hdv_lot = crafts["prices"][str(farine_id)]
+    assert avg is not None and hdv is None and hdv_ts is None and hdv_lot is None  # prix moyen connu, fiche HDV jamais ouverte
     conn = api.connect()
     conn.execute("INSERT INTO hdv_listings VALUES (?, 1, 60, 500, 0, 0, '[]', 9e9, 9e9)", (farine_id,))
     conn.commit()
     conn.close()
-    assert api.stock_crafts()["prices"][str(farine_id)][1:] == [50, 9e9]  # meilleur prix unitaire : le lot de 10
+    assert api.stock_crafts()["prices"][str(farine_id)][1:] == [50, 9e9, 10]  # meilleur prix unitaire : le lot de 10
     farine = next(r for r in crafts["rows"] if r["name"] == "Farine")
     assert farine["craftable"] == 54 and farine["total_margin"] == pytest.approx(54 * farine["margin"])
 

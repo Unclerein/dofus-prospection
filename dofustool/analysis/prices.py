@@ -21,6 +21,7 @@ class PriceRef:
     price: float  # prix unitaire
     source: str
     ts: float
+    lot: int | None = None  # taille du lot HDV d'où vient le prix unitaire (1, 10, 100, 1000)
 
     def age_hours(self, now: float) -> float:
         return max(0.0, now - self.ts) / 3600
@@ -47,9 +48,12 @@ def weighted_median(points: list[tuple[float, int]]) -> float | None:
     return None
 
 
-def unit_price(prices: tuple[int, ...]) -> float | None:
-    """Meilleur prix unitaire parmi les lots x1, x10, x100, x1000 (0 = pas de lot de cette taille)."""
-    candidates = [price / size for price, size in zip(prices, LOT_SIZES) if price > 0]
+def unit_price(prices: tuple[int, ...]) -> tuple[float, int] | None:
+    """(meilleur prix unitaire, taille du lot) parmi les lots x1, x10, x100, x1000 (0 = pas de lot de cette taille).
+
+    À prix unitaire égal, le plus petit lot l'emporte : c'est le plus facile à acheter.
+    """
+    candidates = [(price / size, size) for price, size in zip(prices, LOT_SIZES) if price > 0]
     return min(candidates) if candidates else None
 
 
@@ -113,14 +117,15 @@ class PriceBook:
         for item_id, effect_id, low, high in conn.execute("SELECT * FROM item_effects"):
             if effect_id not in non_stats:
                 templates.setdefault(item_id, {})[effect_id] = (low, high)
-        self._hdv: dict[int, tuple[float, str, float]] = {}
+        self._hdv: dict[int, tuple[float, str, float, int]] = {}
         for item_id, p1, p10, p100, p1000, effects, captured_at in conn.execute(
             "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_current WHERE captured_at >= ?",
             (oldest,),
         ):
-            price = unit_price((p1, p10, p100, p1000))
-            if price is None:
+            best = unit_price((p1, p10, p100, p1000))
+            if best is None:
                 continue
+            price, lot = best
             if item_id in self._equipment:
                 template = templates.get(item_id)
                 listed = [tuple(e) for e in json.loads(effects) if e[0] not in non_stats]
@@ -130,7 +135,7 @@ class PriceBook:
             else:
                 source = HDV
             if item_id not in self._hdv or price < self._hdv[item_id][0]:
-                self._hdv[item_id] = (price, source, captured_at)
+                self._hdv[item_id] = (price, source, captured_at, lot)
 
     def is_equipment(self, item_id: int) -> bool:
         return item_id in self._equipment
@@ -159,8 +164,8 @@ class PriceBook:
         hdv = self._hdv.get(item_id)
         return (hdv[0], hdv[2]) if hdv is not None and hdv[1] == HDV else None
 
-    def hdv_price(self, item_id: int) -> tuple[float, str, float] | None:
-        """(prix unitaire, nature, date du relevé) de l'annonce HDV retenue pour l'item, quel que soit son type."""
+    def hdv_price(self, item_id: int) -> tuple[float, str, float, int] | None:
+        """(prix unitaire, nature, date du relevé, taille du lot) de l'annonce HDV retenue pour l'item, quel que soit son type."""
         return self._hdv.get(item_id)
 
     def avg_price(self, item_id: int) -> int | None:

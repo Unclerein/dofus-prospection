@@ -132,8 +132,9 @@ def test_dofusdb_effects_parsing():
 # --- prix de référence ------------------------------------------------------
 
 def test_unit_price_and_weighted_median():
-    assert unit_price((4, 80, 937, 9443)) == 4
-    assert unit_price((0, 80, 700, 0)) == 7
+    assert unit_price((4, 80, 937, 9443)) == (4, 1)
+    assert unit_price((0, 80, 700, 0)) == (7, 100)
+    assert unit_price((10, 100, 0, 0)) == (10, 1)  # à prix unitaire égal, le plus petit lot
     assert unit_price((0, 0, 0, 0)) is None
     assert weighted_median([(100, 1), (200, 1), (900, 10)]) == 900
     assert weighted_median([]) is None
@@ -170,7 +171,8 @@ def test_resource_reference_order(conn):
     assert (book(conn).get(289).price, book(conn).get(289).source) == (9, LAST_SALE)
     save(conn, message(289, listing(289, 1137, [12, 80, 937, 9443])))
     ref = book(conn).get(289)
-    assert (ref.price, ref.source) == (8, HDV)  # le lot de 10 revient à 8 l'unité
+    assert (ref.price, ref.source, ref.lot) == (8, HDV, 10)  # le lot de 10 revient à 8 l'unité
+    assert book(conn).hdv_price(289)[3] == 10
     assert book(conn, NOW + 48 * 3600).get(289).source == AVG_PRICE  # annonces et vente trop anciennes
 
 
@@ -225,7 +227,7 @@ def test_equipment_reference_ignores_exo_and_single_sales(conn):
     assert book(conn).get(2469).source == MEDIAN_24H  # caractéristiques de base encore inconnues
     store(conn, 2469, [(PA, 1, 1)])
     ref = book(conn).get(2469)
-    assert (ref.price, ref.source) == (59_000, HDV_PLAIN)
+    assert (ref.price, ref.source, ref.lot) == (59_000, HDV_PLAIN, 1)
 
     # Tendance : pour un équipement, c'est le prix médian du jour qui est comparé, pas la dernière vente.
     day = int(NOW) // 86400 * 86400
