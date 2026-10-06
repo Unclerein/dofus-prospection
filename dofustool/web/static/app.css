@@ -427,3 +427,17 @@ button.chip:hover { border-color: var(--accent); }
 .sw.aim { background: var(--accent); } .sw.mitemps { border: 2px dashed var(--warn); }
 .sw.wipe { background: #5A2A24; } .sw.safe { background: #2A5A4B; } .sw.risky { background: #45351A; }
 @media (max-width: 720px) { .fight-facts { border-left: 0; border-top: 1px solid var(--line); } }
+
+/* Grand écran : la barre latérale reste en place quand la page défile. */
+@media (min-width: 761px) {
+  .sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start; scrollbar-width: thin; }
+}
+/* Tableaux serrés : beaucoup de colonnes dans peu de place (Tendances côte à côte, annonces de forgemagie). */
+table.dense th, table.dense td { padding-left: 6px; padding-right: 6px; }
+table.dense th:first-child, table.dense td:first-child { padding-left: 16px; }
+table.dense th:last-child, table.dense td:last-child { padding-right: 14px; }
+table.dense .item-cell { gap: 10px; }
+table.dense .item-cell .name, table.dense .item-cell .sub { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.grid2 table.dense .item-cell .name, .grid2 table.dense .item-cell .sub { max-width: 192px; overflow: hidden; text-overflow: ellipsis; }
+table.dense td.act { width: 40px; }
+table.dense .th-sort .stat-ico { margin-right: 0; }

@@ -901,9 +901,9 @@ function listingsTable(listings, d, f, withDates) {
       refresh();
     } }, label, sort.key === String(key) ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''));
   const short = (name) => name.replace('% Résistance', 'Ré').replace('Dommages', 'Do').replace('Dommage', 'Do').replace('Intelligence', 'Int').replace('Vitalité', 'Vita').replace('Agilité', 'Agi').replace('Sagesse', 'Sag').replace('Initiative', 'Ini').replace('Prospection', 'PP').replace('% Critique', 'Crit');
-  return h('div', { class: 'scroll' }, h('table', { style: `min-width: ${420 + d.lines.length * 62}px` },
+  return h('div', { class: 'scroll' }, h('table', { class: 'dense', style: `min-width: ${420 + d.lines.length * 44}px` },
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
-      d.lines.map((line) => head(line.id, [statIcon(d.assets[line.id]), short(line.name)], false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
+      d.lines.map((line) => head(line.id, d.assets[line.id] ? statIcon(d.assets[line.id]) : short(line.name), false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
       onmouseenter: (event) => showTip(event, itemTooltip(l, d)),
       onmousemove: placeTip,
@@ -980,7 +980,7 @@ async function forgeRanking() {
       ? h('div', { class: 'empty' }, ui.criterion === 'saved' ? "Aucun critère enregistré : règle-les dans l'onglet « Par objet »."
         : ui.criterion === 'over' ? `Aucune annonce connue avec ${lineName} à ${ui.amount} ou plus au-dessus de son jet parfait, parmi les ${data.rows.length} objets qui ont cette ligne de base.`
         : 'Aucun objet connu ne répond à ce critère.')
-      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
+      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 940px' },
         h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'De base'), h('th', {}, label),
           h('th', { class: 'l sorted' }, (ui.start === 'base' ? 'Marge sur la base' : 'Marge sur un craft') + ' ↓'), h('th', {}, 'Coût de craft'),
           h('th', {}, ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'))),
@@ -1008,7 +1008,7 @@ async function pageTrends() {
   const table = (title, rows, positive) => h('section', { class: 'panel' },
     h('div', { class: 'panel-head' }, h('h2', {}, title), h('span', { class: 'muted small' }, `${rows.length} objet${rows.length > 1 ? 's' : ''}`)),
     rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun pour le moment.')
-      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
+      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 600px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'), h('th', {}, ''))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '), r.item_id)),
