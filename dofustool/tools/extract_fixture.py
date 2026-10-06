@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 
 from ..archive import Archive
-from ..messages import avg_prices, hdv_listings, load_keymap, market_history
+from ..messages import avg_prices, hdv_listings, market_history
+from ..messages import load_runtime_keymap as load_keymap
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 PARSERS = {"avg_prices": avg_prices.parse, "market_history": market_history.parse, "hdv_listings": hdv_listings.parse}

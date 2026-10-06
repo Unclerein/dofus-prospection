@@ -109,7 +109,7 @@ h1, h2 { margin: 0; }
 .field > label, .field > .label, .cap {
   color: var(--muted); font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
 }
-input[type="number"], input[type="text"], input[type="search"], select {
+input[type="number"], input[type="text"], input[type="search"], input[type="password"], select {
   height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong);
   background: var(--ground); width: 100%;
 }
@@ -441,3 +441,14 @@ table.dense .item-cell .name, table.dense .item-cell .sub { max-width: 300px; ov
 .grid2 table.dense .item-cell .name, .grid2 table.dense .item-cell .sub { max-width: 192px; overflow: hidden; text-overflow: ellipsis; }
 table.dense td.act { width: 40px; }
 table.dense .th-sort .stat-ico { margin-right: 0; }
+
+/* Tutoriel de démarrage : liste d'étapes cochées au fur et à mesure. */
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.step { display: flex; align-items: flex-start; gap: 12px; }
+.step-mark {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-strong);
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--ground);
+}
+.step.done .step-mark { background: var(--gain); border-color: var(--gain); }
+.step-title { font-weight: 600; }
+.step:not(.done) .step-title { color: var(--soft); }

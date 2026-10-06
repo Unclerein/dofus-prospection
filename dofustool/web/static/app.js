@@ -143,6 +143,7 @@ const NAV = [
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5'],
+  ['welcome', 'Aide', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM7.2 7.200a1.900 1.900 0 113 1.500c-.700.500-1.200.900-1.200 1.800M9 12.700v.100'],
   ['config', 'Config', 'M3 5h4M11 5h4M3 9h8M15 9h0M3 13h2M9 13h6M9 3.5v3M13 7.5v3M7 11.5v3'],
 ];
 
@@ -180,7 +181,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig };
+  const pages = { crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -1394,6 +1395,22 @@ async function pageFight() {
 
 // ---------------------------------------------------------------- page État
 
+/** Où en est le partage avec les amis. */
+function sharePanelStatus(s) {
+  const share = s.share;
+  if (!share || (!share.enabled && !share.hosting)) return null;
+  const state = !share.enabled ? 'Ce PC héberge le hub mais n\'y est pas inscrit lui-même'
+    : share.last_error ? `Dernière tentative échouée : ${share.last_error}`
+      : share.last_ok ? `Synchronisé ${ago(share.last_ok, s.now)}` : 'Pas encore synchronisé';
+  return h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Partage'), h('span', { class: share.last_error ? 'warn small' : 'muted small' }, state)),
+    h('table', {}, h('tbody', {},
+      h('tr', {}, h('td', { class: 'l soft' }, 'Relevés envoyés'), h('td', { style: 'font-weight: 500' }, fmt(share.sent))),
+      h('tr', {}, h('td', { class: 'l soft' }, 'Relevés reçus des amis'), h('td', { style: 'font-weight: 500' }, fmt(share.received))),
+      share.members.map((m) => h('tr', {}, h('td', { class: 'l soft' }, m.pseudo + (m.pseudo === share.pseudo ? ' (moi)' : '')),
+        h('td', {}, `vu ${ago(m.last_seen, s.now)} · ${fmt(m.pushed)} relevés`))))));
+}
+
 /** Ce que vaut le prix estimé : comparé aux annonces HDV relevées sur la même période. */
 function estimatePanel(s) {
   const e = s.estimates;
@@ -1438,6 +1455,7 @@ async function pageStatus() {
       kpi('Décodage', s.decode_alert ? 'Alerte' : 'Normal', s.decode_alert ? 'voir MAINTENANCE.md' : null, s.decode_alert ? 'warn' : 'gain')),
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Données')),
       h('table', {}, h('tbody', {}, rows.map(([label, value]) => h('tr', {}, h('td', { class: 'l soft' }, label), h('td', { style: 'font-weight: 500' }, value)))))),
+    sharePanelStatus(s),
     estimatePanel(s),
     h('section', { class: 'panel pad' }, h('h2', { style: 'margin-bottom: 12px' }, 'Limites à garder en tête'),
       h('ul', { class: 'list' },
@@ -1448,10 +1466,76 @@ async function pageStatus() {
   ];
 }
 
+// ---------------------------------------------------------------- page Aide (tutoriel de premier démarrage)
+
+async function pageWelcome() {
+  S.status = await api('/api/status');
+  renderCapture();
+  const s = S.status;
+  const data = await cached('config', '/api/config');
+  const ui = S.ui.welcome || (S.ui.welcome = { server: data.values.server_name, pseudo: data.values.share_pseudo, hub: data.values.share_hub_url, token: data.values.share_token });
+  const first = !s.onboarded;
+
+  const check = (ok, title, detail) => h('li', { class: 'step ' + (ok ? 'done' : '') }, h('span', { class: 'step-mark', 'aria-hidden': 'true' }, ok ? '✓' : ''), h('div', {}, h('div', { class: 'step-title' }, title), h('div', { class: 'muted small' }, detail)));
+  const checklist = h('section', { class: 'panel pad' }, h('h2', { style: 'margin-bottom: 14px' }, 'Où tu en es'),
+    h('ul', { class: 'steps' },
+      check(s.items > 0, 'Données du jeu importées', s.items > 0 ? `${fmt(s.items)} objets, ${fmt(s.recipes)} recettes` : 'Lance : .venv\\Scripts\\python.exe -m dofustool.staticdata.update'),
+      check(!!s.last_connection_ts, 'Jeu vu par la capture', s.last_connection_ts ? `Dernière connexion ${ago(s.last_connection_ts, s.now)}` : 'Lance le jeu par le raccourci « Dofus + Prospection » et choisis ton personnage.'),
+      check(s.snapshots > 0, 'Prix moyens reçus', s.snapshots > 0 ? `${fmt(s.snapshots)} relevés, ${fmt(s.priced_items)} objets` : 'Ils arrivent quelques secondes après le choix du personnage, puis toutes les heures.'),
+      check(s.hdv_items > 0, 'Premières annonces HDV relevées', s.hdv_items > 0 ? `${fmt(s.hdv_items)} objets` : 'Ouvre la fiche d\'un objet à l\'HDV : son prix est relevé.'),
+      check(s.share.enabled && !!s.share.last_ok && !s.share.last_error, 'Partage avec tes amis', !s.share.enabled ? 'Facultatif : renseigne l\'adresse du hub et ton jeton ci-dessous.' : s.share.last_error ? s.share.last_error : s.share.last_ok ? `Synchronisé ${ago(s.share.last_ok, s.now)}` : 'Première synchronisation dans la minute.')));
+
+  const input = (id, label, key, width, attrs = {}) => h('div', { class: 'field', style: `flex: 1 1 ${width}px` }, h('label', { for: id }, label),
+    h('input', { id, type: 'text', value: ui[key], autocomplete: 'off', spellcheck: 'false', ...attrs, oninput: (e) => { ui[key] = e.target.value.trim(); } }));
+  const save = async () => {
+    const values = { ...configDraft(data.values), server_name: ui.server, share_pseudo: ui.pseudo, share_hub_url: ui.hub, share_token: ui.token, onboarded: true };
+    try {
+      await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+    } catch (error) { return notify(`Non enregistré. ${error.message}`); }
+    S.cache = {}; S.ui.welcome = null; S.ui.config = null;
+    notify('Réglages enregistrés.');
+    if (first) location.hash = '#/crafts'; else refresh();
+  };
+  const settings = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Tes réglages'), h('span', { class: 'muted small' }, 'Modifiables ensuite dans Config')),
+    h('div', { class: 'form-body' },
+      h('div', { class: 'filters' }, input('w-server', 'Ton serveur de jeu', 'server', 180, { placeholder: 'Kourial' }), input('w-pseudo', 'Ton pseudo (vu par tes amis)', 'pseudo', 180)),
+      h('div', { class: 'filters' }, input('w-hub', 'Adresse du hub (si on t\'en a donné une)', 'hub', 300, { placeholder: 'http://100.x.y.z:8610' }), input('w-token', 'Ton jeton', 'token', 260, { type: 'password' })),
+      h('div', {}, h('button', { class: 'btn primary', onclick: save }, first ? 'Enregistrer et commencer' : 'Enregistrer'))));
+
+  const how = h('section', { class: 'panel pad' }, h('h2', { style: 'margin-bottom: 12px' }, 'Comment ça marche'),
+    h('ul', { class: 'list' },
+      h('li', {}, 'Prospection écoute ce que le jeu reçoit du serveur. Il n\'envoie rien, ne clique pas, ne modifie pas le jeu.'),
+      h('li', {}, 'Lance toujours le jeu par le raccourci « Dofus + Prospection » : c\'est lui qui démarre la capture, et elle doit commencer avant la connexion.'),
+      h('li', {}, 'Les prix moyens de tous les objets arrivent seuls. Le prix réel d\'un objet est relevé quand tu ouvres sa fiche à l\'HDV.'),
+      h('li', {}, 'Ta banque est lue quand tu l\'ouvres, tes ventes quand tu ouvres l\'onglet Vendre, le cours d\'un objet quand tu l\'affiches.'),
+      h('li', {}, 'Avec le partage, les relevés de marché de tes amis s\'ajoutent aux tiens. Ton stock, tes ventes et tes personnages ne quittent jamais ton PC.')));
+
+  const tabs = [
+    ['crafts', 'Crafts', 'Les recettes classées par marge, coût des ingrédients et taxe compris.'],
+    ['stock', 'Mon stock', 'Ce que tu possèdes, et ce que tu peux fabriquer avec.'],
+    ['sales', 'Mes ventes', 'Tes lots en vente, et ceux qui ne sont plus les moins chers.'],
+    ['jobs', 'Métiers', 'Le chemin le moins coûteux pour monter un métier.'],
+    ['forge', 'Forgemagie', 'Les équipements en vente, leurs jets, exos et overs.'],
+    ['trends', 'Tendances', 'Les objets sous-cotés ou sur-cotés par rapport à leur prix habituel.'],
+    ['item', 'Fiche objet', 'Tout ce qu\'on sait d\'un objet : prix, cours, recette, annonces.'],
+    ['status', 'État', 'La capture fonctionne-t-elle, que vaut le prix estimé, où en est le partage.'],
+  ];
+  const tour = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Les onglets')),
+    h('table', {}, h('tbody', {}, tabs.map(([page, name, text]) => h('tr', { class: 'link', onclick: () => { location.hash = `#/${page}`; } },
+      h('td', { class: 'l', style: 'font-weight: 600; width: 150px' }, name), h('td', { class: 'l soft wrap' }, text))))));
+
+  return [
+    h('header', { class: 'head' }, h('div', {}, h('h1', {}, first ? 'Bienvenue dans Prospection' : 'Aide'),
+      h('div', { class: 'lead' }, first ? 'Trois minutes pour tout régler.' : 'Le tutoriel de démarrage, à relire quand tu veux.'))),
+    checklist, settings, how, tour,
+  ];
+}
+
 // ---------------------------------------------------------------- page Config
 
 /** Valeurs de config.toml telles que le formulaire les manipule. */
-const configDraft = (values) => ({ ...values, iface: values.iface || '', character_id: values.character_id || 0, jobs: { ...values.jobs } });
+const configDraft = (values) => ({ ...values, iface: values.iface || '', character_id: values.character_id || 0, jobs: { ...values.jobs }, share_members: { ...values.share_members } });
 
 function notify(text) {
   clearTimeout(toastTimer);
@@ -1539,8 +1623,65 @@ async function pageConfig() {
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),
-    jobsPanel, market, system,
+    jobsPanel, market, sharePanel(d, data, sync), system,
   ];
+}
+
+/** Jeton aléatoire, fabriqué par le navigateur : 24 caractères sans ambiguïté. */
+function newToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function copyText(text, label) {
+  navigator.clipboard.writeText(text).then(() => notify(`${label} copié.`), () => notify('Copie impossible : sélectionne le texte à la main.'));
+}
+
+function sharePanel(d, data, sync) {
+  const field = (id, label, key, width, attrs = {}) => h('div', { class: 'field', style: `flex: 1 1 ${width}px` }, h('label', { for: id }, label),
+    h('input', { id, type: 'text', value: d[key], autocomplete: 'off', spellcheck: 'false', ...attrs, oninput: (e) => { d[key] = e.target.value.trim(); sync(); } }));
+  const members = Object.entries(d.share_members);
+  const tailscale = data.addresses.find((a) => a.tailscale);
+  const address = tailscale || data.addresses[0];
+  const hubUrl = address ? `http://${address.ip}:${d.share_port}` : null;
+  let pseudoInput = null;
+  const add = () => {
+    const pseudo = pseudoInput.value.trim();
+    if (!pseudo || d.share_members[pseudo]) return notify(pseudo ? 'Ce pseudo existe déjà.' : 'Donne un pseudo à cet ami.');
+    d.share_members[pseudo] = newToken();
+    refresh();
+  };
+  pseudoInput = h('input', { id: 'c-friend', type: 'text', placeholder: 'Pseudo de l\'ami', autocomplete: 'off', onkeydown: (e) => { if (e.key === 'Enter') add(); } });
+
+  const hosting = !d.share_host ? null : h('div', { class: 'form-body', style: 'padding: 0' },
+    h('div', { class: 'note' }, hubUrl
+      ? [`Adresse à donner à tes amis : `, h('strong', {}, hubUrl), ' ', h('button', { class: 'btn', style: 'margin-left: 10px', onclick: () => copyText(hubUrl, 'Adresse') }, 'Copier'),
+        !tailscale && h('div', { class: 'muted small', style: 'margin-top: 6px' }, 'Adresse de ton réseau local : elle ne marche que chez toi. Pour des amis à distance, installe Tailscale (voir INSTALL.md).')]
+      : 'Aucune adresse réseau trouvée sur ce PC.'),
+    h('div', { class: 'muted small' }, 'Un jeton par ami. Pour que ton propre PC partage aussi, ajoute-toi dans la liste et colle ton jeton plus haut, avec l\'adresse http://127.0.0.1:' + d.share_port + '.'),
+    members.length > 0 && h('div', { class: 'scroll' }, h('table', { style: 'min-width: 560px' },
+      h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ami'), h('th', { class: 'l' }, 'Jeton (secret)'), h('th', {}, ''))),
+      h('tbody', {}, members.map(([pseudo, token]) => h('tr', {},
+        h('td', { class: 'l', style: 'font-weight: 600' }, pseudo),
+        h('td', { class: 'l soft' }, `${token.slice(0, 4)}…${token.slice(-3)}`),
+        h('td', {}, h('button', { class: 'btn', onclick: () => copyText(token, `Jeton de ${pseudo}`) }, 'Copier le jeton'), ' ',
+          h('button', { class: 'btn quiet', onclick: () => { delete d.share_members[pseudo]; refresh(); } }, 'Retirer'))))))),
+    h('div', { class: 'filters' }, h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 'c-friend' }, 'Ajouter un ami'), pseudoInput),
+      h('button', { class: 'btn', onclick: add }, 'Créer son jeton')));
+
+  return h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Partage avec des amis'), h('span', { class: 'muted small' }, 'Seuls les relevés de marché sont partagés')),
+    h('div', { class: 'form-body' },
+      h('div', { class: 'filters' },
+        field('c-pseudo', 'Mon pseudo', 'share_pseudo', 160),
+        field('c-hub', 'Adresse du hub', 'share_hub_url', 300, { placeholder: 'http://100.x.y.z:8610' }),
+        field('c-token', 'Mon jeton', 'share_token', 260, { type: 'password', placeholder: 'reçu de celui qui héberge' })),
+      h('div', { class: 'filters' },
+        h('label', { class: 'check' }, h('input', { id: 'c-host', type: 'checkbox', checked: d.share_host, onchange: (e) => { d.share_host = e.target.checked; refresh(); } }), 'Ce PC héberge le hub'),
+        d.share_host && h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'c-port' }, 'Port'),
+          h('input', { id: 'c-port', type: 'number', min: 1024, max: 65535, value: d.share_port, oninput: (e) => { d.share_port = Number(e.target.value); sync(); } })),
+        d.share_host && h('span', { class: 'muted small', style: 'padding-bottom: 12px' }, 'Pris en compte au prochain lancement de Prospection')),
+      hosting));
 }
 
 // ---------------------------------------------------------------- démarrage
@@ -1550,6 +1691,8 @@ async function pageConfig() {
   renderCapture();
   try { S.status = await api('/api/status'); } catch (error) { /* affiché par la page */ }
   renderCapture();
+  // Premier démarrage : le tutoriel d'abord.
+  if (S.status && !S.status.onboarded && !location.hash.replace(/^#\/?/, '')) location.hash = '#/welcome';
   await render();
   await poll();
   setInterval(poll, 5000);

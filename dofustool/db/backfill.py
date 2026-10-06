@@ -9,7 +9,8 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage
+from ..messages import avg_prices, characters, hdv_listings, market_history, sales, storage
+from ..messages import load_runtime_keymap as load_keymap
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:

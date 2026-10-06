@@ -19,6 +19,13 @@ function Say($text) { Write-Host ("{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $
 if (-not (Test-Path $python)) { throw "Environnement Python introuvable : $python (voir README)." }
 New-Item -ItemType Directory -Force $data | Out-Null
 
+# 0. Mise à jour du code, si possible. Une interface restée ouverte avec l'ancien code est relancée.
+$updated = & (Join-Path $PSScriptRoot 'update.ps1') -Root $root
+if ($updated -contains 'updated') {
+    $ui = Get-NetTCPConnection -LocalPort 8600 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ui) { Stop-Process -Id $ui.OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }
+}
+
 $cfg = & $python -c "import json, dataclasses; from dofustool import config; print(json.dumps(dataclasses.asdict(config.load())))" | ConvertFrom-Json
 $gameName = $cfg.dofus_process
 

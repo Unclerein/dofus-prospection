@@ -23,9 +23,17 @@ class Config:
     use_estimated_prices: bool = True
     iface: str | None = None
     avg_prices_timeout_s: float = 60.0
-    ankama_path: str = ""
+    ankama_path: str = r"C:\Program Files\Ankama\Ankama Launcher\Ankama Launcher.exe"
     dofus_process: str = "Dofus"
-    start_dashboard: bool = False
+    start_dashboard: bool = True
+    # Partage des relevés de marché avec quelques amis (voir dofustool/share).
+    share_pseudo: str = ""
+    share_hub_url: str = ""
+    share_token: str = ""
+    share_host: bool = False  # ce PC héberge le hub
+    share_port: int = 8610
+    share_members: dict[str, str] = field(default_factory=dict)  # pseudo -> jeton, côté hub
+    onboarded: bool = False  # le tutoriel de premier démarrage a été vu
 
 
 def load(path: Path = CONFIG_PATH) -> Config:
@@ -35,7 +43,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
 
 def _from_raw(raw: dict) -> Config:
-    market, capture, launcher = (raw.get(s, {}) for s in ("market", "capture", "launcher"))
+    market, capture, launcher, share = (raw.get(s, {}) for s in ("market", "capture", "launcher", "share"))
     defaults = Config()
     return Config(
         server_name=raw.get("server", {}).get("name", defaults.server_name),
@@ -52,6 +60,13 @@ def _from_raw(raw: dict) -> Config:
         ankama_path=launcher.get("ankama_path", defaults.ankama_path),
         dofus_process=launcher.get("dofus_process", defaults.dofus_process),
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
+        share_pseudo=str(share.get("pseudo", "")),
+        share_hub_url=str(share.get("hub_url", "")),
+        share_token=str(share.get("token", "")),
+        share_host=bool(share.get("host", False)),
+        share_port=int(share.get("port", defaults.share_port)),
+        share_members={str(k): str(v) for k, v in share.get("members", {}).items()},
+        onboarded=bool(raw.get("app", {}).get("onboarded", False)),
     )
 
 
@@ -83,6 +98,21 @@ def from_values(values: dict) -> Config:
         if not isinstance(name, str) or not name.strip() or len(name) > 40 or not name.isprintable():
             raise ValueError("Métiers : nom invalide")
         jobs[name.strip()] = _number({"v": level}, "v", f"Niveau de {name}", 1, MAX_JOB_LEVEL, integer=True)
+    members_in = values.get("share_members", {})
+    if not isinstance(members_in, dict) or len(members_in) > 20:
+        raise ValueError("Partage : liste d'amis invalide")
+    members = {}
+    for pseudo, token in members_in.items():
+        ok = all(isinstance(x, str) and x.strip() and x.isprintable() and '"' not in x for x in (pseudo, token))
+        if not ok or len(pseudo) > 30 or not 16 <= len(token) <= 100 or " " in token:
+            raise ValueError("Partage : pseudo ou jeton invalide (un jeton fait au moins 16 caractères, sans espace)")
+        members[pseudo.strip()] = token
+    hub_url = _text(values, "share_hub_url", "Adresse du hub", 200).rstrip("/")
+    if hub_url and not hub_url.startswith(("http://", "https://")):
+        raise ValueError("Adresse du hub : elle doit commencer par http:// ou https://")
+    token = _text(values, "share_token", "Jeton de partage", 100)
+    if " " in token:
+        raise ValueError("Jeton de partage : pas d'espace")
     character = values.get("character_id") or 0
     if isinstance(character, bool) or not isinstance(character, int) or character < 0:
         raise ValueError("Personnage : identifiant invalide")
@@ -101,6 +131,13 @@ def from_values(values: dict) -> Config:
         ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
         dofus_process=_text(values, "dofus_process", "Processus du jeu", 60),
         start_dashboard=bool(values.get("start_dashboard")),
+        share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
+        share_hub_url=hub_url,
+        share_token=token,
+        share_host=bool(values.get("share_host", False)),
+        share_port=_number({"v": values.get("share_port", 8610)}, "v", "Port du hub", 1024, 65535, integer=True),
+        share_members=members,
+        onboarded=bool(values.get("onboarded", False)),
     )
 
 
@@ -115,6 +152,7 @@ def _plain(number: float) -> str:
 def render(cfg: Config) -> str:
     """Texte de config.toml pour cette configuration, commentaires compris."""
     jobs = "".join(f"{_quoted(name)} = {level}\n" for name, level in cfg.jobs.items())
+    members = "".join(f"{_quoted(pseudo)} = {_quoted(token)}\n" for pseudo, token in cfg.share_members.items())
     return f"""# Paramètres de Prospection. Modifiables ici ou dans l'onglet Config de l'interface,
 # qui réécrit ce fichier en entier.
 
@@ -157,7 +195,24 @@ ankama_path = {_quoted(cfg.ankama_path)}
 dofus_process = {_quoted(cfg.dofus_process)}
 # Ouvrir l'interface au lancement.
 start_dashboard = {"true" if cfg.start_dashboard else "false"}
-"""
+
+[app]
+# Le tutoriel de premier démarrage a été vu.
+onboarded = {"true" if cfg.onboarded else "false"}
+
+[share]
+# Partage des relevés de marché avec quelques amis du même serveur. Les jetons sont des secrets.
+pseudo = {_quoted(cfg.share_pseudo)}
+# Adresse du hub (par exemple http://100.101.102.103:8610) et jeton personnel reçu de celui qui l'héberge.
+hub_url = {_quoted(cfg.share_hub_url)}
+token = {_quoted(cfg.share_token)}
+# Ce PC héberge le hub : il écoute sur ce port, joignable depuis les autres PC.
+host = {"true" if cfg.share_host else "false"}
+port = {cfg.share_port}
+
+[share.members]
+# Côté hub : un jeton par ami autorisé (pseudo = jeton).
+{members}"""
 
 
 def save(cfg: Config, path: Path = CONFIG_PATH) -> None:

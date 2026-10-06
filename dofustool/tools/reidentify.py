@@ -16,7 +16,7 @@ from datetime import datetime
 
 from .. import db, identify
 from ..archive import ARCHIVE_PATH
-from ..messages import KEYMAP_PATH, avg_prices
+from ..messages import avg_prices, runtime_keymap_path
 from ..protocol.tcp import S2C
 from ..protocol.wire import LEN, VARINT, WireError, iter_fields
 
@@ -80,12 +80,6 @@ def find_candidates(archive: sqlite3.Connection, known_items: set[int], since: f
     return sorted(found, key=lambda c: (-(c.known_ratio or 0), -c.entries))
 
 
-def write_keymap(candidate: Candidate) -> None:
-    keymap = json.loads(KEYMAP_PATH.read_text(encoding="utf-8"))
-    keymap["avg_prices"] = {"key": candidate.key, "fields": candidate.fields}
-    KEYMAP_PATH.write_text(json.dumps(keymap, indent=2) + "\n", encoding="utf-8")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--connection", type=int, help="numéro de la connexion archivée à examiner (défaut : la dernière)")
@@ -113,7 +107,8 @@ def main() -> int:
     archive.close()
     found, problems = identify.identify(scan, context)
 
-    raw = identify.read_keymap(KEYMAP_PATH)
+    keymap_path = runtime_keymap_path()
+    raw = identify.read_keymap(keymap_path)
     changed = identify.changes(raw, found)
     print(f"Connexion {row[0]} du {datetime.fromtimestamp(row[1]):%d/%m/%Y %H:%M} : {len(scan.best)} clés échangées.")
     for name in identify.NAMES:
@@ -138,8 +133,8 @@ def main() -> int:
     if not args.write:
         print("Relance avec --write pour écrire ces changements dans keymap.json.")
         return 0
-    identify.write_keymap(KEYMAP_PATH, found if new_build else changed, new_build, db.MARKET_PATH.parent / "keymap-backups")
-    print("keymap.json mis à jour (ancienne version gardée dans data/keymap-backups). Lance maintenant le backfill.")
+    identify.write_keymap(keymap_path, found if new_build else changed, new_build, db.MARKET_PATH.parent / "keymap-backups")
+    print("data/keymap.json mis à jour (ancienne version gardée dans data/keymap-backups). Lance maintenant le backfill.")
     return 0
 
 

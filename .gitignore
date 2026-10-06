@@ -18,3 +18,6 @@ dist/
 
 # Outils
 .claude/
+
+# Réglages personnels de chaque joueur (créés par l'onglet Config)
+dofustool/config.toml

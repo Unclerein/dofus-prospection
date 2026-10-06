@@ -20,6 +20,7 @@ from ..analysis.forgemagie import Filter, base_lines
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
+from ..share import client as share_client
 from ..fight import grid as fight_grid, harebourg
 from ..staticdata import effects as base_effects
 
@@ -48,6 +49,24 @@ def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH)
     ).fetchone()
     cfg_mtime = config_path.stat().st_mtime if config_path.exists() else 0.0
     return [*stamp, cfg_mtime]
+
+
+def local_addresses() -> list[dict]:
+    """Adresses de ce PC sur ses réseaux, pour indiquer aux amis où joindre le hub."""
+    import ipaddress
+    import socket
+
+    found = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = ipaddress.ip_address(info[4][0])
+            if address.is_loopback or any(str(address) == f["ip"] for f in found):
+                continue
+            # 100.64.0.0/10 : plage des réseaux privés de type Tailscale.
+            found.append({"ip": str(address), "tailscale": address in ipaddress.ip_network("100.64.0.0/10")})
+    except OSError:
+        pass
+    return sorted(found, key=lambda f: not f["tailscale"])
 
 
 def records(frame: pd.DataFrame) -> list[dict]:
@@ -191,6 +210,8 @@ class Api:
                     "min_snapshots_for_trend": cfg.min_snapshots_for_trend,
                     "min_liquidity": cfg.min_liquidity,
                     "use_estimated_prices": cfg.use_estimated_prices,
+                    "onboarded": cfg.onboarded,
+                    "share": share_client.status(conn, cfg),
                     "estimates": {
                         "count": len(state["ws"].prices.estimates),
                         "reliable": sum(1 for e in state["ws"].prices.estimates.values() if e.confidence == "fiable"),
@@ -373,6 +394,7 @@ class Api:
                 "jobs": list(names.values()),
                 "characters": characters,
                 "path": str(self.config_path),
+                "addresses": local_addresses(),
                 "now": time.time(),
             }
         finally:

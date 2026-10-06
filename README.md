@@ -6,6 +6,9 @@ Outil personnel d'analyse de marché Dofus 3, par capture réseau **strictement 
 
 ## Installation (Windows, Npcap requis)
 
+Pas à pas, liens et commandes compris, et partage des relevés entre amis : voir [INSTALL.md](INSTALL.md).
+En résumé, pour un développeur :
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -57,7 +60,7 @@ Tests :
 ## Limites connues
 
 - **Les prix moyens sont théoriques.** Ils sont lissés, en retard sur le marché et ne distinguent pas les lots. Il n'y a pas de profondeur de marché en v1.
-- **Les données précises ne couvrent que les objets consultés manuellement.**
+- **Les données précises ne couvrent que les objets consultés manuellement.** Le partage entre amis (voir INSTALL.md) additionne ce que chacun relève.
 - **Les tendances sont faibles au début** pour les objets jamais consultés dans le cours du marché.
 - **Les marges ignorent** le temps passé, la valeur des ressources farmées soi-même au-delà du coût d'opportunité et l'XP de métier.
 - **Chaque mise à jour du jeu change les clés des messages.** La capture les retrouve seule dans la plupart des cas ; sinon, voir [MAINTENANCE.md](MAINTENANCE.md).

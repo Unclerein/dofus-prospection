@@ -8,6 +8,10 @@ import sys
 import threading
 import webbrowser
 
+from .. import config
+from ..messages import runtime_keymap_path
+from ..share import hub as share_hub
+from ..share.client import Syncer
 from .server import DEFAULT_PORT, serve
 
 
@@ -22,6 +26,16 @@ def main() -> int:
     except OSError as exc:
         print(f"Impossible d'écouter sur le port {args.port} : {exc}. L'interface tourne peut-être déjà.")
         return 1
+    # Partage : le hub (si ce PC l'héberge) et la synchronisation tournent avec l'interface.
+    cfg = config.load()
+    if cfg.share_host:
+        try:
+            hub_server = share_hub.serve(cfg.share_port)
+            threading.Thread(target=hub_server.serve_forever, daemon=True).start()
+            print(f"Hub de partage : port {cfg.share_port}")
+        except OSError as exc:
+            print(f"Hub de partage non démarré (port {cfg.share_port}) : {exc}")
+    Syncer(keymap_path=runtime_keymap_path()).start()
     url = f"http://localhost:{args.port}"
     print(f"Prospection : {url}  (Ctrl+C pour arrêter)")
     if not args.no_browser:

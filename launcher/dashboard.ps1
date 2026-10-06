@@ -18,6 +18,7 @@ if ($Stop) {
 }
 
 if (-not $listener) {
+    & (Join-Path $PSScriptRoot 'update.ps1') -Root $root | Out-Null
     if (-not (Test-Path $python)) { Write-Host "Environnement Python introuvable : $python"; exit 1 }
     Start-Process -FilePath $python -ArgumentList '-m', 'dofustool.web', '--no-browser' -WorkingDirectory $root -WindowStyle Hidden
     # Attendre que le serveur réponde avant d'ouvrir le navigateur.
