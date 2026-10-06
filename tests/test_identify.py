@@ -346,11 +346,11 @@ def test_sales_parse_and_market_fingerprint():
 def test_sales_are_stored_per_market_and_served(app_db):  # noqa: F811
     conn = db.connect(app_db)
     now = __import__("time").time()
-    first = SalesList(11, (Sale(1, 1, 100, 900, 86_400), Sale(2, 3, 1, 250, 20 * 86_400), Sale(3, 500, 1, 5_000_000, 86_400)))
+    first = SalesList(11, (Sale(1, 1, 100, 900, 86_400), Sale(2, 3, 1, 250, 20 * 86_400), Sale(3, 500, 1, 5_000_000, 86_400), Sale(4, 1, 1, 12, 5000)))
     assert db.save_sales(conn, first, now - 60)
-    assert db.save_sales(conn, SalesList(22, (Sale(9, 1, 1, 12, 5000),)), now - 30)
+    assert db.save_sales(conn, SalesList(22, (Sale(9, 2, 1, 77, 5000),)), now - 30)  # un autre HDV : aucun objet en commun
     assert not db.save_sales(conn, SalesList(11, ()), now - 3600)  # relevé plus ancien : ignoré
-    assert conn.execute("SELECT COUNT(*) FROM my_sales").fetchone()[0] == 4
+    assert conn.execute("SELECT COUNT(*) FROM my_sales").fetchone()[0] == 5
     # Le Blé (item 1) se vend 8 les 100 à l'HDV : mon lot à 900 est sous-enchéri. Le Pain n'est pas relevé.
     conn.execute("INSERT INTO hdv_listings VALUES (1, 77, 12, 0, 800, 0, '[]', ?, ?)", (now, now))
     conn.commit()
@@ -358,7 +358,7 @@ def test_sales_are_stored_per_market_and_served(app_db):  # noqa: F811
 
     data = Api(app_db).sales()
     json.dumps(data, allow_nan=False)
-    assert data["markets"] == 2 and len(data["rows"]) == 4
+    assert data["markets"] == 2 and len(data["rows"]) == 5
     wheat = data["rows"][0]  # les lots sous-enchéris viennent en premier
     assert (wheat["name"], wheat["lot"], wheat["hdv"], wheat["undercut"], wheat["unit"]) == ("Blé", 100, 800, 100, 9.0)
     by_uid_price = {row["price"]: row for row in data["rows"]}
@@ -369,7 +369,7 @@ def test_sales_are_stored_per_market_and_served(app_db):  # noqa: F811
     conn = db.connect(app_db)
     assert db.save_sales(conn, SalesList(11, ()), now)  # tout vendu ou retiré dans cet HDV
     conn.close()
-    assert [row["price"] for row in Api(app_db).sales()["rows"]] == [12]
+    assert [row["price"] for row in Api(app_db).sales()["rows"]] == [77]
 
 
 def test_a_relisted_market_replaces_its_old_fingerprint():
