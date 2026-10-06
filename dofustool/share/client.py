@@ -3,6 +3,7 @@ import gzip
 import json
 import logging
 import sqlite3
+import ssl
 import threading
 import time
 import urllib.error
@@ -19,6 +20,20 @@ CHUNK = 300
 TIMEOUT_S = 30
 
 
+def _tls_context() -> ssl.SSLContext:
+    """Vérifie le certificat du hub comme le fait Windows (et donc un navigateur).
+
+    Le magasin de certificats que Python lit seul peut ne pas connaître une autorité récente :
+    un certificat parfaitement valide serait alors refusé.
+    """
+    try:
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _post(url: str, token: str, payload: dict) -> dict:
     body = gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     request = urllib.request.Request(
@@ -28,7 +43,8 @@ def _post(url: str, token: str, payload: dict) -> dict:
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Content-Encoding": "gzip"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+        context = _tls_context() if url.startswith("https://") else None
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S, context=context) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         raw = error.read()
