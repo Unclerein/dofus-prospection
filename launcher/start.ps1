@@ -23,11 +23,24 @@ $cfg = & $python -c "import json, dataclasses; from dofustool import config; pri
 $gameName = $cfg.dofus_process
 
 # 1. Capture en arrière-plan.
-if (Test-Path $ready) {
-    Say "Une capture semble déjà en cours ($ready existe). Si ce n'est pas le cas, supprime ce fichier et relance."
-    exit 1
+#    Une capture déjà en cours n'est gardée que si un autre lanceur la surveille encore. Sinon elle est
+#    restée orpheline (fenêtre du lanceur fermée, plantage) : on l'arrête proprement et on repart.
+function Get-Captures { Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object { $_.CommandLine -match 'dofustool\.capture' } }
+$others = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+    Where-Object { $_.CommandLine -match 'start\.ps1' -and $_.ProcessId -ne $PID }
+if (Get-Captures) {
+    if ($others) {
+        Say "Un lanceur surveille déjà une capture : rien à relancer."
+        if (-not $NoLauncher -and (Test-Path $cfg.ankama_path)) { Start-Process -FilePath $cfg.ankama_path }
+        exit 0
+    }
+    Say "Une capture tournait sans lanceur : arrêt, puis redémarrage."
+    New-Item -ItemType File -Force $stop | Out-Null
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Captures) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    Get-Captures | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
-Remove-Item $stop -ErrorAction SilentlyContinue
+Remove-Item $ready, $stop -ErrorAction SilentlyContinue
 $capture = Start-Process -FilePath $python -ArgumentList '-m', 'dofustool.capture' -WorkingDirectory $root -WindowStyle Hidden -PassThru
 $deadline = (Get-Date).AddSeconds(45)
 while (-not (Test-Path $ready)) {
