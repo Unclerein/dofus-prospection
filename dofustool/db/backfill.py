@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, hdv_listings, load_keymap, market_history, storage
+from ..messages import avg_prices, characters, hdv_listings, load_keymap, market_history, storage
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -70,6 +70,31 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
                 current[connection_id] = parsed
                 db.save_holdings(market, db.INVENTORY, parsed, ts)
                 counts["inventaires lus"] += 1
+    listing, select, jobs = (keymap.get(k) for k in ("character_list", "character_select", "job_levels"))
+    if listing is not None:
+        for ts, body in archive.execute(
+            "SELECT ts, body FROM messages WHERE key = ? AND direction = 's2c' ORDER BY ts", (listing.key,)
+        ):
+            found = characters.parse_list(body, listing)
+            if found is not None:
+                db.save_characters(market, found, ts)
+    if select is not None and jobs is not None:
+        counts["relevés de métiers lus"] = 0
+        chosen: dict[int, int] = {}  # personnage choisi sur chaque connexion
+        rows = archive.execute(
+            "SELECT connection_id, ts, direction, key, body FROM messages WHERE key IN (?, ?) ORDER BY connection_id, id",
+            (select.key, jobs.key),
+        )
+        for connection_id, ts, direction, key, body in rows:
+            if key == select.key and direction == "c2s":
+                character_id = characters.parse_selection(body, select)
+                if character_id is not None:
+                    chosen[connection_id] = character_id
+            elif key == jobs.key and direction == "s2c" and connection_id in chosen:
+                levels = characters.parse_jobs(body, jobs)
+                if levels is not None:
+                    db.save_job_levels(market, chosen[connection_id], levels, ts)
+                    counts["relevés de métiers lus"] += 1
     return counts
 
 

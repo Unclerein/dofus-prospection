@@ -9,6 +9,7 @@ import math
 import sqlite3
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import pandas as pd
@@ -27,17 +28,23 @@ log = logging.getLogger("dofustool.web")
 CATEGORIES = {0: "Équipements", 1: "Consommables", 2: "Ressources", 3: "Objets de quête", 4: "Autres", 5: "Cosmétiques"}
 
 
-def data_stamp(conn: sqlite3.Connection) -> list:
+# Le métier « Base » (recettes sans métier) n'a pas de niveau : il n'est pas proposé dans la configuration.
+BASE_JOB_ID = 1
+
+
+def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH) -> list:
     """Empreinte des données : change dès qu'une capture écrit du nouveau ou que la config est modifiée."""
     stamp = conn.execute(
         "SELECT (SELECT COUNT(*) FROM snapshots), (SELECT MAX(captured_at) FROM market_history), "
         "(SELECT MAX(captured_at) FROM hdv_listings), (SELECT COUNT(*) FROM hdv_listings), "
         "(SELECT COUNT(*) FROM item_effects_fetched), (SELECT value FROM static_meta WHERE key = 'imported_at'), "
         "(SELECT MAX(captured_at) FROM holdings_meta), "
+        # Somme des niveaux, pas la date du relevé : un gain d'expérience ne doit pas tout recalculer.
+        "(SELECT COUNT(*) FROM characters), (SELECT SUM(level) FROM character_jobs), "
         "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
         " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
     ).fetchone()
-    cfg_mtime = config.CONFIG_PATH.stat().st_mtime if config.CONFIG_PATH.exists() else 0.0
+    cfg_mtime = config_path.stat().st_mtime if config_path.exists() else 0.0
     return [*stamp, cfg_mtime]
 
 
@@ -60,8 +67,9 @@ def clean(value):
 class Api:
     """Un objet par serveur. Les calculs lourds sont refaits seulement quand les données changent."""
 
-    def __init__(self, db_path: Path | str = db.MARKET_PATH) -> None:
+    def __init__(self, db_path: Path | str = db.MARKET_PATH, config_path: Path = config.CONFIG_PATH) -> None:
         self.db_path = db_path
+        self.config_path = config_path
         self._lock = threading.Lock()
         self._stamp: list | None = None
         self._state: dict | None = None
@@ -103,10 +111,10 @@ class Api:
         return db.connect(self.db_path)
 
     def _load(self, conn: sqlite3.Connection) -> dict:
-        stamp = data_stamp(conn)
+        stamp = data_stamp(conn, self.config_path)
         with self._lock:
             if self._state is None or stamp != self._stamp:
-                cfg = config.load()
+                cfg = config.load(self.config_path)
                 ws = data.build_workspace(conn, cfg, time.time())
                 trends, insufficient = data.trends_frame(conn, cfg, ws)
                 stock = Stock(conn)
@@ -145,7 +153,7 @@ class Api:
     def version(self) -> dict:
         conn = self.connect()
         try:
-            return {"stamp": data_stamp(conn)}
+            return {"stamp": data_stamp(conn, self.config_path)}
         finally:
             conn.close()
 
@@ -310,24 +318,63 @@ class Api:
         finally:
             conn.close()
 
+    # --- configuration -------------------------------------------------------
+
+    def config(self) -> dict:
+        """Contenu de config.toml, et de quoi le remplir : métiers du jeu, personnages vus par la capture."""
+        conn = self.connect()
+        try:
+            cfg = config.load(self.config_path)
+            names = dict(conn.execute("SELECT id, name FROM jobs WHERE id != ? ORDER BY name", (BASE_JOB_ID,)))
+            characters = []
+            for character_id, name, level in conn.execute("SELECT id, name, level FROM characters ORDER BY name"):
+                captured = db.character_jobs(conn, character_id)
+                characters.append(
+                    {
+                        "id": character_id,
+                        "name": name,
+                        "level": level,
+                        "jobs": {names[j]: lvl for j, (lvl, _, _) in captured.items() if j in names},
+                        "jobs_at": max((ts for _, _, ts in captured.values()), default=None),
+                    }
+                )
+            return {
+                "values": asdict(cfg),
+                "jobs": list(names.values()),
+                "characters": characters,
+                "path": str(self.config_path),
+                "now": time.time(),
+            }
+        finally:
+            conn.close()
+
+    def save_config(self, values: dict) -> dict:
+        """Valide les valeurs saisies et réécrit config.toml. ValueError si l'une est invalide."""
+        config.save(config.from_values(values), self.config_path)
+        return self.config()
+
     # --- métiers -------------------------------------------------------------
 
     def jobs(self) -> dict:
-        """Métiers qui ont des recettes, avec le niveau renseigné dans config.toml s'il existe."""
+        """Métiers qui ont des recettes, avec le niveau de la configuration et l'expérience relevée."""
         conn = self.connect()
         try:
             state = self._load(conn)
-            levels = {name.casefold(): level for name, level in state["cfg"].jobs.items()}
+            cfg = state["cfg"]
+            levels = {name.casefold(): level for name, level in cfg.jobs.items()}
+            captured = db.character_jobs(conn, cfg.character_id) if cfg.character_id else {}
             rows = conn.execute(
                 "SELECT j.id, j.name, COUNT(*), MAX(r.level) FROM recipes r JOIN jobs j ON j.id = r.job_id "
                 "GROUP BY j.id ORDER BY j.name"
             ).fetchall()
-            return {
-                "jobs": [
-                    {"id": job_id, "name": name, "recipes": count, "max_level": top, "level": levels.get(name.casefold())}
-                    for job_id, name, count, top in rows
-                ]
-            }
+            jobs = []
+            for job_id, name, count, top in rows:
+                level = levels.get(name.casefold())
+                seen = captured.get(job_id)
+                # L'expérience relevée ne vaut que si elle correspond au niveau enregistré.
+                xp = seen[1] if seen is not None and seen[0] == level else None
+                jobs.append({"id": job_id, "name": name, "recipes": count, "max_level": top, "level": level, "xp": xp})
+            return {"jobs": jobs}
         finally:
             conn.close()
 

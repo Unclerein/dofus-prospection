@@ -164,6 +164,21 @@ CREATE TABLE IF NOT EXISTS holdings_meta (
     kamas       INTEGER NOT NULL,
     stacks      INTEGER NOT NULL
 );
+-- Personnages du compte et leurs niveaux de métier. Donnée personnelle, comme holdings.
+CREATE TABLE IF NOT EXISTS characters (
+    id      INTEGER PRIMARY KEY,
+    name    TEXT NOT NULL,
+    level   INTEGER NOT NULL,
+    seen_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS character_jobs (
+    character_id INTEGER NOT NULL,
+    job_id       INTEGER NOT NULL,
+    level        INTEGER NOT NULL,
+    xp           INTEGER NOT NULL,
+    captured_at  REAL NOT NULL,
+    PRIMARY KEY (character_id, job_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -300,6 +315,36 @@ def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at
             (container, captured_at, storage.kamas, len(storage.stacks)),
         )
     return True
+
+
+def save_characters(conn: sqlite3.Connection, characters, seen_at: float) -> None:
+    """Enregistre les personnages du compte (messages.characters.Character) ; le relevé le plus récent gagne."""
+    with conn:
+        conn.executemany(
+            "INSERT INTO characters VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET "
+            "name = excluded.name, level = excluded.level, seen_at = excluded.seen_at "
+            "WHERE excluded.seen_at >= characters.seen_at",
+            ((c.id, c.name, c.level, seen_at) for c in characters),
+        )
+
+
+def save_job_levels(conn: sqlite3.Connection, character_id: int, jobs, captured_at: float) -> None:
+    """Enregistre des niveaux de métier (messages.characters.JobLevel) ; le relevé le plus récent gagne."""
+    with conn:
+        conn.executemany(
+            "INSERT INTO character_jobs VALUES (?, ?, ?, ?, ?) ON CONFLICT (character_id, job_id) DO UPDATE SET "
+            "level = excluded.level, xp = excluded.xp, captured_at = excluded.captured_at "
+            "WHERE excluded.captured_at >= character_jobs.captured_at",
+            ((character_id, j.job_id, j.level, j.xp, captured_at) for j in jobs),
+        )
+
+
+def character_jobs(conn: sqlite3.Connection, character_id: int) -> dict[int, tuple[int, int, float]]:
+    """{id du métier: (niveau, expérience, date du relevé)} d'un personnage."""
+    rows = conn.execute(
+        "SELECT job_id, level, xp, captured_at FROM character_jobs WHERE character_id = ?", (character_id,)
+    )
+    return {job_id: (level, xp, captured_at) for job_id, level, xp, captured_at in rows}
 
 
 def set_ignored(conn: sqlite3.Connection, item_id: int, ignored: bool, now: float) -> None:

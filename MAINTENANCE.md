@@ -85,6 +85,18 @@ champ 2 ; dans une entrée, quantité en 1, date en 2, prix en 3, identifiant en
 `tests/fixtures/market_history.bin` est le cours du Blé, et ses tests rappellent les valeurs
 lues à l'écran ce jour-là.
 
+**Personnages et métiers : manuel.** Trois messages du début de la connexion de jeu :
+
+- `character_list` : serveur → client, juste avant le choix du personnage ; une entrée par
+  personnage, avec son identifiant, son niveau et son nom ;
+- `character_select` : client → serveur, quelques octets, l'identifiant du personnage choisi seul ;
+- `job_levels` : serveur → client, quelques secondes après ; une entrée par métier (identifiant
+  du métier, expérience, niveau), puis une seule entrée à chaque gain d'expérience.
+
+Repères du build du 5 octobre 2026 : `ksw` (entrées en champ 1 ; dans une entrée, identifiant
+en 3 et infos en 2 ; dans les infos, niveau en 4 et nom en 5), `kth` (identifiant en 1), `irl`
+(entrées en champ 2 ; métier en 1, expérience en 2, niveau en 5).
+
 ### 3. Mettre à jour `keymap.json`
 
 Automatiquement, si `reidentify` a trouvé un candidat unique et sûr :

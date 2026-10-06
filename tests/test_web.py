@@ -14,12 +14,12 @@ from .test_app import app_db  # noqa: F401  (fixture : une base complète sur di
 
 
 @pytest.fixture
-def api(app_db):  # noqa: F811
+def api(app_db, tmp_path):  # noqa: F811
     conn = db.connect(app_db)
     conn.executemany("INSERT INTO item_icons VALUES (?, ?)", [(3, 9001), (500, 9002)])
     conn.commit()
     conn.close()
-    return Api(app_db)
+    return Api(app_db, tmp_path / "config.toml")  # fichier absent : valeurs par défaut
 
 
 def test_clean_makes_values_json_safe():
@@ -261,6 +261,9 @@ def server(api, tmp_path):
     httpd.server_close()
 
 
+JSON = {"Content-Type": "application/json"}
+
+
 def get(url: str):
     with urllib.request.urlopen(url, timeout=10) as response:
         return response.status, response.headers.get("Content-Type"), response.read()
@@ -288,14 +291,14 @@ def test_http_routes(server):
 
 def test_http_save_filter(server, api):
     def post(body: bytes):
-        request = urllib.request.Request(server + "/api/forge/item/500/filter", data=body, method="POST")
+        request = urllib.request.Request(server + "/api/forge/item/500/filter", data=body, method="POST", headers=JSON)
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.loads(response.read())
 
     assert post(b'{"minimums": {"125": 230}}') == {"saved": {"minimums": {"125": 230}, "exo": None, "exo_min": 1}}
     assert api.forge_item(500)["filter"]["minimums"] == {"125": 230}
     def post_ignore(body: bytes):
-        request = urllib.request.Request(server + "/api/ignore", data=body, method="POST")
+        request = urllib.request.Request(server + "/api/ignore", data=body, method="POST", headers=JSON)
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.loads(response.read())
 
@@ -307,7 +310,7 @@ def test_http_save_filter(server, api):
     assert error.value.code == 400
 
     def post_type(body: bytes):
-        request = urllib.request.Request(server + "/api/ignore-type", data=body, method="POST")
+        request = urllib.request.Request(server + "/api/ignore-type", data=body, method="POST", headers=JSON)
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.loads(response.read())
 

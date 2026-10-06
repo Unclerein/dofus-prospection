@@ -118,6 +118,7 @@ const NAV = [
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5'],
+  ['config', 'Config', 'M3 5h4M11 5h4M3 9h8M15 9h0M3 13h2M9 13h6M9 3.5v3M13 7.5v3M7 11.5v3'],
 ];
 
 function route() {
@@ -154,7 +155,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
+  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -526,7 +527,7 @@ async function pageJobs() {
   const saved = S.ui.jobs || (S.ui.jobs = Object.assign({ job: jobs[0].id, bonus: 100, resale: false, perJob: {} }, loadJobState()));
   if (!jobs.some((j) => j.id === saved.job)) saved.job = jobs[0].id;
   const job = jobs.find((j) => j.id === saved.job);
-  const mine = saved.perJob[job.id] || (saved.perJob[job.id] = { xp: job.level ? levelToXp(job.level) : 0, target: Math.min(200, (job.level || 1) + 20), exclude: [] });
+  const mine = saved.perJob[job.id] || (saved.perJob[job.id] = { xp: job.xp ?? (job.level ? levelToXp(job.level) : 0), target: Math.min(200, (job.level || 1) + 20), exclude: [] });
   const persist = () => { try { localStorage.setItem('dofustool.jobs', JSON.stringify(saved)); } catch (error) { /* stockage indisponible */ } };
   const change = (mutate) => { mutate(); persist(); refresh(); };
 
@@ -1173,7 +1174,7 @@ async function pageStatus() {
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'État'))),
     s.decode_alert && h('div', { class: 'banner', role: 'alert' }, `${s.decode_alert} (alerte du ${when(s.decode_alert_ts)})`),
-    s.unknown_jobs && s.unknown_jobs.length ? h('div', { class: 'note' }, `Métiers inconnus dans config.toml : ${s.unknown_jobs.join(', ')}`) : null,
+    s.unknown_jobs && s.unknown_jobs.length ? h('div', { class: 'note' }, `Métiers inconnus dans la configuration : ${s.unknown_jobs.join(', ')}`) : null,
     h('section', { class: 'kpis' },
       kpi('Capture', s.running ? 'En cours' : 'Arrêtée', s.running ? ago(s.started_ts, now) : when(s.stopped_ts), s.running ? 'gain' : ''),
       kpi('Dernier relevé de prix', ago(s.last_snapshot_ts, now), when(s.last_snapshot_ts)),
@@ -1186,6 +1187,100 @@ async function pageStatus() {
         h('li', {}, "Les annonces HDV sont des prix demandés, pas des ventes ; elles ne couvrent que les objets que tu ouvres."),
         h('li', {}, "Les marges ignorent le temps passé, le coût des runes et l'XP de métier."),
         h('li', {}, 'Une mise à jour du jeu peut casser le décodage jusqu\'à ré-identification.'))),
+  ];
+}
+
+// ---------------------------------------------------------------- page Config
+
+/** Valeurs de config.toml telles que le formulaire les manipule. */
+const configDraft = (values) => ({ ...values, iface: values.iface || '', character_id: values.character_id || 0, jobs: { ...values.jobs } });
+
+function notify(text) {
+  clearTimeout(toastTimer);
+  $toast.replaceChildren(h('span', {}, text));
+  $toast.hidden = false;
+  toastTimer = setTimeout(() => { $toast.hidden = true; }, 5000);
+}
+
+async function pageConfig() {
+  const data = await cached('config', '/api/config');
+  const ui = S.ui.config || (S.ui.config = { draft: null });
+  const saved = configDraft(data.values);
+  const d = ui.draft || (ui.draft = configDraft(data.values));
+  const dirty = () => JSON.stringify(d) !== JSON.stringify(saved);
+
+  const save = h('button', { class: 'btn primary', onclick: async () => {
+    try {
+      await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) });
+    } catch (error) { return notify(`Non enregistré. ${error.message}`); }
+    S.cache = {}; ui.draft = null;
+    try { S.status = await api('/api/status'); renderCapture(); } catch (error) { /* affiché au prochain rafraîchissement */ }
+    await refresh();
+    notify('Configuration enregistrée.');
+  } }, 'Enregistrer');
+  const cancel = h('button', { class: 'btn quiet', onclick: () => { ui.draft = null; refresh(); } }, 'Annuler');
+  const sync = () => { save.disabled = cancel.disabled = !dirty(); };
+  sync();
+
+  const number = (id, label, value, onValue, attrs = {}) => h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: id }, label),
+    h('input', { id, type: 'number', value, ...attrs, oninput: (e) => { onValue(e.target.value === '' ? null : Number(e.target.value)); sync(); } }));
+  const text = (id, label, key, width, placeholder) => h('div', { class: 'field', style: `flex: 1 1 ${width}px` }, h('label', { for: id }, label),
+    h('input', { id, type: 'text', value: d[key], placeholder, autocomplete: 'off', spellcheck: 'false', oninput: (e) => { d[key] = e.target.value; sync(); } }));
+  const percent = (x) => Math.round(x * 1e6) / 1e4;
+
+  // Personnage : le choisir reprend les niveaux de métier relevés à sa dernière connexion.
+  const character = data.characters.find((c) => c.id === d.character_id);
+  const known = (c) => Object.keys(c.jobs).length > 0;
+  const stale = character && known(character) && !dirty() && Object.entries(character.jobs).some(([name, level]) => d.jobs[name] !== level);
+  const pick = (id) => {
+    d.character_id = id;
+    const chosen = data.characters.find((c) => c.id === id);
+    if (chosen && known(chosen)) d.jobs = { ...chosen.jobs };
+    refresh();
+  };
+  const set = Object.keys(d.jobs).length;
+  const jobsPanel = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Personnage et métiers'), h('span', { class: 'muted small' }, `${set} métier${set > 1 ? 's' : ''} renseigné${set > 1 ? 's' : ''}`)),
+    h('div', { class: 'form-body' },
+      h('div', { class: 'filters' },
+        h('div', { class: 'field', style: 'flex: 0 1 320px' }, h('label', { for: 'c-char' }, 'Personnage'),
+          h('select', { id: 'c-char', onchange: (e) => pick(Number(e.target.value)) },
+            h('option', { value: 0, selected: !d.character_id }, 'Aucun'),
+            d.character_id && !character ? h('option', { value: d.character_id, selected: true }, 'Personnage inconnu') : null,
+            data.characters.map((c) => h('option', { value: c.id, selected: c.id === d.character_id }, `${c.name} · niv. ${c.level}${known(c) ? '' : ' · métiers non relevés'}`)))),
+        character && known(character) && h('div', { class: 'muted small', style: 'padding-bottom: 12px' }, `Métiers relevés ${ago(character.jobs_at, data.now)}`)),
+      data.characters.length === 0 && h('div', { class: 'muted small' }, 'Aucun personnage vu pour l\'instant : connecte-toi en jeu avec la capture active.'),
+      character && !known(character) && h('div', { class: 'muted small' }, 'Métiers non relevés : connecte ce personnage avec la capture active.'),
+      stale && h('div', { class: 'note', style: 'display: flex; align-items: center; justify-content: space-between; gap: 16px' },
+        'Les niveaux relevés en jeu ont changé depuis l\'enregistrement.',
+        h('button', { class: 'btn', onclick: () => { d.jobs = { ...d.jobs, ...character.jobs }; refresh(); } }, 'Reprendre les niveaux relevés')),
+      h('div', { class: 'form-grid' }, data.jobs.map((name, index) => h('div', { class: 'field' }, h('label', { for: `c-job-${index}` }, name),
+        h('input', { id: `c-job-${index}`, type: 'number', min: 1, max: 200, value: d.jobs[name] ?? '', placeholder: '—', class: d.jobs[name] ? 'set' : null,
+          oninput: (e) => { if (e.target.value === '') delete d.jobs[name]; else d.jobs[name] = Number(e.target.value); sync(); } }))))));
+
+  const market = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Marché')),
+    h('div', { class: 'form-body' }, h('div', { class: 'filters' },
+      number('c-tax', 'Taxe HDV %', percent(d.hdv_tax), (v) => { d.hdv_tax = v === null ? null : v / 100; }, { min: 0, max: 50, step: 0.1 }),
+      number('c-age', 'Dernière vente valable (h)', d.last_sale_max_age_hours, (v) => { d.last_sale_max_age_hours = v; }, { min: 1, step: 1 }),
+      number('c-snap', 'Relevés pour une tendance', d.min_snapshots_for_trend, (v) => { d.min_snapshots_for_trend = v; }, { min: 1, step: 1 }),
+      number('c-liq', 'Vendus sur 7 j, minimum', d.min_liquidity, (v) => { d.min_liquidity = v; }, { min: 0, step: 10 }),
+      number('c-thr', 'Seuil de signal %', percent(d.trend_threshold), (v) => { d.trend_threshold = v === null ? null : v / 100; }, { min: 1, max: 500, step: 1 }))));
+
+  const system = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Capture et lanceur'), h('span', { class: 'muted small' }, 'Pris en compte au prochain lancement')),
+    h('div', { class: 'form-body' },
+      h('div', { class: 'filters' },
+        text('c-server', 'Serveur', 'server_name', 160),
+        text('c-iface', 'Interface réseau', 'iface', 220, 'par défaut'),
+        number('c-timeout', 'Alerte sans prix après (s)', d.avg_prices_timeout_s, (v) => { d.avg_prices_timeout_s = v; }, { min: 5, max: 3600, step: 5 }),
+        text('c-process', 'Processus du jeu', 'dofus_process', 140)),
+      h('div', { class: 'filters' },
+        text('c-ankama', 'Launcher Ankama', 'ankama_path', 520),
+        h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'))));
+
+  return [
+    h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),
+    jobsPanel, market, system,
   ];
 }
 

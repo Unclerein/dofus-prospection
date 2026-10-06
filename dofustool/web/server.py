@@ -103,6 +103,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.crafts())
                 if path == "/api/trends":
                     return self._json(api.trends())
+                if path == "/api/config":
+                    return self._json(api.config())
                 if path == "/api/jobs":
                     return self._json(api.jobs())
                 if path == "/api/jobs/plan":
@@ -161,9 +163,30 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                 log.exception("Erreur sur %s", path)
                 self._json({"error": "erreur interne, voir la console du serveur"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        def _local_request(self) -> bool:
+            """Vrai si la requête vient bien de l'interface elle-même, pas d'une page d'un autre site."""
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+            origin = self.headers.get("Origin")
+            json_body = (self.headers.get("Content-Type") or "").split(";")[0].strip() == "application/json"
+            return (
+                host in ("localhost", "127.0.0.1")
+                and json_body
+                and (origin is None or urlparse(origin).hostname in ("localhost", "127.0.0.1"))
+            )
+
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            if not self._local_request():
+                # Lire le corps avant de répondre : sinon la connexion est coupée sous les pieds du client.
+                self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 65536))
+                return self._json({"error": "requête refusée"}, HTTPStatus.FORBIDDEN)
             try:
+                if path == "/api/config":
+                    length = min(int(self.headers.get("Content-Length") or 0), 65536)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("objet JSON attendu")
+                    return self._json(api.save_config(payload))
                 if match := re.fullmatch(r"/api/forge/item/(\d+)/filter", path):
                     length = min(int(self.headers.get("Content-Length") or 0), 65536)
                     payload = json.loads(self.rfile.read(length) or b"{}")

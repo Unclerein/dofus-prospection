@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 from .. import db
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, hdv_listings, market_history, storage
+from ..messages import Mapping, avg_prices, characters, hdv_listings, market_history, storage
 from ..protocol.session import Message, Session
+from ..protocol.tcp import C2S, S2C
 from . import Segment
 
 log = logging.getLogger("dofustool.capture")
@@ -27,6 +28,7 @@ class _ConnWatch:
     got_prices: bool = False
     alerted: bool = False
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
+    character_id: int | None = None  # personnage choisi sur cette connexion
 
 
 class Pipeline:
@@ -75,6 +77,29 @@ class Pipeline:
                     len(history.hourly),
                     len(history.daily),
                 )
+            return
+
+        mapping = self.keymap.get("character_select")
+        if mapping is not None and msg.key == mapping.key and msg.direction == C2S:
+            chosen = characters.parse_selection(msg.body, mapping)
+            if chosen is not None:
+                watch.character_id = chosen
+            return
+
+        mapping = self.keymap.get("character_list")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            found = characters.parse_list(msg.body, mapping)
+            if found is not None:
+                db.save_characters(self.market, found, msg.ts)
+            return
+
+        mapping = self.keymap.get("job_levels")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            jobs = characters.parse_jobs(msg.body, mapping)
+            if jobs is not None and watch.character_id is not None:
+                db.save_job_levels(self.market, watch.character_id, jobs, msg.ts)
+                if len(jobs) > 1:  # la liste complète de la connexion, pas un gain d'expérience
+                    log.info("Métiers enregistrés : %d.", len(jobs))
             return
 
         mapping = self.keymap.get("bank")

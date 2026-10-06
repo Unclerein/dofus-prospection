@@ -52,5 +52,30 @@
       "quantity": 2,
       "item_id": 5
     }
+  },
+  "character_list": {
+    "key": "ksw",
+    "fields": {
+      "entries": 1,
+      "info": 2,
+      "id": 3,
+      "level": 4,
+      "name": 5
+    }
+  },
+  "character_select": {
+    "key": "kth",
+    "fields": {
+      "id": 1
+    }
+  },
+  "job_levels": {
+    "key": "irl",
+    "fields": {
+      "entries": 2,
+      "job_id": 1,
+      "xp": 2,
+      "level": 5
+    }
   }
 }

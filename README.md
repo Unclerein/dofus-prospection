@@ -23,7 +23,9 @@ après chaque mise à jour du jeu.
 
 Le raccourci bureau « Dofus + Prospection » (créé par `launcher\install_shortcut.ps1`) lance
 `launcher\start.ps1` : la capture démarre en arrière-plan, le launcher Ankama s'ouvre, et la
-capture s'arrête d'elle-même à la fermeture de Dofus. Les réglages sont dans `dofustool\config.toml`.
+capture s'arrête d'elle-même à la fermeture de Dofus. Les réglages sont dans `dofustool\config.toml`,
+modifiable depuis l'onglet Config de l'interface : y choisir un personnage reprend ses niveaux de
+métier relevés par la capture.
 
 La capture seule, sans lanceur (Ctrl+C pour arrêter) :
 

@@ -83,7 +83,7 @@ def test_backfill_from_archive_is_idempotent(conn):
     archive.commit()
 
     cours = {"cours lus": 2, "cours enregistrés": 1, "cours rejetés": 1, "listes HDV lues": 0, "listes HDV enregistrées": 0,
-             "banques lues": 0, "inventaires lus": 0, "listes fusionnées lues": 0}
+             "banques lues": 0, "inventaires lus": 0, "listes fusionnées lues": 0, "relevés de métiers lus": 0}
     assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 1, "rejetés": 1, **cours}
     assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 0, "rejetés": 1, **cours}
     assert conn.execute("SELECT COUNT(*) FROM market_history").fetchone()[0] == 53  # rejouer n'ajoute rien

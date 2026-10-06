@@ -1,14 +1,19 @@
-"""Lecture de config.toml."""
+"""Lecture et écriture de config.toml."""
+import json
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.toml"
 
+MAX_JOB_LEVEL = 200
+
 
 @dataclass(frozen=True, slots=True)
 class Config:
     server_name: str = ""
+    character_id: int | None = None
     jobs: dict[str, int] = field(default_factory=dict)
     hdv_tax: float = 0.02
     last_sale_max_age_hours: float = 24.0
@@ -25,11 +30,15 @@ class Config:
 def load(path: Path = CONFIG_PATH) -> Config:
     """Charge la configuration ; toute valeur absente garde son défaut."""
     # utf-8-sig : le Bloc-notes de Windows peut ajouter un BOM à l'enregistrement.
-    raw = tomllib.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+    return _from_raw(tomllib.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {})
+
+
+def _from_raw(raw: dict) -> Config:
     market, capture, launcher = (raw.get(s, {}) for s in ("market", "capture", "launcher"))
     defaults = Config()
     return Config(
         server_name=raw.get("server", {}).get("name", defaults.server_name),
+        character_id=int(raw.get("character", {}).get("id", 0)) or None,
         jobs={str(k): int(v) for k, v in raw.get("jobs", {}).items()},
         hdv_tax=float(market.get("hdv_tax", defaults.hdv_tax)),
         last_sale_max_age_hours=float(market.get("last_sale_max_age_hours", defaults.last_sale_max_age_hours)),
@@ -42,3 +51,120 @@ def load(path: Path = CONFIG_PATH) -> Config:
         dofus_process=launcher.get("dofus_process", defaults.dofus_process),
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
     )
+
+
+def _text(values: dict, key: str, label: str, max_length: int = 260) -> str:
+    value = values.get(key) or ""
+    if not isinstance(value, str) or len(value) > max_length or not value.isprintable():
+        raise ValueError(f"{label} : texte invalide")
+    return value.strip()
+
+
+def _number(values: dict, key: str, label: str, low: float, high: float, integer: bool = False) -> float:
+    value = values.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        raise ValueError(f"{label} : nombre attendu")
+    if integer and value != int(value):
+        raise ValueError(f"{label} : nombre entier attendu")
+    if not low <= value <= high:
+        raise ValueError(f"{label} : doit être entre {low:g} et {high:g}")
+    return int(value) if integer else float(value)
+
+
+def from_values(values: dict) -> Config:
+    """Construit une configuration à partir de valeurs saisies ; ValueError (en français) si l'une est invalide."""
+    jobs_in = values.get("jobs", {})
+    if not isinstance(jobs_in, dict):
+        raise ValueError("Métiers : liste invalide")
+    jobs = {}
+    for name, level in jobs_in.items():
+        if not isinstance(name, str) or not name.strip() or len(name) > 40 or not name.isprintable():
+            raise ValueError("Métiers : nom invalide")
+        jobs[name.strip()] = _number({"v": level}, "v", f"Niveau de {name}", 1, MAX_JOB_LEVEL, integer=True)
+    character = values.get("character_id") or 0
+    if isinstance(character, bool) or not isinstance(character, int) or character < 0:
+        raise ValueError("Personnage : identifiant invalide")
+    return Config(
+        server_name=_text(values, "server_name", "Serveur", 60),
+        character_id=character or None,
+        jobs=jobs,
+        hdv_tax=_number(values, "hdv_tax", "Taxe HDV", 0, 0.5),
+        last_sale_max_age_hours=_number(values, "last_sale_max_age_hours", "Âge maximal de la dernière vente", 0.1, 8760),
+        min_snapshots_for_trend=_number(values, "min_snapshots_for_trend", "Relevés pour une tendance", 1, 1000, integer=True),
+        min_liquidity=_number(values, "min_liquidity", "Liquidité minimale", 0, 10**9, integer=True),
+        trend_threshold=_number(values, "trend_threshold", "Seuil de tendance", 0.01, 5),
+        iface=_text(values, "iface", "Interface réseau") or None,
+        avg_prices_timeout_s=_number(values, "avg_prices_timeout_s", "Délai d'alerte", 5, 3600),
+        ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
+        dofus_process=_text(values, "dofus_process", "Processus du jeu", 60),
+        start_dashboard=bool(values.get("start_dashboard")),
+    )
+
+
+def _quoted(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)  # une chaîne JSON est une chaîne TOML valide
+
+
+def _plain(number: float) -> str:
+    return str(int(number)) if float(number).is_integer() else repr(float(number))
+
+
+def render(cfg: Config) -> str:
+    """Texte de config.toml pour cette configuration, commentaires compris."""
+    jobs = "".join(f"{_quoted(name)} = {level}\n" for name, level in cfg.jobs.items())
+    return f"""# Paramètres de Prospection. Modifiables ici ou dans l'onglet Config de l'interface,
+# qui réécrit ce fichier en entier.
+
+[server]
+# Nom de ton serveur de jeu (informatif : un seul serveur est géré).
+name = {_quoted(cfg.server_name)}
+
+[character]
+# Personnage choisi dans l'onglet Config (identifiant numérique du jeu ; 0 = aucun).
+id = {cfg.character_id or 0}
+
+[jobs]
+# Tes métiers et leur niveau (facultatif). Ils ne limitent pas le classement : un craft peut être
+# confié à un autre joueur. Ils servent à repérer et filtrer ce que tu peux faire toi-même.
+{jobs}
+[market]
+# Taxe de mise en vente en HDV, en proportion du prix (0.02 = 2 %). À vérifier en jeu.
+hdv_tax = {repr(cfg.hdv_tax)}
+# Au-delà de cet âge, le dernier prix de vente n'est plus utilisé : on retombe sur le prix moyen.
+last_sale_max_age_hours = {_plain(cfg.last_sale_max_age_hours)}
+# Nombre minimal de relevés avant de calculer une tendance sur les prix moyens.
+min_snapshots_for_trend = {cfg.min_snapshots_for_trend}
+# Quantité vendue minimale sur 7 jours pour qu'un objet apparaisse par défaut.
+min_liquidity = {cfg.min_liquidity}
+# Écart à la tendance à partir duquel un objet est signalé sous-coté ou sur-coté (0.15 = 15 %).
+trend_threshold = {repr(cfg.trend_threshold)}
+
+[capture]
+# Interface réseau à écouter. Vide = interface par défaut.
+# Liste : python -m dofustool.tools.identify --list-ifaces
+iface = {_quoted(cfg.iface or "")}
+# Délai (s) après la connexion au-delà duquel l'absence de prix moyens déclenche une alerte.
+avg_prices_timeout_s = {_plain(cfg.avg_prices_timeout_s)}
+
+[launcher]
+ankama_path = {_quoted(cfg.ankama_path)}
+# Nom du processus du jeu, sans « .exe ».
+dofus_process = {_quoted(cfg.dofus_process)}
+# Ouvrir l'interface au lancement.
+start_dashboard = {"true" if cfg.start_dashboard else "false"}
+"""
+
+
+def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
+    """Écrit config.toml. Le fichier est remplacé d'un coup : jamais à moitié écrit."""
+    text = render(cfg)
+    if load_text(text) != cfg:  # garde-fou : ne jamais écrire un fichier qui ne se relit pas à l'identique
+        raise ValueError("configuration impossible à enregistrer telle quelle")
+    temp = path.with_suffix(".toml.tmp")
+    temp.write_text(text, encoding="utf-8", newline="\n")
+    os.replace(temp, path)
+
+
+def load_text(text: str) -> Config:
+    """Comme load, depuis un texte TOML."""
+    return _from_raw(tomllib.loads(text))
