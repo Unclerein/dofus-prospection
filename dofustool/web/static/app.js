@@ -1466,7 +1466,156 @@ async function pageStatus() {
   ];
 }
 
-// ---------------------------------------------------------------- page Aide (tutoriel de premier démarrage)
+// ---------------------------------------------------------------- visite guidée (premier démarrage)
+
+let tourOpen = false;
+
+/** Visite guidée en surimpression : quelques réglages, puis un tour des onglets, mis en lumière un par un. */
+async function startTour() {
+  if (tourOpen) return;
+  tourOpen = true;
+  let data;
+  try { data = await api('/api/config'); } catch (error) { tourOpen = false; return; }
+  const v = data.values;
+  const form = { server: v.server_name, pseudo: v.share_pseudo, hub: v.share_hub_url, token: v.share_token };
+  const cameFrom = location.hash;
+  let index = 0, poller = null, live = S.status, message = '';
+
+  const $hole = h('div', { class: 'tour-hole', 'aria-hidden': 'true' });
+  const $card = h('div', { class: 'tour-card' });
+  const $tour = h('div', { class: 'tour', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Visite guidée de Prospection' }, $hole, $card);
+
+  const field = (id, label, key, attrs = {}) => h('div', { class: 'field' }, h('label', { for: id }, label),
+    h('input', { id, type: 'text', value: form[key], autocomplete: 'off', spellcheck: 'false', ...attrs, oninput: (e) => { form[key] = e.target.value.trim(); } }));
+  const point = (title, text) => h('li', {}, h('strong', {}, title), text ? h('span', {}, ` ${text}`) : null);
+  const check = (ok, title, detail) => h('li', { class: 'step ' + (ok ? 'done' : '') },
+    h('span', { class: 'step-mark', 'aria-hidden': 'true' }, ok ? '✓' : ''), h('div', {}, h('div', { class: 'step-title' }, title), h('div', { class: 'muted small' }, detail)));
+  const recent = (ts) => !!ts && live && live.now - ts < 900;
+  const tab = (page, title, text) => ({ target: page, title, body: () => [h('p', {}, text)] });
+
+  const steps = [
+    { title: 'Bienvenue dans Prospection', body: () => [
+      h('p', {}, 'L\'outil lit ce que le jeu reçoit du serveur et en tire des prix, des marges et l\'état de ton stock.'),
+      h('ul', { class: 'tour-points' },
+        point('Il écoute, c\'est tout.', 'Rien n\'est envoyé au jeu, aucun clic à ta place.'),
+        point('Tes données restent chez toi.', 'Stock, ventes et personnages ne quittent pas ce PC.'),
+        point('Deux minutes de réglages,', 'puis un tour des onglets.'))] },
+    { title: 'Ton serveur et ton pseudo', body: () => [
+      h('p', {}, 'Le serveur sert à ne pas mélanger des prix. Le pseudo est le nom que verront tes amis si vous partagez vos relevés.'),
+      field('t-server', 'Serveur de jeu', 'server', { placeholder: 'Kourial' }),
+      field('t-pseudo', 'Pseudo', 'pseudo')],
+      check: () => (form.server ? '' : 'Indique ton serveur de jeu.') },
+    { title: 'Partager avec tes amis', optional: true, body: () => [
+      h('p', {}, 'À plusieurs, chacun profite des prix relevés par les autres. Si un ami t\'a donné une adresse et un jeton, colle-les ici. Sinon passe à la suite : ça se règle plus tard dans Config.'),
+      field('t-hub', 'Adresse du hub', 'hub', { placeholder: 'https://…' }),
+      field('t-token', 'Ton jeton', 'token', { type: 'password' })],
+      check: () => (form.hub && !/^https?:\/\//.test(form.hub) ? 'L\'adresse du hub commence par https://' : form.hub && !form.token ? 'Il manque ton jeton.' : '') },
+    { title: 'Lance toujours le jeu par le raccourci', live: true, body: () => [
+      h('p', {}, 'Le raccourci « Dofus + Prospection » du bureau démarre l\'écoute avant le jeu : c\'est indispensable, elle doit voir la connexion dès le début.'),
+      h('ul', { class: 'steps' },
+        check(live && live.running, 'Écoute démarrée', live && live.running ? 'La capture tourne.' : 'Lance le raccourci du bureau.'),
+        check(recent(live && live.last_connection_ts), 'Personnage connecté', recent(live && live.last_connection_ts) ? 'Le jeu est vu.' : 'Choisis ton personnage en jeu.'),
+        check(recent(live && live.last_snapshot_ts), 'Prix moyens reçus', recent(live && live.last_snapshot_ts) ? `${fmt(live.priced_items)} objets.` : 'Ils arrivent quelques secondes après.')),
+      h('p', { class: 'muted small' }, 'Les étapes se cochent toutes seules. Tu peux continuer sans attendre.')] },
+    { title: 'Ce que tu fais en jeu nourrit l\'outil', body: () => [
+      h('p', {}, 'Les prix moyens de tous les objets arrivent seuls, toutes les heures. Le reste se relève quand tu l\'affiches en jeu :'),
+      h('ul', { class: 'tour-points' },
+        point('La fiche d\'un objet à l\'HDV', '→ son prix réel, lot par lot.'),
+        point('Ta banque et ton inventaire', '→ ton stock.'),
+        point('L\'onglet Vendre d\'un HDV', '→ tes lots en vente.'),
+        point('Le cours du marché d\'un objet', '→ ses ventes passées.'))] },
+    tab('crafts', 'Crafts', 'Toutes les recettes, classées par marge : prix de vente, coût des ingrédients et taxe compris. Un clic ouvre la fiche de l\'objet.'),
+    tab('stock', 'Mon stock', 'Ce que tu possèdes, sa valeur, et les recettes que tu peux déjà lancer avec ce que tu as.'),
+    tab('sales', 'Mes ventes', 'Tes lots en vente, et ceux qui ne sont plus les moins chers de l\'HDV.'),
+    tab('forge', 'Forgemagie', 'Les équipements en vente avec leurs jets : exos, overs, et ce que rapporte une amélioration.'),
+    tab('trends', 'Tendances', 'Les objets vendus nettement sous ou au-dessus de leur prix habituel.'),
+    tab('status', 'État', 'La capture tourne-t-elle, que vaut le prix estimé, où en est le partage avec tes amis.'),
+    { title: 'C\'est parti', body: () => [
+      h('p', {}, 'Plus tu ouvres de fiches à l\'HDV, plus les prix sont justes. Cette visite reste disponible dans l\'onglet Aide, et tous les réglages dans Config.')] },
+  ];
+
+  const close = () => {
+    clearInterval(poller);
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('resize', place);
+    $tour.remove();
+    tourOpen = false;
+  };
+  const save = async (withForm) => {
+    const values = { ...configDraft(v), onboarded: true };
+    if (withForm) Object.assign(values, { server_name: form.server, share_pseudo: form.pseudo, share_hub_url: form.hub, share_token: form.token });
+    await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+    S.cache = {}; S.ui.config = null; S.ui.welcome = null;
+    try { S.status = await api('/api/status'); renderCapture(); } catch (error) { /* au prochain rafraîchissement */ }
+  };
+  const finish = async (withForm) => {
+    try { await save(withForm); } catch (error) { message = `Non enregistré. ${error.message}`; index = withForm ? 1 : index; return draw(); }
+    close();
+    if (withForm) location.hash = '#/crafts'; else if (location.hash !== cameFrom) location.hash = cameFrom || '#/crafts';
+    render();
+  };
+  const go = (delta) => {
+    const step = steps[index];
+    if (delta > 0 && step.check) { message = step.check(); if (message) return draw(); }
+    message = '';
+    index = Math.max(0, Math.min(steps.length - 1, index + delta));
+    draw();
+  };
+  function onKey(event) {
+    if (event.key === 'Escape') finish(false);
+    else if (event.key === 'ArrowRight' && event.target.tagName !== 'INPUT') go(1);
+    else if (event.key === 'ArrowLeft' && event.target.tagName !== 'INPUT') go(-1);
+    else if (event.key === 'Enter' && event.target.tagName === 'INPUT') go(1);
+  }
+
+  /** Place le halo sur l'onglet présenté et la carte à côté ; sans cible, la carte est au centre. */
+  function place() {
+    const step = steps[index];
+    const target = step.target && document.querySelector(`#nav a[href="#/${step.target}"]`);
+    if (!target) {
+      $hole.style.cssText = 'left: 50%; top: 50%; width: 0; height: 0;';
+      $card.style.cssText = 'left: 50%; top: 50%; transform: translate(-50%, -50%);';
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    $hole.style.cssText = `left: ${r.left - 4}px; top: ${r.top - 4}px; width: ${r.width + 8}px; height: ${r.height + 8}px;`;
+    const width = Math.min(420, innerWidth - 32);
+    const beside = r.right + 24 + width <= innerWidth;
+    const left = beside ? r.right + 24 : Math.max(16, Math.min(innerWidth - width - 16, r.left));
+    const top = beside ? Math.max(16, Math.min(innerHeight - $card.offsetHeight - 16, r.top - 24)) : Math.min(innerHeight - $card.offsetHeight - 16, r.bottom + 16);
+    $card.style.cssText = `left: ${left}px; top: ${Math.max(16, top)}px; transform: none;`;
+  }
+
+  function draw() {
+    const step = steps[index];
+    const last = index === steps.length - 1;
+    clearInterval(poller);
+    if (step.live) poller = setInterval(async () => { try { live = await api('/api/status'); if (steps[index].live) draw(); } catch (error) { /* réessai */ } }, 3000);
+    if (step.target && location.hash !== `#/${step.target}`) location.hash = `#/${step.target}`;
+    const focused = document.activeElement && document.activeElement.id;
+    $card.replaceChildren(
+      h('div', { class: 'tour-progress', 'aria-hidden': 'true' }, steps.map((_, i) => h('span', { class: i <= index ? 'on' : '' }))),
+      h('div', { class: 'tour-count' }, `${index + 1} sur ${steps.length}` + (step.optional ? ' · facultatif' : '')),
+      h('h2', { id: 'tour-title' }, step.title),
+      h('div', { class: 'tour-body' }, step.body()),
+      message && h('div', { class: 'warn small', role: 'alert' }, message),
+      h('div', { class: 'tour-actions' },
+        !last && h('button', { class: 'btn quiet', onclick: () => finish(false) }, 'Passer la visite'),
+        h('span', { style: 'flex: 1' }),
+        index > 0 && h('button', { class: 'btn', onclick: () => go(-1) }, 'Retour'),
+        h('button', { id: 'tour-next', class: 'btn primary', onclick: () => (last ? finish(true) : go(1)) }, last ? 'Terminer' : step.optional && !form.hub ? 'Plus tard' : 'Suivant')));
+    place();
+    const again = focused && document.getElementById(focused);
+    (again && $card.contains(again) ? again : $card.querySelector('input') || document.getElementById('tour-next')).focus();
+  }
+
+  document.body.append($tour);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('resize', place);
+  draw();
+}
+
+// ---------------------------------------------------------------- page Aide
 
 async function pageWelcome() {
   S.status = await api('/api/status');
@@ -1526,8 +1675,8 @@ async function pageWelcome() {
       h('td', { class: 'l', style: 'font-weight: 600; width: 150px' }, name), h('td', { class: 'l soft wrap' }, text))))));
 
   return [
-    h('header', { class: 'head' }, h('div', {}, h('h1', {}, first ? 'Bienvenue dans Prospection' : 'Aide'),
-      h('div', { class: 'lead' }, first ? 'Trois minutes pour tout régler.' : 'Le tutoriel de démarrage, à relire quand tu veux.'))),
+    h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Aide'), h('div', { class: 'lead' }, 'Où tu en es, et à quoi sert chaque onglet.')),
+      h('button', { class: 'btn primary', onclick: () => startTour() }, 'Lancer la visite guidée')),
     checklist, settings, how, tour,
   ];
 }
@@ -1691,9 +1840,8 @@ function sharePanel(d, data, sync) {
   renderCapture();
   try { S.status = await api('/api/status'); } catch (error) { /* affiché par la page */ }
   renderCapture();
-  // Premier démarrage : le tutoriel d'abord.
-  if (S.status && !S.status.onboarded && !location.hash.replace(/^#\/?/, '')) location.hash = '#/welcome';
   await render();
+  if (S.status && !S.status.onboarded) startTour(); // premier démarrage : la visite guidée
   await poll();
   setInterval(poll, 5000);
   setInterval(renderCapture, 30000);
