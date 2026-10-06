@@ -210,3 +210,14 @@ def test_share_settings_round_trip(tmp_path):
     for bad in ({"share_hub_url": "ftp://x"}, {"share_token": "a b"}, {"share_members": {"Tom": "court"}}, {"share_members": []}, {"share_port": 80}):
         with pytest.raises(ValueError):
             config.from_values({**values, **bad})
+
+
+def test_changing_token_resends_everything(hub_url):
+    """Un joueur qui s'était trompé de jeton : ses relevés repartent sous le bon nom."""
+    conn = market_db()
+    assert client.sync_once(conn, member(hub_url, "jeton-bob-0123456789xx"))["sent"] == 4
+    assert client.sync_once(conn, member(hub_url, "jeton-bob-0123456789xx"))["sent"] == 0
+    db.save_hdv_listings(conn, HdvListings(3, (Listing(1, (300, 0, 0, 0), ()),)), NOW)
+    # Nouveau jeton : tout est proposé de nouveau au hub, qui ne garde que ce qu'il n'avait pas.
+    assert client.sync_once(conn, member(hub_url, "jeton-alice-0123456789")) == {"sent": 1, "received": 4}
+    assert client.get_state(conn)["push_mark"] != "0"

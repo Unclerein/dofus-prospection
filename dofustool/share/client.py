@@ -1,5 +1,6 @@
 """Synchronisation de ce PC avec le hub de partage : envoie ses relevés, récupère ceux des autres."""
 import gzip
+import hashlib
 import json
 import logging
 import sqlite3
@@ -65,9 +66,11 @@ def enabled(cfg: config.Config) -> bool:
 def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | None = None, post=_post) -> dict:
     """Un aller-retour complet avec le hub. Renvoie {sent, received} ; lève ConnectionError si le hub refuse ou ne répond pas."""
     state = get_state(conn)
-    if state.get("hub") != cfg.share_hub_url:  # autre hub : on repart de zéro
+    # Autre hub, ou autre jeton (donc autre joueur aux yeux du hub) : on repart de zéro et tout est renvoyé.
+    identity = cfg.share_hub_url + "#" + hashlib.sha256(cfg.share_token.encode()).hexdigest()[:12]
+    if state.get("hub") != identity:
         state = {}
-        set_state(conn, hub=cfg.share_hub_url, cursor=0, push_mark=0)
+        set_state(conn, hub=identity, cursor=0, push_mark=0)
     cursor = int(state.get("cursor", 0))
     started = time.time()
     records = collect(conn, float(state.get("push_mark", 0)), keymap_path)
