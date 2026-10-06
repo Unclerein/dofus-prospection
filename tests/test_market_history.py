@@ -12,6 +12,7 @@ from dofustool.messages.market_history import DAY, HOUR
 from .test_protocol import ld, vi
 
 FIXTURE = Path(__file__).parent / "fixtures" / "market_history.bin"
+# Numéros de champ du build du 5 octobre 2026, celui des fixtures réelles de ce fichier.
 MAPPING = Mapping("xxx", {"hourly": 1, "daily": 2, "quantity": 1, "date": 2, "price": 3, "item_id": 4})
 T0 = datetime(2026, 10, 5, 14, 6, 26, tzinfo=timezone.utc)
 # Heure de la capture dont est tirée la fixture (05/10/2026 16:14 heure de Paris).
@@ -62,7 +63,7 @@ def test_parse_rejects_unexpected_shapes(body):
 
 @pytest.fixture(scope="module")
 def ble():
-    return market_history.parse(FIXTURE.read_bytes(), load_keymap()["market_history"])
+    return market_history.parse(FIXTURE.read_bytes(), MAPPING)
 
 
 def test_fixture_matches_24h_screen(ble):
@@ -157,7 +158,7 @@ def weighted_median(points):
 
 def test_gelano_fixture_matches_screen():
     gelano = market_history.parse(
-        FIXTURE.with_name("market_history_gelano.bin").read_bytes(), load_keymap()["market_history"]
+        FIXTURE.with_name("market_history_gelano.bin").read_bytes(), MAPPING
     )
     paris = timezone(timedelta(hours=2))
     assert gelano.item_id == 2469
@@ -173,3 +174,11 @@ def test_gelano_fixture_matches_screen():
     sale = gelano.last_sale  # « dernier achat : 05/10 - 17:29 »
     assert datetime.fromtimestamp(sale.sold_at, paris).strftime("%d/%m - %H:%M") == "05/10 - 17:29"
     assert sale.price == 64_333
+
+
+def test_real_keymap_reads_a_body_built_with_its_field_numbers():
+    mapping = load_keymap()["market_history"]
+    f = mapping.fields
+    point = vi(f["quantity"], 12) + ld(f["date"], T0.isoformat().encode()) + vi(f["price"], 150) + vi(f["item_id"], 289)
+    parsed = market_history.parse(ld(f["hourly"], point) + ld(f["daily"], point), mapping)
+    assert parsed.item_id == 289 and parsed.hourly[0].price == 150 and parsed.daily[0].quantity == 12

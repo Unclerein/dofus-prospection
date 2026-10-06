@@ -11,6 +11,7 @@ from dofustool.protocol.tcp import S2C
 
 from .test_avg_prices import FIXTURE
 from .test_market_history import FIXTURE as MARKET_FIXTURE
+from .test_market_history import MAPPING as MARKET_MAPPING
 
 
 @pytest.fixture
@@ -67,8 +68,10 @@ def test_market_history_latest_capture_wins(conn):
     ]
 
 
-def test_backfill_from_archive_is_idempotent(conn):
+def test_backfill_from_archive_is_idempotent(conn, monkeypatch):
     mapping = load_keymap()["avg_prices"]
+    # La fixture du cours du marché date du build du 5 octobre : le rejeu utilise ses numéros de champ.
+    monkeypatch.setattr("dofustool.db.backfill.load_keymap", lambda: {"avg_prices": mapping, "market_history": MARKET_MAPPING})
     body = FIXTURE.read_bytes()
     archive = Archive(":memory:")
     conn_id = archive.open_connection(1.0, 40000, "192.0.2.1", "test")
@@ -77,13 +80,12 @@ def test_backfill_from_archive_is_idempotent(conn):
     archive.add(conn_id, Message(0, 600.0, S2C, mapping.key, b"\x08\x01", 2, None))  # même clé, autre forme
     archive.commit()
 
-    history = load_keymap()["market_history"]
+    history = MARKET_MAPPING
     archive.add(conn_id, Message(0, 700.0, S2C, history.key, MARKET_FIXTURE.read_bytes(), 3, 1))
     archive.add(conn_id, Message(0, 800.0, S2C, history.key, b"\\x08\\x01", 3, 2))
     archive.commit()
 
-    cours = {"cours lus": 2, "cours enregistrés": 1, "cours rejetés": 1, "listes HDV lues": 0, "listes HDV enregistrées": 0,
-             "banques lues": 0, "inventaires lus": 0, "listes fusionnées lues": 0, "relevés de métiers lus": 0}
+    cours = {"cours lus": 2, "cours enregistrés": 1, "cours rejetés": 1}
     assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 1, "rejetés": 1, **cours}
     assert backfill(archive._db, conn) == {"lus": 3, "relevés ajoutés": 0, "rejetés": 1, **cours}
     assert conn.execute("SELECT COUNT(*) FROM market_history").fetchone()[0] == 53  # rejouer n'ajoute rien

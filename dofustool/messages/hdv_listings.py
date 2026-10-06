@@ -70,6 +70,10 @@ def parse(body: bytes, mapping: Mapping) -> HdvListings | None:
                         uid = sub_value
                     elif sub_number == f["prices"]:
                         prices += _prices(sub_type, sub_value)
+                    elif sub_type == LEN:
+                        # Sous-message inconnu : sans doute des effets dont le champ a changé de numéro.
+                        # Mieux vaut refuser l'annonce que l'enregistrer comme un exemplaire sans effets.
+                        return None
                 if uid is None or entry_item is None or len(prices) != len(LOT_SIZES) or not any(prices):
                     return None
                 listings.append((entry_item, Listing(uid, tuple(prices), tuple(effects))))

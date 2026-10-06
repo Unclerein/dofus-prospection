@@ -8,27 +8,27 @@
     }
   },
   "market_history": {
-    "key": "iuk",
+    "key": "ire",
     "fields": {
       "hourly": 1,
-      "daily": 2,
-      "quantity": 1,
-      "date": 2,
-      "price": 3,
-      "item_id": 4
+      "daily": 3,
+      "quantity": 4,
+      "date": 3,
+      "price": 1,
+      "item_id": 2
     }
   },
   "hdv_listings": {
-    "key": "jzn",
+    "key": "jzs",
     "fields": {
-      "item_id": 1,
-      "entries": 2,
-      "effects": 1,
-      "entry_item": 2,
-      "uid": 5,
-      "prices": 6,
-      "effect_id": 1,
-      "effect_value": 10
+      "item_id": 3,
+      "entries": 1,
+      "effects": 0,
+      "entry_item": 1,
+      "uid": 3,
+      "prices": 2,
+      "effect_id": 0,
+      "effect_value": 0
     }
   },
   "inventory": {
@@ -43,14 +43,14 @@
     }
   },
   "bank": {
-    "key": "iuo",
+    "key": "irp",
     "fields": {
-      "entries": 1,
-      "kamas": 3,
-      "position": 3,
-      "object": 5,
-      "quantity": 2,
-      "item_id": 5
+      "entries": 2,
+      "kamas": 1,
+      "position": 4,
+      "object": 1,
+      "quantity": 3,
+      "item_id": 4
     }
   },
   "character_list": {

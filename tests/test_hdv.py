@@ -15,6 +15,7 @@ from dofustool.staticdata.effects import missing_items, parse_effects, store
 from .test_protocol import ld, varint, vi
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hdv_listings.bin"
+# Numéros de champ du build du 5 octobre 2026, celui de la fixture réelle.
 MAPPING = Mapping(
     "xxx",
     {"item_id": 1, "entries": 2, "effects": 1, "entry_item": 2, "uid": 5, "prices": 6, "effect_id": 1, "effect_value": 10},
@@ -76,7 +77,7 @@ def test_parse_rejects_unexpected_shapes(body):
 
 
 def test_real_fixture_ble():
-    hdv = hdv_listings.parse(FIXTURE.read_bytes(), load_keymap()["hdv_listings"])
+    hdv = hdv_listings.parse(FIXTURE.read_bytes(), MAPPING)
     assert hdv.item_id == 289 and len(hdv.listings) == 1
     assert hdv.listings[0].effects == ()
     assert len(hdv.listings[0].prices) == 4 and all(p > 0 for p in hdv.listings[0].prices)
@@ -275,3 +276,15 @@ def test_missing_items_and_dashboard_detail(conn):
     exo = known["frame"].iloc[1]
     assert (exo["Prix"], exo["Exo"], exo["Caractéristiques"]) == (99_999, "Vitalité 150", "Vitalité 150, PA 1")
     assert data.hdv_detail(conn, ws, 3000) is None
+
+
+def test_real_keymap_reads_a_resource_and_refuses_unknown_submessages():
+    mapping = load_keymap()["hdv_listings"]
+    f = mapping.fields
+    packed = b"".join(varint(p) for p in (278, 2438, 26992, 0))
+    entry = vi(f["entry_item"], 289) + ld(f["prices"], packed) + vi(f["uid"], 7)
+    hdv = hdv_listings.parse(ld(f["entries"], entry) + vi(f["item_id"], 289), mapping)
+    assert hdv.item_id == 289 and hdv.listings[0].prices == (278, 2438, 26992, 0)
+    # Un sous-message inconnu dans une annonce (effets dont le champ aurait changé) : annonce refusée.
+    unknown = max(f.values()) + 5
+    assert hdv_listings.parse(ld(f["entries"], entry + ld(unknown, vi(1, 125))) + vi(f["item_id"], 289), mapping) is None

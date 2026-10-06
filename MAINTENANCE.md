@@ -109,6 +109,16 @@ et nom en 6) ; choix `kta` (identifiant en 1) ; métiers `ipz` (entrées en 1 ; 
 expérience en 2, métier en 5). Les messages gardent leur place et leur taille dans le début de
 la connexion d'un build à l'autre : comparer les deux séquences donne les candidats en une minute.
 
+Même build, messages liés à une action : banque `irp` (kamas en 1, entrées en 2, même forme
+d'entrée que l'inventaire) ; cours du marché `ire` (série horaire en 1, journalière en 3 ; prix
+en 1, identifiant en 2, date en 3, quantité en 4 — contrôle : la moyenne des prix journaliers
+pondérée par les quantités redonne le prix moyen du jeu) ; annonces HDV `jzs`, demandées par
+`kcy` (identifiant en 1, ouverture en 2) : entrées en 1, identifiant en 3 ; dans une entrée,
+identifiant en 1, prix en 2, uid en 3. **Les champs des effets d'un équipement ne sont pas encore
+identifiés** (`effects`, `effect_id`, `effect_value` à 0 dans `keymap.json`) : ouvrir un équipement
+à l'HDV, puis chercher dans une entrée le sous-message répété qui porte un identifiant d'effet
+connu et sa valeur. En attendant, le parseur refuse ces annonces au lieu de les enregistrer sans effets.
+
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
 ### 3. Mettre à jour `keymap.json`
