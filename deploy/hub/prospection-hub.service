@@ -1,0 +1,19 @@
+[Unit]
+Description=Hub de partage de Prospection
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=prospection
+WorkingDirectory=/opt/prospection
+# Lié à 127.0.0.1 : seul Caddy, qui chiffre en HTTPS, est joignable depuis Internet.
+ExecStart=/usr/bin/python3 -m dofustool.share.hub --bind 127.0.0.1 --port 8610
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/prospection
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -67,14 +67,20 @@ L'outil se met à jour tout seul à chaque lancement.
 
 # Partager avec des amis
 
-Chacun installe l'outil comme ci-dessus. L'un des joueurs héberge le **hub** : son PC reçoit les
-relevés de marché de chacun et les redistribue. Seuls les prix circulent ; le stock, les ventes,
-les personnages et le chat ne quittent jamais le PC de chacun.
+Chacun installe l'outil comme ci-dessus. Un **hub** reçoit les relevés de marché de chacun et les
+redistribue. Seuls les prix circulent ; le stock, les ventes, les personnages et le chat ne
+quittent jamais le PC de chacun.
 
-Pour que les PC se joignent à distance sans rien ouvrir sur sa box, on utilise **Tailscale**
-(gratuit) : il relie les PC comme s'ils étaient sur le même réseau, de façon chiffrée.
+Deux façons d'héberger le hub :
 
-## Celui qui héberge le hub
+- **Sur un petit serveur loué (recommandé)** : disponible en permanence, et les joueurs n'ont rien
+  d'autre à installer. Celui qui s'en occupe suit [HUB-SERVEUR.md](HUB-SERVEUR.md) ; les autres
+  n'ont qu'à saisir, dans le tutoriel de démarrage ou l'onglet **Config**, leur pseudo, l'adresse
+  `https://…` du hub et leur jeton.
+- **Sur le PC de l'un des joueurs**, gratuitement, avec **Tailscale** pour relier les PC de façon
+  chiffrée. Le partage ne fonctionne alors que lorsque ce PC est allumé. C'est la suite de cette page.
+
+## Hub sur un PC : celui qui l'héberge
 
 1. Installer Tailscale et s'y connecter :
 
@@ -115,7 +121,7 @@ fonctionner aussitôt. Pour retirer aussi du hub ce qu'il avait envoyé :
 .\.venv\Scripts\python.exe -m dofustool.share.hub --purge SonPseudo
 ```
 
-## Chaque ami
+## Hub sur un PC : chaque ami
 
 1. Installer Tailscale, s'y connecter avec son propre compte, et accepter le lien de partage reçu :
 
