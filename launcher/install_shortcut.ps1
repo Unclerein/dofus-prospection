@@ -10,6 +10,7 @@ $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$start`""
 $shortcut.WorkingDirectory = Split-Path -Parent $PSScriptRoot
 $shortcut.WindowStyle = 7  # fenêtre réduite
 $shortcut.Description = 'Lance la capture passive dofustool puis le launcher Ankama'
+$shortcut.IconLocation = (Join-Path $PSScriptRoot 'dofustool.ico')
 $shortcut.Save()
 Write-Host "Raccourci créé : $link"
 
@@ -22,5 +23,6 @@ $shortcut.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -F
 $shortcut.WorkingDirectory = Split-Path -Parent $PSScriptRoot
 $shortcut.WindowStyle = 7
 $shortcut.Description = 'Ouvre l''interface dofustool sans lancer le jeu'
+$shortcut.IconLocation = (Join-Path $PSScriptRoot 'dofustool.ico')
 $shortcut.Save()
 Write-Host "Raccourci créé : $link"
