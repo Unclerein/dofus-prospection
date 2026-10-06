@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, characters, hdv_listings, load_keymap, market_history, storage
+from ..messages import avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -70,6 +70,16 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
                 current[connection_id] = parsed
                 db.save_holdings(market, db.INVENTORY, parsed, ts)
                 counts["inventaires lus"] += 1
+    mine = keymap.get("my_sales")
+    if mine is not None:
+        counts["listes de ventes lues"] = 0
+        for ts, body in archive.execute(
+            "SELECT ts, body FROM messages WHERE key = ? AND direction = 's2c' ORDER BY ts", (mine.key,)
+        ):
+            parsed = sales.parse(body, mine)
+            if parsed is not None:
+                db.save_sales(market, parsed, ts)
+                counts["listes de ventes lues"] += 1
     listing, select, jobs = (keymap.get(k) for k in ("character_list", "character_select", "job_levels"))
     if listing is not None:
         for ts, body in archive.execute(

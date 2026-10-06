@@ -14,4 +14,6 @@ class Mapping:
 
 def load_keymap(path: Path = KEYMAP_PATH) -> dict[str, Mapping]:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    return {name: Mapping(entry["key"], entry["fields"]) for name, entry in raw.items()}
+    # « stale » : clé d'un ancien build, pas encore retrouvée sur le nouveau. L'utiliser ferait lire
+    # un autre message sous l'ancien nom.
+    return {name: Mapping(entry["key"], entry["fields"]) for name, entry in raw.items() if not entry.get("stale")}

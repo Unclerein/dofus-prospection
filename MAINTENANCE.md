@@ -8,6 +8,33 @@ dans `data/archive.sqlite` et sera redécodé à la fin.
 Les règles du `PLAN.md` §3 s'appliquent à toute la procédure : capture passive uniquement, et
 aucun affichage de chaîne, d'octet brut, de handshake ou de flux d'authentification.
 
+## Ce qui se fait tout seul
+
+La capture retrouve elle-même les messages par leur structure (`dofustool/identify.py`) :
+
+- si les prix moyens ne sont pas décodés une minute après la connexion, elle cherche dans ce que
+  la connexion a échangé. Si elle retrouve la liste des prix sous une autre clé, c'est une mise à
+  jour : elle réécrit `keymap.json`, marque « périmées » (`"stale": true`) les entrées pas encore
+  retrouvées pour qu'elles ne servent plus, et décode ce qui était déjà arrivé ;
+- ensuite, toutes les 20 secondes, elle cherche les messages encore manquants. Ceux qui dépendent
+  d'une action (banque, annonces HDV, cours du marché, onglet Vendre) sont retrouvés la première
+  fois que tu fais l'action en jeu. Les annonces HDV restent « partielles » (`"partial": true`)
+  tant qu'aucun équipement n'a été ouvert : il faut en voir un pour retrouver le champ des effets ;
+- un message n'est retenu que si son contenu se contrôle (objets connus, niveaux cohérents avec
+  l'expérience, moyenne des ventes égale au prix moyen du jeu…) et s'il n'y a qu'un seul candidat ;
+- l'ancienne table est copiée dans `data/keymap-backups/` avant chaque écriture.
+
+Le journal `data/capture.log` le raconte : `Mise à jour du jeu détectée`, puis une ligne
+`Message retrouvé : …` par message. Pour vérifier ou rattraper une connexion archivée :
+
+```powershell
+.\.venv\Scripts\python.exe -m dofustool.tools.reidentify            # dernière connexion, sans rien écrire
+.\.venv\Scripts\python.exe -m dofustool.tools.reidentify --write    # écrit dans keymap.json
+```
+
+La suite de ce document ne sert que si l'alerte persiste : la recherche automatique n'a rien
+trouvé, ou a trouvé plusieurs candidats (`Message … non retrouvé : plusieurs candidats`).
+
 ## Reconnaître la panne
 
 - Le journal `data/capture.log` contient `ALERTE : Flux de jeu actif depuis … sans prix moyens décodés`.

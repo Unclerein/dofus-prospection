@@ -42,6 +42,7 @@ def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH)
         "(SELECT MAX(captured_at) FROM holdings_meta), "
         # Somme des niveaux, pas la date du relevé : un gain d'expérience ne doit pas tout recalculer.
         "(SELECT COUNT(*) FROM characters), (SELECT SUM(level) FROM character_jobs), "
+        "(SELECT MAX(captured_at) FROM my_sales_meta), "
         "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
         " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
     ).fetchone()
@@ -569,6 +570,57 @@ class Api:
                 raise ValueError("type d'objet inconnu")
             db.set_type_ignored(conn, type_name, ignored, time.time())
             return {"type": type_name, "ignored": ignored, "count": len(db.ignored_types(conn))}
+        finally:
+            conn.close()
+
+    # --- mes ventes ----------------------------------------------------------
+
+    def sales(self) -> dict:
+        """Lots que le joueur a en vente, comparés au prix le plus bas relevé à l'HDV pour la même taille de lot."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, cfg = state["ws"], state["cfg"]
+            now = time.time()
+            cheapest = {
+                row[0]: row[1:]
+                for row in conn.execute(
+                    "SELECT item_id, MIN(NULLIF(p1, 0)), MIN(NULLIF(p10, 0)), MIN(NULLIF(p100, 0)), MIN(NULLIF(p1000, 0)), "
+                    "MAX(captured_at) FROM hdv_current WHERE captured_at >= ? GROUP BY item_id",
+                    (now - cfg.last_sale_max_age_hours * 3600,),
+                )
+            }
+            rows = []
+            for item_id, lot, price, remaining, captured_at in conn.execute(
+                "SELECT item_id, lot, price, remaining_s, captured_at FROM my_sales"
+            ):
+                item = ws.items.get(item_id)
+                equipment = ws.prices.is_equipment(item_id)
+                seen = cheapest.get(item_id)
+                # Un équipement se compare mal : chaque exemplaire a ses propres jets.
+                hdv = seen[(1, 10, 100, 1000).index(lot)] if seen and not equipment else None
+                avg = ws.prices.avg_price(item_id)
+                rows.append(
+                    {
+                        "item_id": item_id,
+                        "name": item.name if item else f"#{item_id}",
+                        "icon": state["icons"].get(item_id),
+                        "type": state["meta"].get(item_id, (None, None))[0],
+                        "equipment": equipment,
+                        "lot": lot,
+                        "price": price,
+                        "unit": price / lot,
+                        "hdv": hdv,
+                        "hdv_ts": seen[4] if hdv is not None else None,
+                        "undercut": price - hdv if hdv is not None and hdv < price else 0,
+                        "avg": avg * lot if avg else None,
+                        "remaining_s": max(0, remaining - (now - captured_at)),
+                        "captured_at": captured_at,
+                    }
+                )
+            rows.sort(key=lambda r: (-(r["undercut"] > 0), -r["price"]))
+            meta = conn.execute("SELECT COUNT(*), MIN(captured_at), MAX(captured_at) FROM my_sales_meta").fetchone()
+            return clean({"rows": rows, "markets": meta[0], "oldest": meta[1], "latest": meta[2], "tax": cfg.hdv_tax, "now": now})
         finally:
             conn.close()
 

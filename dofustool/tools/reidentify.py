@@ -1,10 +1,10 @@
-"""Retrouve dans l'archive, par sa structure, le message des prix moyens après une rotation des clés.
+"""Retrouve dans l'archive, par leur structure, les messages connus après une rotation des clés.
 
-Cherche un gros message serveur -> client fait d'un seul champ répété dont chaque entrée
-porte deux entiers : un identifiant d'item connu et un prix. N'affiche que des clés, des
-numéros de champ et des compteurs.
+La capture le fait toute seule en cours de partie (voir dofustool/identify.py) ; cette commande
+sert à vérifier, ou à rattraper une connexion archivée. N'affiche que des clés, des numéros de
+champ et des compteurs.
 
-Usage : python -m dofustool.tools.reidentify [--since AAAA-MM-JJ] [--write]
+Usage : python -m dofustool.tools.reidentify [--connection N] [--write]
 """
 import argparse
 import json
@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 
-from .. import db
+from .. import db, identify
 from ..archive import ARCHIVE_PATH
 from ..messages import KEYMAP_PATH, avg_prices
 from ..protocol.tcp import S2C
@@ -88,42 +88,58 @@ def write_keymap(candidate: Candidate) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--since", help="ne regarder que les messages archivés depuis cette date (AAAA-MM-JJ)")
-    parser.add_argument("--write", action="store_true", help="écrire le candidat retenu dans keymap.json")
+    parser.add_argument("--connection", type=int, help="numéro de la connexion archivée à examiner (défaut : la dernière)")
+    parser.add_argument("--write", action="store_true", help="écrire les messages retrouvés dans keymap.json")
     args = parser.parse_args()
 
     if not ARCHIVE_PATH.exists():
         print("data/archive.sqlite absent : fais d'abord une capture.")
         return 1
-    since = datetime.strptime(args.since, "%Y-%m-%d").timestamp() if args.since else 0.0
     market = db.connect()
-    known = {row[0] for row in market.execute("SELECT id FROM items")}
+    context = identify.Context.load(market)
     market.close()
-    if not known:
-        print("Aucun item en base (données statiques non importées) : les identifiants ne peuvent pas être vérifiés.")
+    if not context.items:
+        print("Aucun item en base (données statiques non importées) : rien ne peut être vérifié.")
+        return 1
     archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
-    candidates = find_candidates(archive, known, since)
+    row = archive.execute(
+        "SELECT id, started_at FROM connections WHERE id = COALESCE(?, (SELECT MAX(id) FROM connections))", (args.connection,)
+    ).fetchone()
+    if row is None:
+        print("Connexion introuvable dans l'archive.")
+        return 1
+    scan = identify.Scan(row[1])
+    scan.feed(archive, row[0])
     archive.close()
+    found, problems = identify.identify(scan, context)
 
-    if not candidates:
-        print("Aucun message n'a la structure des prix moyens. Vérifie que la capture va au-delà du choix du personnage.")
-        return 1
-    current = json.loads(KEYMAP_PATH.read_text(encoding="utf-8")).get("avg_prices")
-    for c in candidates:
-        ratio = "non vérifié" if c.known_ratio is None else f"{c.known_ratio:.1%} d'items connus"
-        print(f"clé {c.key} : {c.entries} entrées, champs {c.fields}, {ratio}")
-    best = candidates[0]
-    if current == {"key": best.key, "fields": best.fields}:
-        print("keymap.json est déjà à jour pour avg_prices.")
+    raw = identify.read_keymap(KEYMAP_PATH)
+    changed = identify.changes(raw, found)
+    print(f"Connexion {row[0]} du {datetime.fromtimestamp(row[1]):%d/%m/%Y %H:%M} : {len(scan.best)} clés échangées.")
+    for name in identify.NAMES:
+        if name in problems:
+            state = problems[name]
+        elif name not in found:
+            state = "pas vu dans cette connexion" + (" (clé périmée)" if raw.get(name, {}).get("stale") else "")
+        elif name in changed:
+            state = f"retrouvé : clé {found[name].key}, champs {found[name].fields}"
+        else:
+            state = f"à jour (clé {found[name].key})"
+        if name in found and found[name].partial:
+            state += " ; effets d'équipement pas encore vus"
+        print(f"  {name:17} {state}")
+
+    prices = found.get("avg_prices")
+    current = raw.get("avg_prices", {})
+    new_build = prices is not None and (current.get("key") != prices.key or current.get("fields") != prices.fields)
+    if not changed:
+        print("keymap.json est déjà à jour.")
         return 0
-    if not best.confident or sum(c.confident for c in candidates) != 1:
-        print("Pas de candidat unique et sûr : rien n'est écrit. Voir MAINTENANCE.md, identification manuelle.")
-        return 1
-    if args.write:
-        write_keymap(best)
-        print(f"keymap.json mis à jour : avg_prices -> {best.key}. Lance maintenant le backfill.")
-    else:
-        print(f"Candidat retenu : {best.key}. Relance avec --write pour l'écrire dans keymap.json.")
+    if not args.write:
+        print("Relance avec --write pour écrire ces changements dans keymap.json.")
+        return 0
+    identify.write_keymap(KEYMAP_PATH, found if new_build else changed, new_build, db.MARKET_PATH.parent / "keymap-backups")
+    print("keymap.json mis à jour (ancienne version gardée dans data/keymap-backups). Lance maintenant le backfill.")
     return 0
 
 

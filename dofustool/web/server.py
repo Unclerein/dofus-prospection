@@ -125,6 +125,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     )
                 if path == "/api/ignored":
                     return self._json(api.ignored())
+                if path == "/api/sales":
+                    return self._json(api.sales())
                 if path == "/api/stock":
                     return self._json(api.stock())
                 if path == "/api/stock/crafts":

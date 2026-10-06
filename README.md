@@ -60,6 +60,6 @@ Tests :
 - **Les données précises ne couvrent que les objets consultés manuellement.**
 - **Les tendances sont faibles au début** pour les objets jamais consultés dans le cours du marché.
 - **Les marges ignorent** le temps passé, la valeur des ressources farmées soi-même au-delà du coût d'opportunité et l'XP de métier.
-- **Chaque mise à jour du jeu peut casser le décodage** jusqu'à ré-identification.
+- **Chaque mise à jour du jeu change les clés des messages.** La capture les retrouve seule dans la plupart des cas ; sinon, voir [MAINTENANCE.md](MAINTENANCE.md).
 - **Un seul serveur,** Windows avec Npcap uniquement.
 - **Zone grise vis-à-vis des CGU d'Ankama.** Ne pas diffuser l'outil, les archives ni les captures.

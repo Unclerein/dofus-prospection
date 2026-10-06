@@ -68,6 +68,16 @@ class Archive:
         row = self._db.execute("SELECT body FROM messages WHERE key = ? ORDER BY ts DESC LIMIT 1", (key,)).fetchone()
         return row[0] if row else None
 
+    @property
+    def db(self) -> sqlite3.Connection:
+        """Connexion SQLite, pour relire ce qui vient d'être archivé (y compris avant validation)."""
+        return self._db
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        """Connexion SQLite, pour relire ce qui vient d'être archivé (y compris avant validation)."""
+        return self._db
+
     def commit(self) -> None:
         self._db.commit()
 

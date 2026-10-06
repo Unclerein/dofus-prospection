@@ -8,9 +8,9 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import db
+from .. import db, identify
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, storage
+from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -19,6 +19,8 @@ log = logging.getLogger("dofustool.capture")
 
 # Sans trafic depuis ce délai, la connexion n'est plus considérée comme active.
 ACTIVE_WINDOW_S = 30.0
+# Tant qu'un message reste à retrouver (après une mise à jour du jeu), on le cherche à cet intervalle.
+IDENTIFY_EVERY_S = 20.0
 
 
 @dataclass(slots=True)
@@ -30,6 +32,7 @@ class _ConnWatch:
     alerted: bool = False
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
     character_id: int | None = None  # personnage choisi sur cette connexion
+    scan: identify.Scan | None = None  # ce que la connexion a échangé, pour retrouver les messages
 
 
 class Pipeline:
@@ -52,6 +55,9 @@ class Pipeline:
         self.timeout = avg_prices_timeout_s
         self._watch: dict[int, _ConnWatch] = {}
         self._errors: set[str] = set()
+        self._next_identify = 0.0
+        self._context: identify.Context | None = None
+        self.backup_dir = db.MARKET_PATH.parent / "keymap-backups"
 
     def handle(self, segment: Segment) -> None:
         try:
@@ -70,7 +76,9 @@ class Pipeline:
         watch.last_ts = msg.ts
         if watch.archive_id is not None:
             self.archive.add(watch.archive_id, msg)
+        self._decode(msg, watch)
 
+    def _decode(self, msg: Message, watch: _ConnWatch) -> None:
         mapping = self.keymap.get("market_history")
         if mapping is not None and msg.key == mapping.key:
             history = market_history.parse(msg.body, mapping)
@@ -106,6 +114,13 @@ class Pipeline:
                 db.save_job_levels(self.market, watch.character_id, jobs, msg.ts)
                 if len(jobs) > 1:  # la liste complète de la connexion, pas un gain d'expérience
                     log.info("Métiers enregistrés : %d.", len(jobs))
+            return
+
+        mapping = self.keymap.get("my_sales")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            listing = sales.parse(msg.body, mapping)
+            if listing is not None and db.save_sales(self.market, listing, msg.ts):
+                log.info("Lots en vente enregistrés : %d.", len(listing.sales))
             return
 
         mapping = self.keymap.get("bank")
@@ -164,6 +179,10 @@ class Pipeline:
             for watch in self._watch.values():
                 active = now - watch.last_ts <= ACTIVE_WINDOW_S
                 if active and not watch.got_prices and not watch.alerted and now - watch.first_ts > self.timeout:
+                    # Avant d'alerter : une mise à jour du jeu a peut-être seulement changé les clés.
+                    self._identify(watch, new_build=True)
+                    if watch.got_prices:
+                        continue
                     watch.alerted = True
                     text = (
                         f"Flux de jeu actif depuis {now - watch.first_ts:.0f} s sans prix moyens décodés. "
@@ -172,9 +191,64 @@ class Pipeline:
                     )
                     log.warning("ALERTE : %s", text)
                     db.set_status(self.market, decode_alert=text, decode_alert_ts=now)
+            if now >= self._next_identify:
+                self._next_identify = now + IDENTIFY_EVERY_S
+                for watch in self._watch.values():
+                    if now - watch.last_ts <= ACTIVE_WINDOW_S:
+                        self._identify(watch, new_build=False)
             db.set_status(self.market, heartbeat_ts=now)
         except Exception as exc:
             self._log_error_once(exc)
+
+    def _identify(self, watch: _ConnWatch, new_build: bool) -> None:
+        """Retrouve par leur structure les messages que keymap.json ne connaît pas (ou plus) et les décode.
+
+        new_build : les prix moyens ne sont pas décodés, donc toutes les clés sont peut-être périmées.
+        """
+        if self._keymap_path is None or watch.archive_id is None or not self._keymap_path.exists():
+            return
+        raw = identify.read_keymap(self._keymap_path)
+        wanted = identify.NAMES if new_build else tuple(identify.pending(raw))
+        if not wanted:
+            return
+        if watch.scan is None:
+            watch.scan = identify.Scan(watch.first_ts)
+        watch.scan.feed(self.archive.db, watch.archive_id)
+        if self._context is None:
+            self._context = identify.Context.load(self.market)
+        found, problems = identify.identify(watch.scan, self._context, wanted)
+        if new_build:
+            prices = found.get("avg_prices")
+            current = raw.get("avg_prices", {})
+            if prices is None:
+                return  # pas de liste de prix dans le flux : le personnage n'est sans doute pas encore choisi
+            new_build = current.get("key") != prices.key or current.get("fields") != prices.fields
+        changed = identify.changes(raw, found)
+        if not changed and not new_build:
+            return
+        identify.write_keymap(self._keymap_path, found if new_build else changed, new_build, self.backup_dir)
+        if new_build:
+            log.warning("Mise à jour du jeu détectée : les clés des messages ont changé.")
+        for name, item in sorted(changed.items()):
+            log.info("Message retrouvé : %s (clé %s)%s.", name, item.key, ", sans les effets d'équipement" if item.partial else "")
+        for name, problem in sorted(problems.items()):
+            log.warning("Message %s non retrouvé : %s.", name, problem)
+        self._reload_keymap()
+        self._context = None  # les prix moyens de contrôle vont changer
+        self._replay(watch, {item.key for item in changed.values()})
+
+    def _replay(self, watch: _ConnWatch, keys: set[str]) -> None:
+        """Décode ce que la connexion avait déjà reçu sous des clés tout juste retrouvées."""
+        if not keys:
+            return
+        marks = ",".join("?" * len(keys))
+        rows = self.archive.db.execute(
+            f"SELECT ts, direction, key, frame_field, correlation, body FROM messages "
+            f"WHERE connection_id = ? AND key IN ({marks}) ORDER BY id",
+            (watch.archive_id, *sorted(keys)),
+        ).fetchall()
+        for ts, direction, key, frame_field, correlation, body in rows:
+            self._decode(Message(0, ts, direction, key, body, frame_field, correlation), watch)
 
     def _reload_keymap(self) -> None:
         if self._keymap_path is None or not self._keymap_path.exists():

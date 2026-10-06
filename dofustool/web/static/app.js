@@ -135,6 +135,7 @@ const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo
 const NAV = [
   ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z'],
   ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6'],
+  ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1'],
   ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500'],
   ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
   ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
@@ -179,7 +180,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig };
+  const pages = { crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -532,6 +533,65 @@ function stockItems(data) {
       h('div', { class: 'panel-foot' }, h('span', {}, 'Objets portés exclus.'),
         h('span', {}, `${fmt(Math.min(ui.limit, rows.length))} sur ${fmt(rows.length)} `, rows.length > ui.limit && h('button', { class: 'btn', onclick: () => set({ limit: ui.limit + 300 }) }, 'Afficher plus')))),
   ];
+}
+
+// ---------------------------------------------------------------- page Mes ventes
+
+function remainingLabel(seconds) {
+  if (seconds <= 0) return 'expiré';
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
+  if (seconds < 2 * 86400) return `${Math.round(seconds / 3600)} h`;
+  return `${Math.round(seconds / 86400)} j`;
+}
+
+async function pageSales() {
+  const data = await cached('sales', '/api/sales');
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Mes ventes'),
+    h('div', { class: 'lead' }, data.latest ? `Relevé ${ago(data.latest, data.now)}` + (data.markets > 1 ? ` · ${data.markets} HDV` : '') : 'Lots que tu as mis en vente')));
+  if (!data.markets) {
+    return [head, h('div', { class: 'panel empty' }, 'Ouvre l\'onglet Vendre d\'un HDV en jeu, capture active : tes lots apparaîtront ici.')];
+  }
+  const ui = S.ui.sales || (S.ui.sales = { view: 'all', q: '' });
+  const undercut = data.rows.filter((r) => r.undercut > 0);
+  const unknown = data.rows.filter((r) => r.hdv === null && !r.equipment);
+  const soon = data.rows.filter((r) => r.remaining_s < 3 * 86400);
+  const total = data.rows.reduce((sum, r) => sum + r.price, 0);
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Lots en vente', fmt(data.rows.length), data.markets > 1 ? `${data.markets} HDV relevés` : null),
+    kpi('Valeur affichée', fmt(total), 'somme des prix demandés'),
+    kpi('Sous-enchéris', fmt(undercut.length), undercut.length ? `${fmt(undercut.reduce((sum, r) => sum + r.price, 0))} kamas concernés` : 'aucun parmi les prix relevés', undercut.length ? 'warn' : 'gain'),
+    kpi('Expirent sous 3 jours', fmt(soon.length)));
+
+  const query = norm(ui.q.trim());
+  const pool = { all: data.rows, undercut, unknown, soon }[ui.view] || data.rows;
+  const shown = pool.filter((r) => !query || norm(r.name).includes(query));
+  let typing = null;
+  const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
+    segmented('Lots affichés', [['all', `Tous (${data.rows.length})`], ['undercut', `Sous-enchéris (${undercut.length})`], ['unknown', `Prix HDV non relevé (${unknown.length})`], ['soon', `Expirent bientôt (${soon.length})`]], ui.view, (view) => { ui.view = view; refresh(); }),
+    h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 's-q' }, 'Objet'),
+      h('input', { id: 's-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
+        oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));
+
+  const state = (r) => {
+    if (r.equipment) return h('span', { class: 'muted' }, 'équipement');
+    if (r.hdv === null) return h('span', { class: 'muted' }, 'non relevé');
+    if (r.undercut > 0) return [h('div', { class: 'warn', style: 'font-weight: 600' }, `−${fmt(r.undercut)}`), h('div', { class: 'source' }, `HDV à ${fmt(r.hdv)} · ${ago(r.hdv_ts, data.now)}`)];
+    return [h('div', { class: 'gain', style: 'font-weight: 600' }, 'le moins cher'), h('div', { class: 'source' }, ago(r.hdv_ts, data.now))];
+  };
+  const table = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, `${shown.length} lot${shown.length > 1 ? 's' : ''}`), h('span', { class: 'muted small' }, 'Comparés au prix le plus bas relevé pour la même taille de lot')),
+    shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun lot ne correspond.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Lot'), h('th', {}, 'Mon prix'), h('th', {}, 'À l\'unité'), h('th', {}, 'Face à l\'HDV'), h('th', {}, 'Prix moyen du lot'), h('th', {}, 'Expire dans'))),
+        h('tbody', {}, shown.slice(0, 400).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+          h('td', { class: 'l' }, itemCell(r.icon, r.name, r.type)),
+          h('td', { class: 'soft' }, `x${r.lot}`),
+          h('td', { class: 'strong' }, fmt(r.price)),
+          h('td', { class: 'soft' }, r.lot > 1 ? (r.unit < 100 && !Number.isInteger(r.unit) ? r.unit.toFixed(2).replace('.', ',') : fmt(r.unit)) : '—'),
+          h('td', {}, state(r)),
+          h('td', { class: 'soft' }, fmt(r.avg)),
+          h('td', { class: r.remaining_s < 3 * 86400 ? 'warn' : 'soft' }, remainingLabel(r.remaining_s))))))));
+  return [head, kpis, filters, table];
 }
 
 // ---------------------------------------------------------------- page Métiers
