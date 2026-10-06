@@ -47,87 +47,32 @@ puis le relancer.
 ## 4. Premier lancement
 
 1. Double-cliquer **« Dofus + Prospection »** sur le bureau. Il démarre l'écoute, ouvre le launcher
-   Ankama et ouvre Prospection dans le navigateur, sur le tutoriel.
-2. Lancer le jeu et choisir son personnage, comme d'habitude.
-3. Dans le tutoriel, renseigner son serveur, son pseudo, et l'adresse du hub et le jeton si on en a
-   reçu (voir « Partager avec des amis »). Les étapes se cochent toutes seules.
+   Ankama et ouvre Prospection dans le navigateur.
+2. Une **visite guidée** s'affiche : y saisir son serveur de jeu et son pseudo, puis, à l'étape
+   « Partager avec tes amis », l'adresse du hub et le jeton reçus (voir plus bas).
+3. Lancer le jeu et choisir son personnage, comme d'habitude. Les étapes de la visite se cochent
+   toutes seules.
 
 Toujours lancer le jeu par ce raccourci : l'écoute doit démarrer avant la connexion. Le second
 raccourci, **« Prospection »**, ouvre l'outil seul, sans le jeu.
 
 L'outil se met à jour tout seul à chaque lancement.
 
----
+## 5. Partager les prix avec le groupe
 
-# Partager avec des amis
+Celui qui t'a donné l'outil t'envoie deux choses en privé :
 
-Chacun installe l'outil comme ci-dessus. Un **hub** reçoit les relevés de marché de chacun et les
-redistribue. Seuls les prix circulent ; le stock, les ventes, les personnages et le chat ne
-quittent jamais le PC de chacun.
+- **l'adresse du hub**, qui commence par `https://` ;
+- **ton jeton**, un mot de passe personnel. Ne le partage pas.
 
-Deux façons d'héberger le hub :
+Les saisir dans la visite guidée, ou plus tard dans l'onglet **Config**, section « Partage avec des
+amis », avec ton pseudo. Laisser « Ce PC héberge le hub » décoché, puis **Enregistrer**.
 
-- **Sur un petit serveur loué (recommandé)** : disponible en permanence, et les joueurs n'ont rien
-  d'autre à installer. Celui qui s'en occupe suit [HUB-SERVEUR.md](HUB-SERVEUR.md) ; les autres
-  n'ont qu'à saisir, dans le tutoriel de démarrage ou l'onglet **Config**, leur pseudo, l'adresse
-  `https://…` du hub et leur jeton.
-- **Sur le PC de l'un des joueurs**, gratuitement, avec **Tailscale** pour relier les PC de façon
-  chiffrée. Le partage ne fonctionne alors que lorsque ce PC est allumé. C'est la suite de cette page.
+Dans la minute, l'onglet **État** affiche « Synchronisé à l'instant » et la liste des joueurs du
+groupe. À partir de là, les prix que chacun relève à l'HDV profitent à tous.
 
-## Hub sur un PC : celui qui l'héberge
-
-1. Installer Tailscale et s'y connecter :
-
-   ```powershell
-   winget install --id Tailscale.Tailscale -e
-   ```
-
-2. Autoriser le hub dans le pare-feu Windows, pour le réseau Tailscale seulement. Dans un
-   PowerShell **ouvert en administrateur** (clic droit, « Exécuter en tant qu'administrateur ») :
-
-   ```powershell
-   New-NetFirewallRule -DisplayName "Prospection hub" -Direction Inbound -Protocol TCP -LocalPort 8610 -Action Allow -InterfaceAlias "Tailscale"
-   ```
-
-3. Dans Prospection, onglet **Config**, section « Partage avec des amis » :
-   - cocher **« Ce PC héberge le hub »** ;
-   - ajouter chaque ami par son pseudo : un jeton est créé pour lui ;
-   - s'ajouter soi-même à la liste, puis coller son propre jeton dans « Mon jeton », avec
-     l'adresse `http://127.0.0.1:8610` dans « Adresse du hub » ;
-   - **Enregistrer**, puis fermer et relancer Prospection.
-
-4. Partager son PC avec chaque ami dans Tailscale : sur
-   <https://login.tailscale.com/admin/machines>, menu « … » de son PC, **Share**, et envoyer le
-   lien à l'ami (documentation : <https://tailscale.com/kb/1084/sharing>).
-
-5. Envoyer à chaque ami, en privé : **l'adresse du hub** affichée dans Config (elle commence par
-   `http://100.`) et **son jeton**. Un jeton est un mot de passe : un par ami, jamais dans un
-   salon public.
-
-Le partage fonctionne tant que ce PC est allumé avec Prospection lancé ; le jeu n'a pas besoin de
-tourner. PC éteint, chacun continue à utiliser l'outil de son côté, et les relevés partent au hub
-dès qu'il revient.
-
-Pour retirer un ami : le supprimer de la liste dans Config et enregistrer. Son jeton cesse de
-fonctionner aussitôt. Pour retirer aussi du hub ce qu'il avait envoyé :
-
-```powershell
-.\.venv\Scripts\python.exe -m dofustool.share.hub --purge SonPseudo
-```
-
-## Hub sur un PC : chaque ami
-
-1. Installer Tailscale, s'y connecter avec son propre compte, et accepter le lien de partage reçu :
-
-   ```powershell
-   winget install --id Tailscale.Tailscale -e
-   ```
-
-2. Dans Prospection (tutoriel de démarrage, ou onglet **Config**) : saisir son pseudo, l'adresse
-   du hub et son jeton, puis enregistrer.
-
-3. Vérifier dans l'onglet **État**, panneau « Partage » : « Synchronisé à l'instant », et la liste
-   des amis avec leur dernier passage.
+Seuls les prix du marché circulent. Ton stock, tes ventes, tes personnages et le chat ne quittent
+jamais ton PC.
 
 ---
 
@@ -139,9 +84,12 @@ fonctionner aussitôt. Pour retirer aussi du hub ce qu'il avait envoyé :
 | Le raccourci ne fait rien | Ouvrir `C:\prospection\data\capture.log` : la dernière ligne dit ce qui bloque. |
 | L'onglet État affiche « Capture arrêtée » en jeu | Le jeu a été lancé sans le raccourci : le fermer et le relancer par « Dofus + Prospection ». |
 | Aucun prix après le choix du personnage | VPN actif ? Désigner la bonne interface réseau dans Config. Sinon, attendre une minute : après une mise à jour du jeu, l'outil retrouve seul ses repères. |
-| Partage : « hub injoignable » | Le PC qui héberge est éteint, Tailscale n'est pas connecté d'un côté, ou la règle de pare-feu manque. |
-| Partage : « jeton inconnu » | Jeton mal copié, ou l'hôte n'a pas enregistré sa liste d'amis. |
+| Partage : « hub injoignable » | Vérifier l'adresse du hub (elle commence par `https://`) et sa connexion Internet. Si ça dure, prévenir celui qui gère le hub. |
+| Partage : « jeton inconnu » | Jeton mal copié (attention aux espaces). Sinon, en redemander un à celui qui gère le hub. |
 
 L'outil lit seulement ce que le jeu reçoit : il n'envoie rien, ne clique pas et ne modifie pas le
 jeu. Cette lecture reste une zone grise vis-à-vis des conditions d'utilisation d'Ankama : chacun
 l'utilise sous sa propre responsabilité, et l'outil ne se diffuse pas au-delà du groupe.
+
+Pour mettre en place le hub du groupe : [HUB-SERVEUR.md](HUB-SERVEUR.md) (serveur loué) ou
+[HUB-PC.md](HUB-PC.md) (sur son propre PC).
