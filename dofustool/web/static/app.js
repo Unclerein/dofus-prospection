@@ -112,6 +112,7 @@ const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo
 const NAV = [
   ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z'],
   ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6'],
+  ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500'],
   ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
   ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
@@ -153,7 +154,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
+  const pages = { crafts: pageCrafts, stock: pageStock, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -506,6 +507,97 @@ function stockItems(data) {
       h('div', { class: 'panel-foot' }, h('span', {}, 'Objets portés exclus.'),
         h('span', {}, `${fmt(Math.min(ui.limit, rows.length))} sur ${fmt(rows.length)} `, rows.length > ui.limit && h('button', { class: 'btn', onclick: () => set({ limit: ui.limit + 300 }) }, 'Afficher plus')))),
   ];
+}
+
+// ---------------------------------------------------------------- page Métiers
+
+const levelToXp = (level) => level * (level - 1) * 10;
+const xpToLevel = (xp) => Math.max(1, Math.min(200, Math.floor((Math.sqrt(1 + 0.4 * xp) + 1) / 2)));
+
+function loadJobState() {
+  try { return JSON.parse(localStorage.getItem('dofustool.jobs') || '{}'); } catch (error) { return {}; }
+}
+
+async function pageJobs() {
+  const jobs = (await cached('jobs', '/api/jobs')).jobs;
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Métiers'), h('div', { class: 'lead' }, 'Chemin le moins coûteux vers un niveau')));
+  if (!jobs.length) return [head, h('div', { class: 'panel empty' }, 'Aucune recette connue.')];
+
+  const saved = S.ui.jobs || (S.ui.jobs = Object.assign({ job: jobs[0].id, bonus: 100, resale: false, perJob: {} }, loadJobState()));
+  if (!jobs.some((j) => j.id === saved.job)) saved.job = jobs[0].id;
+  const job = jobs.find((j) => j.id === saved.job);
+  const mine = saved.perJob[job.id] || (saved.perJob[job.id] = { xp: job.level ? levelToXp(job.level) : 0, target: Math.min(200, (job.level || 1) + 20), exclude: [] });
+  const persist = () => { try { localStorage.setItem('dofustool.jobs', JSON.stringify(saved)); } catch (error) { /* stockage indisponible */ } };
+  const change = (mutate) => { mutate(); persist(); refresh(); };
+
+  const level = xpToLevel(mine.xp);
+  const query = `job=${job.id}&xp=${mine.xp}&target=${mine.target}&bonus=${saved.bonus}&resale=${saved.resale ? 1 : 0}&exclude=${mine.exclude.join(',')}`;
+  const plan = await cached(`plan-${query}`, `/api/jobs/plan?${query}`);
+
+  const controls = h('section', { class: 'panel pad filters', 'aria-label': 'Réglages' },
+    h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'j-job' }, 'Métier'),
+      h('select', { id: 'j-job', onchange: (e) => change(() => { saved.job = Number(e.target.value); }) },
+        jobs.map((j) => h('option', { value: j.id, selected: j.id === job.id }, j.name)))),
+    h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 'j-xp' }, 'XP actuelle'),
+      h('input', { id: 'j-xp', type: 'number', min: 0, value: mine.xp, onchange: (e) => change(() => { mine.xp = Math.max(0, Math.floor(Number(e.target.value) || 0)); }) })),
+    h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-level' }, 'ou niveau actuel'),
+      h('input', { id: 'j-level', type: 'number', min: 1, max: 200, value: level, onchange: (e) => change(() => { mine.xp = levelToXp(Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 1)))); }) })),
+    h('div', { class: 'field', style: 'flex: 0 1 130px' }, h('label', { for: 'j-target' }, 'Niveau souhaité'),
+      h('input', { id: 'j-target', type: 'number', min: 1, max: 200, value: mine.target, class: 'set', onchange: (e) => change(() => { mine.target = Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 1))); }) })),
+    h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-bonus' }, 'Bonus XP %'),
+      h('input', { id: 'j-bonus', type: 'number', min: 0, value: saved.bonus, onchange: (e) => change(() => { saved.bonus = Math.max(0, Number(e.target.value) || 100); }) })),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
+
+  const excluded = plan.excluded.length ? h('div', { class: 'tags', style: 'align-items: center' }, h('span', { class: 'muted small' }, 'Retirés :'),
+    plan.excluded.map((x) => h('span', { class: 'chip on' }, x.name,
+      h('button', { class: 'chip-x', 'aria-label': `Remettre ${x.name}`, title: 'Remettre', onclick: () => change(() => { mine.exclude = mine.exclude.filter((i) => i !== x.item_id); }) }, '×'))),
+    h('button', { class: 'btn quiet', onclick: () => change(() => { mine.exclude = []; }) }, 'Tout remettre')) : null;
+
+  if (mine.target <= level) {
+    return [head, controls, excluded, h('div', { class: 'panel empty' }, `Tu es déjà niveau ${level}.`)];
+  }
+
+  const gained = plan.end_xp - plan.start_xp;
+  const kpis = h('section', { class: 'kpis' },
+    kpi(saved.resale ? 'Coût net' : 'Coût des ingrédients', plan.cost < 0 ? signed(-plan.cost) : fmt(plan.cost), plan.cost < 0 ? 'bénéfice' : null, plan.cost < 0 ? 'gain' : ''),
+    kpi('Niveaux', `${plan.start_level} → ${plan.end_level}`, `${fmt(gained)} XP`),
+    kpi('Crafts', fmt(plan.crafts), `${plan.steps.length} étape${plan.steps.length > 1 ? 's' : ''}`),
+    kpi('Kamas par XP', gained > 0 ? (plan.cost / gained).toFixed(1).replace('.', ',') : '—'));
+
+  const blocked = plan.blocked_at !== null
+    ? h('div', { class: 'banner' }, `Bloqué au niveau ${plan.blocked_at} : aucune recette chiffrable ne rapporte d'XP. ${plan.unpriced} recette${plan.unpriced > 1 ? 's' : ''} sans prix.`)
+    : null;
+
+  const steps = h('section', { class: 'panel', 'aria-label': 'Étapes' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Étapes'), h('span', { class: 'muted small' }, `${plan.candidates} recettes chiffrées`)),
+    plan.steps.length === 0 ? h('div', { class: 'empty' }, 'Aucune étape.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Crafts'), h('th', {}, 'XP'), h('th', {}, saved.resale ? 'Coût net / craft' : 'Coût / craft'), h('th', {}, 'Coût'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
+        h('tbody', {}, plan.steps.map((step) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${step.item_id}`; } },
+          h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
+          h('td', { class: 'l' }, itemCell(step.icon, step.name, `niv. ${step.level} · ${step.ingredients} ingr.` + (step.ratio_pct !== 100 ? ` · XP ×${step.ratio_pct / 100}` : ''))),
+          h('td', { style: 'font-weight: 600' }, `× ${fmt(step.crafts)}`),
+          h('td', { class: 'soft' }, fmt(step.xp)),
+          h('td', { class: 'soft' }, fmt(step.unit_cost)),
+          h('td', { class: 'strong ' + (step.cost < 0 ? 'gain' : '') }, step.cost < 0 ? signed(-step.cost) : fmt(step.cost)),
+          h('td', { class: 'soft' }, (step.cost / step.xp).toFixed(1).replace('.', ',')),
+          h('td', { class: 'act', style: 'width: 96px' }, h('button', { class: 'btn', onclick: (event) => { event.stopPropagation(); change(() => { mine.exclude = [...new Set([...mine.exclude, step.item_id])]; }); } }, 'Retirer'))))))));
+
+  const total = plan.shopping.reduce((sum, row) => sum + (row.cost || 0), 0);
+  const shopping = h('section', { class: 'panel', 'aria-label': 'Liste de courses' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ingrédients · ${fmt(total)} à acheter`)),
+    plan.shopping.length === 0 ? h('div', { class: 'empty' }, 'Rien à acheter.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
+        h('tbody', {}, plan.shopping.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+          h('td', { class: 'l' }, itemCell(row.icon, row.name)),
+          h('td', { class: 'soft' }, fmt(row.quantity)),
+          h('td', {}, !plan.stock_known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row.quantity)),
+          h('td', { style: 'font-weight: 600' }, row.to_buy ? fmt(row.to_buy) : h('span', { class: 'gain' }, '0')),
+          h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source' }, h('span', { class: 'dot ' + (observed(row.source) ? 'on' : '') }), shortSource(row.source))]),
+          h('td', { class: 'strong' }, fmt(row.cost))))))));
+
+  return [head, controls, excluded, blocked, kpis, steps, shopping];
 }
 
 // ---------------------------------------------------------------- page Forgemagie

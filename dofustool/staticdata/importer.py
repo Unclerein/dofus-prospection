@@ -62,6 +62,19 @@ def import_static(
                 (lang,),
             )
         ]
+        # Coefficient d'XP de craft : celui de l'objet s'il en a un (> -1), sinon celui de son type.
+        xp_ratios = []
+        type_columns = {row[1] for row in src.execute("PRAGMA table_info(ItemTypeData)")}
+        for table in ("ItemData", "WeaponData"):
+            columns = {row[1] for row in src.execute(f"PRAGMA table_info({table})")}
+            if "craftXpRatio" not in columns or "craftXpRatio" not in type_columns:
+                continue
+            xp_ratios += src.execute(
+                f"SELECT i.id, CASE WHEN i.craftXpRatio > -1 THEN i.craftXpRatio "
+                f"WHEN ty.craftXpRatio > -1 THEN ty.craftXpRatio ELSE 100 END "
+                f"FROM {table} i LEFT JOIN ItemTypeData ty ON ty.id = i.typeId "
+                f"WHERE i.id IN (SELECT resultId FROM RecipeData)"
+            ).fetchall()
         icons = []
         for table in ("ItemData", "WeaponData"):
             columns = {row[1] for row in src.execute(f"PRAGMA table_info({table})")}
@@ -105,11 +118,12 @@ def import_static(
 
         with dst:  # une seule transaction : l'ancien contenu reste en place si l'import échoue
             dst.executescript(SCHEMA)
-            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects", "item_icons", "effect_meta"):
+            for table in ("items", "jobs", "recipes", "recipe_ingredients", "effects", "item_icons", "effect_meta", "recipe_xp"):
                 dst.execute(f"DELETE FROM {table}")
             dst.executemany("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?, ?, ?)", items)
             dst.executemany("INSERT INTO effects VALUES (?, ?)", effects)
             dst.executemany("INSERT OR REPLACE INTO item_icons VALUES (?, ?)", icons)
+            dst.executemany("INSERT OR REPLACE INTO recipe_xp VALUES (?, ?)", xp_ratios)
             dst.executemany("INSERT OR REPLACE INTO effect_meta VALUES (?, ?, ?, ?)", effect_meta)
             dst.executemany("INSERT INTO jobs VALUES (?, ?)", jobs)
             dst.executemany("INSERT INTO recipes VALUES (?, ?, ?)", recipes)

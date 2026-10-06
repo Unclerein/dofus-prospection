@@ -103,6 +103,24 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.crafts())
                 if path == "/api/trends":
                     return self._json(api.trends())
+                if path == "/api/jobs":
+                    return self._json(api.jobs())
+                if path == "/api/jobs/plan":
+                    exclude = frozenset(int(x) for x in query.get("exclude", "").split(",") if x.isdigit())
+                    try:
+                        bonus = float(query.get("bonus", "100"))
+                    except ValueError:
+                        bonus = 100.0
+                    return self._json(
+                        api.job_plan(
+                            to_int(query.get("job")) or 0,
+                            max(0, to_int(query.get("xp")) or 0),
+                            to_int(query.get("target")) or 1,
+                            min(1000.0, max(0.0, bonus)),
+                            query.get("resale") == "1",
+                            exclude,
+                        )
+                    )
                 if path == "/api/ignored":
                     return self._json(api.ignored())
                 if path == "/api/stock":

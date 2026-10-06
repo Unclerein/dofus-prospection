@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS items (
     is_weapon    INTEGER NOT NULL,
     category_id  INTEGER
 );
+-- Coefficient d'XP de métier d'un objet fabriqué, en pourcentage (100 = normal, 0 = aucune XP).
+-- Vient des données du jeu : coefficient de l'objet, sinon celui de son type.
+CREATE TABLE IF NOT EXISTS recipe_xp (
+    result_id INTEGER PRIMARY KEY,
+    ratio_pct INTEGER NOT NULL
+);
 -- Identifiant de l'image d'un item (servie par DofusDB, mise en cache dans data/icons).
 CREATE TABLE IF NOT EXISTS item_icons (
     item_id INTEGER PRIMARY KEY,

@@ -16,6 +16,7 @@ import pandas as pd
 from .. import config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR
 from ..analysis.forgemagie import Filter, base_lines
+from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
 from ..staticdata import effects as base_effects
@@ -304,6 +305,131 @@ class Api:
                     "craft": craft,
                     "used_in": used_in,
                     "now": ws.now,
+                }
+            )
+        finally:
+            conn.close()
+
+    # --- métiers -------------------------------------------------------------
+
+    def jobs(self) -> dict:
+        """Métiers qui ont des recettes, avec le niveau renseigné dans config.toml s'il existe."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            levels = {name.casefold(): level for name, level in state["cfg"].jobs.items()}
+            rows = conn.execute(
+                "SELECT j.id, j.name, COUNT(*), MAX(r.level) FROM recipes r JOIN jobs j ON j.id = r.job_id "
+                "GROUP BY j.id ORDER BY j.name"
+            ).fetchall()
+            return {
+                "jobs": [
+                    {"id": job_id, "name": name, "recipes": count, "max_level": top, "level": levels.get(name.casefold())}
+                    for job_id, name, count, top in rows
+                ]
+            }
+        finally:
+            conn.close()
+
+    def job_plan(
+        self,
+        job_id: int,
+        start_xp: int,
+        target_level: int,
+        bonus_pct: float = 100.0,
+        resale: bool = False,
+        exclude: frozenset[int] = frozenset(),
+    ) -> dict:
+        """Chemin le moins coûteux pour monter un métier, et la liste de courses qui va avec."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, calc, stock = state["ws"], state["ws"].calculator, state["stock"]
+            hidden = self._hidden(conn, state)
+            ratios = dict(conn.execute("SELECT result_id, ratio_pct FROM recipe_xp"))
+            candidates, results, skipped = [], {}, 0
+            for recipe in calc.recipes.values():
+                if recipe.job_id != job_id or not recipe.ingredients:
+                    continue
+                if recipe.result_id in exclude or hidden(recipe.result_id):
+                    continue
+                result = calc.evaluate(recipe)
+                # Coût d'un craft : tout acheter ; à défaut (ingrédient non achetable), le moins cher possible.
+                cost = result.direct_cost if result.direct_cost is not None else result.recursive_cost
+                if cost is None:
+                    skipped += 1
+                    continue
+                if resale and result.revenue is not None:
+                    cost -= result.revenue
+                results[recipe.result_id] = (recipe, result)
+                candidates.append(jobxp.Candidate(recipe.result_id, recipe.level, ratios.get(recipe.result_id, 100), cost))
+
+            plan = jobxp.cheapest_path(candidates, start_xp, target_level, bonus_pct)
+            shopping: dict[int, int] = {}
+            steps = []
+            for step in plan.steps:
+                recipe, result = results[step.item_id]
+                for item_id, quantity in recipe.ingredients:
+                    shopping[item_id] = shopping.get(item_id, 0) + quantity * step.crafts
+                steps.append(
+                    {
+                        "item_id": step.item_id,
+                        "name": result.item.name,
+                        "icon": state["icons"].get(step.item_id),
+                        "level": recipe.level,
+                        "from_level": step.from_level,
+                        "to_level": step.to_level,
+                        "crafts": step.crafts,
+                        "xp": step.xp,
+                        "cost": step.cost,
+                        "unit_cost": step.cost / step.crafts,
+                        "sell": result.sell.price if result.sell else None,
+                        "source": result.sell.source if result.sell else None,
+                        "ratio_pct": ratios.get(step.item_id, 100),
+                        "ingredients": len(recipe.ingredients),
+                    }
+                )
+            needs = []
+            for item_id, quantity in shopping.items():
+                item = ws.items.get(item_id)
+                ref = ws.prices.get(item_id) if item is not None and item.exchangeable else None
+                have = stock.get(item_id).total
+                needs.append(
+                    {
+                        "item_id": item_id,
+                        "name": item.name if item else f"#{item_id}",
+                        "icon": state["icons"].get(item_id),
+                        "quantity": quantity,
+                        "have": have,
+                        "to_buy": max(0, quantity - have),
+                        "price": ref.price if ref else None,
+                        "source": ref.source if ref else None,
+                        "cost": ref.price * max(0, quantity - have) if ref else None,
+                    }
+                )
+            needs.sort(key=lambda row: -(row["cost"] or 0))
+            excluded = [
+                {"item_id": i, "name": ws.items[i].name if i in ws.items else f"#{i}", "icon": state["icons"].get(i)}
+                for i in sorted(exclude)
+            ]
+            return clean(
+                {
+                    "steps": steps,
+                    "shopping": needs,
+                    "excluded": excluded,
+                    "start_xp": plan.start_xp,
+                    "start_level": jobxp.xp_to_level(plan.start_xp),
+                    "end_xp": plan.end_xp,
+                    "end_level": jobxp.xp_to_level(plan.end_xp),
+                    "target_level": plan.target_level,
+                    "target_xp": jobxp.level_to_xp(plan.target_level),
+                    "blocked_at": plan.blocked_at,
+                    "cost": plan.cost,
+                    "crafts": plan.crafts,
+                    "candidates": len(candidates),
+                    "unpriced": skipped,
+                    "stock_known": stock.known,
+                    "resale": resale,
                 }
             )
         finally:
