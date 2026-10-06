@@ -23,12 +23,12 @@
     "fields": {
       "item_id": 3,
       "entries": 1,
-      "effects": 0,
+      "effects": 5,
       "entry_item": 1,
       "uid": 3,
       "prices": 2,
-      "effect_id": 0,
-      "effect_value": 0
+      "effect_id": 10,
+      "effect_value": 5
     }
   },
   "inventory": {

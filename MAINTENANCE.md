@@ -114,10 +114,10 @@ d'entrée que l'inventaire) ; cours du marché `ire` (série horaire en 1, journ
 en 1, identifiant en 2, date en 3, quantité en 4 — contrôle : la moyenne des prix journaliers
 pondérée par les quantités redonne le prix moyen du jeu) ; annonces HDV `jzs`, demandées par
 `kcy` (identifiant en 1, ouverture en 2) : entrées en 1, identifiant en 3 ; dans une entrée,
-identifiant en 1, prix en 2, uid en 3. **Les champs des effets d'un équipement ne sont pas encore
-identifiés** (`effects`, `effect_id`, `effect_value` à 0 dans `keymap.json`) : ouvrir un équipement
-à l'HDV, puis chercher dans une entrée le sous-message répété qui porte un identifiant d'effet
-connu et sa valeur. En attendant, le parseur refuse ces annonces au lieu de les enregistrer sans effets.
+identifiant en 1, prix en 2, uid en 3. Pour un équipement, chaque entrée porte en plus ses effets en champ 5 (répété) : identifiant
+de l'effet en 10, valeur en 5 ; les lignes de dégâts d'une arme n'ont pas de valeur simple.
+Contrôle : la vitalité d'un exemplaire doit tomber dans la fourchette de base de l'objet.
+Une annonce portant un sous-message inconnu est refusée plutôt qu'enregistrée sans effets.
 
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
