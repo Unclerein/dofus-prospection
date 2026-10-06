@@ -73,11 +73,6 @@ class Archive:
         """Connexion SQLite, pour relire ce qui vient d'être archivé (y compris avant validation)."""
         return self._db
 
-    @property
-    def db(self) -> sqlite3.Connection:
-        """Connexion SQLite, pour relire ce qui vient d'être archivé (y compris avant validation)."""
-        return self._db
-
     def commit(self) -> None:
         self._db.commit()
 

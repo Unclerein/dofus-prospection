@@ -195,22 +195,6 @@ CREATE TABLE IF NOT EXISTS my_sales_meta (
     captured_at REAL NOT NULL,
     lots        INTEGER NOT NULL
 );
--- Lots mis en vente par le joueur, par HDV (empreinte de son descripteur). Donnée personnelle.
-CREATE TABLE IF NOT EXISTS my_sales (
-    market      INTEGER NOT NULL,
-    uid         INTEGER NOT NULL,
-    item_id     INTEGER NOT NULL,
-    lot         INTEGER NOT NULL,
-    price       INTEGER NOT NULL,
-    remaining_s INTEGER NOT NULL,
-    captured_at REAL NOT NULL,
-    PRIMARY KEY (market, uid)
-) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS my_sales_meta (
-    market      INTEGER PRIMARY KEY,
-    captured_at REAL NOT NULL,
-    lots        INTEGER NOT NULL
-);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -358,24 +342,19 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
     if row is not None and row[0] > captured_at:
         return False
     with conn:
-        conn.execute("DELETE FROM my_sales WHERE market = ?", (listing.market,))
-        conn.executemany(
-            "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ((listing.market, s.uid, s.item_id, s.lot, s.price, s.remaining_s, captured_at) for s in listing.sales),
-        )
-        conn.execute("INSERT OR REPLACE INTO my_sales_meta VALUES (?, ?, ?)", (listing.market, captured_at, len(listing.sales)))
-    return True
-
-
-def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
-    """Remplace les lots en vente d'un HDV par une liste décodée (messages.sales.SalesList).
-
-    Renvoie False sans rien écrire si une liste plus récente de cet HDV est déjà enregistrée.
-    """
-    row = conn.execute("SELECT captured_at FROM my_sales_meta WHERE market = ?", (listing.market,)).fetchone()
-    if row is not None and row[0] > captured_at:
-        return False
-    with conn:
+        # L'empreinte d'un HDV peut changer avec une mise à jour du jeu : une liste enregistrée sous une
+        # autre empreinte qui contient l'un de ces lots est l'ancien relevé du même HDV.
+        uids = [s.uid for s in listing.sales]
+        marks = ",".join("?" * len(uids))
+        same = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT DISTINCT market FROM my_sales WHERE market != ? AND uid IN ({marks})", (listing.market, *uids)
+            )
+        ]
+        for market in same:
+            conn.execute("DELETE FROM my_sales WHERE market = ?", (market,))
+            conn.execute("DELETE FROM my_sales_meta WHERE market = ?", (market,))
         conn.execute("DELETE FROM my_sales WHERE market = ?", (listing.market,))
         conn.executemany(
             "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
