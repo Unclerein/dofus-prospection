@@ -26,15 +26,9 @@ Fermer ensuite PowerShell et en rouvrir un, pour que Git et Python soient reconn
 
 ## 2. Récupérer l'outil
 
-Le dépôt est privé : il faut un compte GitHub (<https://github.com/signup>) et y avoir été
-invité. L'invitation arrive par mail ; l'accepter avant de continuer.
-
 ```powershell
 git clone https://github.com/Unclerein/dofus-prospection.git C:\prospection
 ```
-
-Une fenêtre de connexion GitHub s'ouvre la première fois. Si rien ne se passe, elle est peut-être
-cachée derrière les autres fenêtres (Alt+Tab).
 
 ## 3. Lancer l'installation
 
@@ -142,7 +136,6 @@ fonctionner aussitôt. Pour retirer aussi du hub ce qu'il avait envoyé :
 | Ce qui se passe | Quoi faire |
 |---|---|
 | `winget` n'est pas reconnu | Installer « Programme d'installation d'application » depuis le Microsoft Store, ou télécharger Git (<https://git-scm.com/download/win>) et Python (<https://www.python.org/downloads/>) à la main, en cochant « Add python.exe to PATH ». |
-| `git clone` répond « Repository not found » | L'invitation GitHub n'est pas acceptée, ou la connexion s'est faite avec un autre compte. |
 | Le raccourci ne fait rien | Ouvrir `C:\prospection\data\capture.log` : la dernière ligne dit ce qui bloque. |
 | L'onglet État affiche « Capture arrêtée » en jeu | Le jeu a été lancé sans le raccourci : le fermer et le relancer par « Dofus + Prospection ». |
 | Aucun prix après le choix du personnage | VPN actif ? Désigner la bonne interface réseau dans Config. Sinon, attendre une minute : après une mise à jour du jeu, l'outil retrouve seul ses repères. |
