@@ -83,9 +83,12 @@ def test_looks_merged():
 
 
 def test_real_keymap_has_storage_mappings():
-    keymap = load_keymap()
-    assert storage.parse(inventory((1, 30)), keymap["inventory"]).quantities() == {1: 30}
-    assert storage.parse(bank((1, 100)), keymap["bank"]).kamas == 900
+    # Un corps bâti avec les numéros de champ du build courant doit se lire avec keymap.json.
+    for name in ("inventory", "bank"):
+        f = load_keymap()[name].fields
+        body = vi(f["kamas"], 900) + ld(f["entries"], vi(f["position"], 63) + ld(f["object"], vi(f["item_id"], 1) + vi(f["quantity"], 30)))
+        parsed = storage.parse(body, load_keymap()[name])
+        assert parsed.quantities() == {1: 30} and parsed.kamas == 900
 
 
 # --- base et stock ----------------------------------------------------------

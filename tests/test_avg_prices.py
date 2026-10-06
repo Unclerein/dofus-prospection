@@ -39,9 +39,9 @@ def test_parse_rejects_unexpected_shapes(body):
 
 def test_fixture_parses_with_current_keymap():
     prices = avg_prices.parse(FIXTURE.read_bytes(), load_keymap()["avg_prices"])
-    assert len(prices) == 8767
+    assert len(prices) == 8781
     assert prices[289] == 10  # Blé
-    assert prices[2469] == 394524  # Gelano
+    assert prices[2469] == 391413  # Gelano
     assert all(p > 0 for p in prices.values())
 
 

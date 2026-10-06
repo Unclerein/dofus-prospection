@@ -12,7 +12,7 @@ import time
 
 from .. import config, db
 from ..archive import Archive
-from ..messages import load_keymap
+from ..messages import KEYMAP_PATH, load_keymap
 from . import GAME_PORT
 from .pipeline import Pipeline, log
 
@@ -42,7 +42,7 @@ def main() -> int:
     STOP_FILE.unlink(missing_ok=True)
     market = db.connect()
     archive = Archive()
-    pipeline = Pipeline(archive, market, load_keymap(), cfg.avg_prices_timeout_s)
+    pipeline = Pipeline(archive, market, load_keymap(), cfg.avg_prices_timeout_s, KEYMAP_PATH)
     source = LiveSource(iface=args.iface or cfg.iface)
     try:
         source.start()

@@ -111,3 +111,30 @@ def test_config_defaults_and_file(tmp_path):
     cfg = config.load(path)
     assert cfg.jobs == {"Bijoutier": 120} and cfg.hdv_tax == 0.01 and cfg.iface is None
     assert config.load().ankama_path.endswith("Ankama Launcher.exe")
+
+
+def test_keymap_is_reloaded_when_the_file_changes(tmp_path, caplog):
+    import json
+    import os
+
+    path = tmp_path / "keymap.json"
+    path.write_text(json.dumps({"avg_prices": {"key": "old", "fields": MAPPING.fields}}), encoding="utf-8")
+    market = db.connect(":memory:")
+    p = Pipeline(Archive(":memory:"), market, {"avg_prices": Mapping("old", MAPPING.fields)}, keymap_path=path)
+    feed(p, framed(any_frame("avg", synthetic(1200))))
+    p.tick(1001.0)
+    assert db.latest_snapshot(market) is None  # clé périmée : rien n'est décodé
+
+    path.write_text(json.dumps({"avg_prices": {"key": "avg", "fields": MAPPING.fields}}), encoding="utf-8")
+    os.utime(path, (5_000, 5_000))
+    caplog.set_level(logging.INFO, logger="dofustool.capture")
+    p.tick(1002.0)
+    assert "keymap.json rechargé : 1 messages connus." in [r.getMessage() for r in caplog.records]
+    feed(p, framed(any_frame("avg", synthetic(1200))), t=1100.0, port=40002)
+    assert db.latest_snapshot(market) is not None
+
+    path.write_text("{ pas du json", encoding="utf-8")  # fichier cassé : l'ancienne table reste en service
+    os.utime(path, (6_000, 6_000))
+    p.tick(1101.0)
+    assert p.keymap["avg_prices"].key == "avg"
+    market.close()

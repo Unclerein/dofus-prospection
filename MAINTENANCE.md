@@ -97,6 +97,20 @@ Repères du build du 5 octobre 2026 : `ksw` (entrées en champ 1 ; dans une entr
 en 3 et infos en 2 ; dans les infos, niveau en 4 et nom en 5), `kth` (identifiant en 1), `irl`
 (entrées en champ 2 ; métier en 1, expérience en 2, niveau en 5).
 
+**Inventaire : manuel.** Gros message serveur → client (une dizaine de Ko) reçu quelques
+secondes après le choix du personnage : un champ répété d'entrées (position, objet), l'objet
+portant son identifiant et sa quantité, plus les kamas au premier niveau.
+
+Repères du build du 6 octobre 2026 (les clés **et** les numéros de champ ont changé) :
+prix moyens `isr` (entrées en 3, identifiant en 1, prix en 2) ; inventaire `irl` (entrées en 2,
+kamas en 4 ; dans une entrée, objet en 1 et position en 4 ; dans l'objet, quantité en 3 et
+identifiant en 4) ; personnages `ksc` (entrées en 2 ; identifiant en 3, infos en 4 ; niveau en 3
+et nom en 6) ; choix `kta` (identifiant en 1) ; métiers `ipz` (entrées en 1 ; niveau en 1,
+expérience en 2, métier en 5). Les messages gardent leur place et leur taille dans le début de
+la connexion d'un build à l'autre : comparer les deux séquences donne les candidats en une minute.
+
+La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
+
 ### 3. Mettre à jour `keymap.json`
 
 Automatiquement, si `reidentify` a trouvé un candidat unique et sûr :

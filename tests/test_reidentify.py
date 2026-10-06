@@ -54,7 +54,7 @@ def test_match_rejects_other_shapes():
 def test_real_fixture_is_identified_with_current_field_numbers():
     mapping = load_keymap()["avg_prices"]
     candidate = match_avg_prices(mapping.key, FIXTURE.read_bytes(), set())
-    assert candidate.fields == mapping.fields and candidate.entries == 8924
+    assert candidate.fields == mapping.fields and candidate.entries == 8788
 
 
 def test_find_candidates_in_archive():

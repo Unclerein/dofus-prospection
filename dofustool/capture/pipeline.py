@@ -6,10 +6,11 @@ n'a pas exactement la forme attendue est ignoré (il reste dans l'archive brute)
 import logging
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from .. import db
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, hdv_listings, market_history, storage
+from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, storage
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -38,7 +39,12 @@ class Pipeline:
         market: sqlite3.Connection,
         keymap: dict[str, Mapping],
         avg_prices_timeout_s: float = 60.0,
+        keymap_path: Path | None = None,
     ) -> None:
+        # Si le chemin est donné, keymap.json est relu dès qu'il change : après une mise à jour du jeu,
+        # la correction des clés prend effet sans relancer la capture (ni perdre la connexion en cours).
+        self._keymap_path = keymap_path
+        self._keymap_mtime = keymap_path.stat().st_mtime if keymap_path is not None and keymap_path.exists() else None
         self.session = Session()
         self.archive = archive
         self.market = market
@@ -153,6 +159,7 @@ class Pipeline:
     def tick(self, now: float) -> None:
         """À appeler régulièrement : valide l'archive et surveille le décodage."""
         try:
+            self._reload_keymap()
             self.archive.commit()
             for watch in self._watch.values():
                 active = now - watch.last_ts <= ACTIVE_WINDOW_S
@@ -168,6 +175,22 @@ class Pipeline:
             db.set_status(self.market, heartbeat_ts=now)
         except Exception as exc:
             self._log_error_once(exc)
+
+    def _reload_keymap(self) -> None:
+        if self._keymap_path is None or not self._keymap_path.exists():
+            return
+        mtime = self._keymap_path.stat().st_mtime
+        if mtime == self._keymap_mtime:
+            return
+        self._keymap_mtime = mtime
+        try:
+            self.keymap = load_keymap(self._keymap_path)
+        except (ValueError, KeyError, TypeError) as exc:  # fichier en cours d'écriture ou invalide : on garde l'ancien
+            log.warning("keymap.json illisible, ancienne table conservée : %s", exc)
+            return
+        for watch in self._watch.values():
+            watch.alerted = False  # laisse l'alerte se lever au prochain relevé décodé
+        log.info("keymap.json rechargé : %d messages connus.", len(self.keymap))
 
     def _log_error_once(self, exc: Exception) -> None:
         signature = f"{type(exc).__name__}: {exc}"

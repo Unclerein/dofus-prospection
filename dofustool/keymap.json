@@ -1,10 +1,10 @@
 {
   "avg_prices": {
-    "key": "itn",
+    "key": "isr",
     "fields": {
-      "entries": 1,
-      "item_id": 3,
-      "price": 5
+      "entries": 3,
+      "item_id": 1,
+      "price": 2
     }
   },
   "market_history": {
@@ -32,14 +32,14 @@
     }
   },
   "inventory": {
-    "key": "isb",
+    "key": "irl",
     "fields": {
-      "kamas": 1,
+      "kamas": 4,
       "entries": 2,
-      "position": 3,
-      "object": 5,
-      "quantity": 2,
-      "item_id": 5
+      "position": 4,
+      "object": 1,
+      "quantity": 3,
+      "item_id": 4
     }
   },
   "bank": {
@@ -54,28 +54,28 @@
     }
   },
   "character_list": {
-    "key": "ksw",
+    "key": "ksc",
     "fields": {
-      "entries": 1,
-      "info": 2,
+      "entries": 2,
+      "info": 4,
       "id": 3,
-      "level": 4,
-      "name": 5
+      "level": 3,
+      "name": 6
     }
   },
   "character_select": {
-    "key": "kth",
+    "key": "kta",
     "fields": {
       "id": 1
     }
   },
   "job_levels": {
-    "key": "irl",
+    "key": "ipz",
     "fields": {
-      "entries": 2,
-      "job_id": 1,
+      "entries": 1,
+      "job_id": 5,
       "xp": 2,
-      "level": 5
+      "level": 1
     }
   }
 }
