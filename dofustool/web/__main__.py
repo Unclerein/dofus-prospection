@@ -23,7 +23,7 @@ def main() -> int:
         print(f"Impossible d'écouter sur le port {args.port} : {exc}. L'interface tourne peut-être déjà.")
         return 1
     url = f"http://localhost:{args.port}"
-    print(f"Interface dofustool : {url}  (Ctrl+C pour arrêter)")
+    print(f"Prospection : {url}  (Ctrl+C pour arrêter)")
     if not args.no_browser:
         threading.Timer(0.5, webbrowser.open, args=(url,)).start()
     try:

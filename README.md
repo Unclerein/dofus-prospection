@@ -1,4 +1,6 @@
-# dofustool
+# Prospection
+
+Le paquet Python s'appelle encore `dofustool` : c'est son nom technique, celui des commandes ci-dessous.
 
 Outil personnel d'analyse de marché Dofus 3, par capture réseau **strictement passive**. Voir [PLAN.md](PLAN.md).
 
@@ -19,7 +21,7 @@ après chaque mise à jour du jeu.
 
 ## Utilisation
 
-Le raccourci bureau « Dofus + dofustool » (créé par `launcher\install_shortcut.ps1`) lance
+Le raccourci bureau « Dofus + Prospection » (créé par `launcher\install_shortcut.ps1`) lance
 `launcher\start.ps1` : la capture démarre en arrière-plan, le launcher Ankama s'ouvre, et la
 capture s'arrête d'elle-même à la fermeture de Dofus. Les réglages sont dans `dofustool\config.toml`.
 
@@ -36,7 +38,7 @@ http://localhost:8600 et se met à jour toute seule pendant une capture :
 .\.venv\Scripts\python.exe -m dofustool.web
 ```
 
-Le raccourci bureau « dofustool » l'ouvre seule, sans jeu ni capture (`launcher\dashboard.ps1`,
+Le raccourci bureau « Prospection » l'ouvre seule, sans jeu ni capture (`launcher\dashboard.ps1`,
 avec `-Stop` pour l'arrêter). Le lanceur l'ouvre avec le jeu tant que `start_dashboard` vaut `true` dans `config.toml`. Les
 icônes des objets sont téléchargées depuis DofusDB à leur premier affichage, puis gardées dans
 `data\icons`. L'ancien dashboard Streamlit reste disponible :

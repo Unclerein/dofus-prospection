@@ -496,7 +496,7 @@ def page_status(state: dict) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="dofustool", layout="wide")
+    st.set_page_config(page_title="Prospection", layout="wide")
     version = data_version()
     conn = db.connect(DB_PATH)
     try:
@@ -505,7 +505,7 @@ def main() -> None:
     finally:
         conn.close()
     with st.sidebar:
-        st.header("dofustool")
+        st.header("Prospection")
         page = st.radio("Page", PAGES, key="page", label_visibility="collapsed")
         s = state["status"]
         st.caption(f"Relevé : {ago(s['last_snapshot_ts'], time.time())}")

@@ -1,4 +1,4 @@
-﻿# Ouvre l'interface dofustool seule, sans capture ni jeu.
+﻿# Ouvre l'interface Prospection seule, sans capture ni jeu.
 # Le serveur tourne en arrière-plan, sans fenêtre, et reste actif jusqu'à l'arrêt de la session Windows.
 #
 # Usage : powershell -ExecutionPolicy Bypass -File launcher\dashboard.ps1 [-Stop]

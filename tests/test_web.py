@@ -275,7 +275,7 @@ def test_http_routes(server):
     assert json.loads(get(server + "/api/forge/ranking?criterion=exo&exo=123")[2])["rows"]
     assert json.loads(get(server + "/api/forge/ranking?criterion=over&effect=125&amount=2")[2])["rows"]
     status, content_type, body = get(server + "/")
-    assert status == 200 and content_type.startswith("text/html") and b"dofustool" in body
+    assert status == 200 and content_type.startswith("text/html") and b"Prospection" in body
     assert get(server + "/app.js")[1].startswith(("text/javascript", "application/javascript"))
     assert get(server + "/icons/9001.png")[2] == b"\x89PNG fictif"
     assert get(server + "/icons/effects/tx_vitality.png")[2] == b"\x89PNG vita"
