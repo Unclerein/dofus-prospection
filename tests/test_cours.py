@@ -253,3 +253,18 @@ def test_item_page(tmp_path):
     # L'arrondi au kama d'un prix moyen qui bouge de 80 kamas pèse quelques pour cent.
     assert [p[2] for p in page["relative"]["points"]] == [pytest.approx(100 * 2 / month, rel=0.05), 0]
     assert page["relative"]["pace"] > 0
+
+
+def test_reference_too_close_or_absurd_quantity_is_not_a_sale(conn):
+    """Un équipement vendu à des prix très dispersés : le dernier prix connu colle au prix moyen, la division explose."""
+    window = cours.Window({D: [340 * 12_000_000.0, 340]})
+    # p0 à 0,2 % du prix moyen reçu : aucune quantité déduite, simple resynchronisation.
+    point = cours.step(window, D + 1 * HOUR, D + 2 * HOUR, 12_050_000, 12_074_000)
+    assert point.qty == 0 and not point.sure
+    assert window.totals()[1] == 340 and window.totals()[0] / 340 == pytest.approx(12_050_000)
+    # p0 à 1,5 % : la quantité déduite (plus de cent pour un objet qui s'en vend onze par jour) est refusée.
+    point = cours.step(window, D + 2 * HOUR, D + 3 * HOUR, 12_150_000, 12_335_000)
+    assert point.qty == 0 and not point.sure and window.totals()[1] == 340
+    # Une vraie vente, à bonne distance du prix moyen, reste lue.
+    point = cours.step(window, D + 3 * HOUR, D + 4 * HOUR, 12_185_000, 16_200_000)
+    assert point.qty == 3 and point.price == pytest.approx(16_150_000, rel=0.01)

@@ -36,6 +36,9 @@ WINDOW_HOURS = 720.0
 ROUNDING = 0.5  # le prix moyen est arrondi au kama
 SURE_SPREAD = 0.15  # écart toléré entre le prix déduit et p0 pour un point sûr
 ABSURD = 5.0  # un prix déduit hors de [p0 ÷ 5, p0 × 5] n'est pas une vente plausible
+MIN_GAP = 0.005  # en dessous de 0,5 % d'écart entre p0 et le prix moyen, la quantité déduite n'a plus de sens
+MAX_PACE = 15.0  # une vente déduite à plus de 15 fois le rythme moyen du mois est une erreur de p0, pas une vente
+MIN_BURST = 10.0  # … sauf petite quantité : dix exemplaires d'un coup restent plausibles pour un objet rare
 HDV_FRESH_HOURS = 24.0  # une annonce HDV sert de p0 si elle a été vue à moins de 24 h du relevé
 LOOKBACK_HOURS = 48.0  # temps 1 : relevés pris en compte, en remontant depuis le plus récent
 
@@ -142,12 +145,15 @@ def step(window: Window, prev_ts: float, ts: float, avg: int, ref: float | None)
     gap = avg * qty - total
     if not qty:
         point = Point(ts, hours, float(avg), 1, False)  # fenêtre vide : au moins une vente, au prix moyen
-    elif ref is None or ref == avg or gap * (ref - avg) < 0:
+    elif ref is None or abs(ref - avg) < MIN_GAP * avg or gap * (ref - avg) < 0:
+        # p0 trop proche du prix moyen : diviser par leur écart ferait exploser la quantité. C'est le cas
+        # d'un équipement dont chaque vente se fait à un prix très différent selon ses jets.
         point = Point(ts, hours, gap, 0, False)
     else:
         sold = max(1, round(gap / (ref - avg)))
         price = (avg * (qty + sold) - total) / sold
-        if not ref / ABSURD <= price <= ref * ABSURD:
+        usual = qty * max(hours, 1.0) / WINDOW_HOURS  # ce qui se vend d'ordinaire sur cette durée
+        if not ref / ABSURD <= price <= ref * ABSURD or sold > max(MIN_BURST, MAX_PACE * usual):
             point = Point(ts, hours, gap, 0, False)
         else:
             # L'arrondi du prix moyen (± 0,5) fait varier la quantité déduite d'autant.
@@ -326,6 +332,13 @@ def liquidity(conn: sqlite3.Connection) -> dict[int, tuple[int, int, float]]:
         "SELECT item_id, base_at, processed_ts, month_qty, min_qty FROM cours_state WHERE processed_ts > base_at"
     ).fetchall():
         if Rebuilt(base_at, processed, month_qty, min_qty, ()).blind:
+            continue
+        # Plus de resynchronisations que de ventes lues : la reconstitution ne suit pas cet objet
+        # (prix de vente trop dispersés). Mieux vaut les quantités du relevé qu'un faux zéro.
+        read, lost = conn.execute(
+            "SELECT COALESCE(SUM(qty > 0), 0), COALESCE(SUM(qty = 0), 0) FROM cours_points WHERE item_id = ?", (item_id,)
+        ).fetchone()
+        if lost > read:
             continue
         hour = int(processed // HOUR) * int(HOUR)
         day = int(processed // DAY) * int(DAY)
