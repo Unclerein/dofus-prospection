@@ -140,6 +140,14 @@ def test_a_shared_keymap_only_fills_what_is_missing_on_the_same_build(tmp_path):
     assert raw["bank"] == {"key": "irp", "fields": {"kamas": 1}}  # retrouvé par un ami
     assert raw["inventory"] == mine["inventory"]  # ce qu'on connaît déjà n'est jamais remplacé
 
+    # Un message qu'une version plus récente sait décoder : accepté et transmis, mais jamais écrit ici.
+    newer = {**theirs, "message_futur": {"key": "abc", "fields": {"total": 1}}}
+    record = {"kind": "keymap", "key": share.keymap_signature(BUILD), "at": NOW, "data": {"entries": newer}}
+    assert share.validate(record, NOW) and share.apply(conn, record, path)
+    assert "message_futur" not in identify.read_keymap(path)
+    for bad in ("nom avec espace", "x" * 41, ""):
+        assert not share.validate({**record, "data": {"entries": {**theirs, bad: {"key": "abc", "fields": {}}}}}, NOW)
+
     sent = share.collect(conn, 0, path)
     assert [r["kind"] for r in sent] == ["keymap"] and sent[0]["key"] == share.keymap_signature(BUILD)
     assert share.validate(sent[0]) and "stale" not in json.dumps(sent[0])

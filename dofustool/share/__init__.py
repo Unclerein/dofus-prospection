@@ -86,7 +86,11 @@ def validate(record, now: float | None = None) -> bool:
         if not isinstance(entries, dict) or not 0 < len(entries) <= 50:
             return False
         for name, entry in entries.items():
-            if name not in identify.NAMES or not isinstance(entry.get("key"), str) or not 0 < len(entry["key"]) <= 40:
+            # Un nom inconnu n'est pas une erreur : c'est un message qu'une version plus récente sait décoder.
+            # Il est transmis tel quel, et ignoré à l'arrivée par ceux qui ne le connaissent pas.
+            if not isinstance(name, str) or not 0 < len(name) <= 40 or not name.replace("_", "").isalnum():
+                return False
+            if not isinstance(entry, dict) or not isinstance(entry.get("key"), str) or not 0 < len(entry["key"]) <= 40:
                 return False
             fields = entry.get("fields")
             if not isinstance(fields, dict) or not all(isinstance(k, str) and _is_int(v, 0, 10**6) for k, v in fields.items()):
