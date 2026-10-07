@@ -1986,7 +1986,8 @@ async function pageWelcome() {
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Aide'), h('div', { class: 'lead' }, 'Où tu en es, et à quoi sert chaque onglet.')),
-      h('button', { class: 'btn primary', onclick: () => startTour() }, 'Lancer la visite guidée')),
+      h('button', { class: 'btn primary', onclick: () => startTour() }, 'Lancer la visite guidée'),
+      h('button', { class: 'btn', onclick: () => showNotes(NOTES.slice(0, 3)) }, 'Nouveautés')),
     checklist, settings, how, tour,
   ];
 }
@@ -2143,6 +2144,50 @@ function sharePanel(d, data, sync) {
       hosting));
 }
 
+// ---------------------------------------------------------------- nouveautés
+
+// Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
+const NOTES = [
+  { id: 1, date: '7 octobre 2026', title: 'Journal de forgemagie et ventes hors ligne', hash: '#/forge/journal', go: 'Voir mon journal', points: [
+    ['Forgemagie › Mon journal :', 'chaque rune que tu passes en jeu est notée toute seule. Un dossier par objet : runes passées, coût, taux de réussite, jets avant et après.'],
+    ['Marge par objet :', 'calculée dès que l’objet forgemagé est mis en vente, définitive quand il est vendu. Le prix de l’objet de base se saisit dans le dossier.'],
+    ['Ventes hors ligne :', 'les lots vendus pendant ton absence entrent dans Mes ventes › Journal, dès que tu rouvres l’onglet Vendre de l’HDV.'],
+    ['Journal des ventes et achats :', 'tes lots en vente se mettent à jour en direct, et une case « Forgemagie seulement » isole runes et objets forgemagés.'],
+    ['Prix de référence :', 'une vente du cours du marché plus récente que le relevé HDV prime désormais sur l’annonce.'],
+  ] },
+];
+const NOTES_KEY = 'dofustool.notes';
+
+/** Affiche les nouveautés. Sans argument : toutes celles parues depuis la dernière fois, ou rien. */
+function showNotes(notes) {
+  const latest = NOTES[0].id;
+  let seen = null;
+  try { seen = localStorage.getItem(NOTES_KEY); } catch (error) { return; }
+  const remember = () => { try { localStorage.setItem(NOTES_KEY, String(latest)); } catch (error) { /* stockage indisponible */ } };
+  if (!notes) {
+    // Jamais rien vu : sur une installation neuve la visite guidée suffit ; sinon c'est la première mise à jour annoncée.
+    notes = seen === null ? (S.status && S.status.onboarded ? NOTES.slice(0, 1) : []) : NOTES.filter((n) => n.id > Number(seen)).slice(0, 3);
+    remember();
+    if (!notes.length) return;
+  }
+  const close = () => { $box.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (event) => { if (event.key === 'Escape') close(); };
+  const first = notes[0];
+  const $box = h('div', { class: 'notes', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'notes-title', onclick: (event) => { if (event.target === $box) close(); } },
+    h('div', { class: 'tour-card' },
+      h('div', { class: 'tour-count' }, 'Nouveautés'),
+      notes.flatMap((note, index) => [
+        h('h2', { id: index === 0 ? 'notes-title' : null }, note.title),
+        h('div', { class: 'muted small' }, note.date),
+        h('ul', { class: 'tour-points' }, note.points.map(([strong, text]) => h('li', {}, h('strong', {}, strong), ' ', text)))]),
+      h('div', { class: 'tour-actions' },
+        h('button', { class: 'btn quiet', style: 'margin-left: auto', onclick: close }, 'Fermer'),
+        first.hash && h('button', { id: 'notes-go', class: 'btn primary', onclick: () => { close(); location.hash = first.hash; } }, first.go))));
+  document.addEventListener('keydown', onKey);
+  document.body.append($box);
+  ($box.querySelector('#notes-go') || $box.querySelector('button')).focus();
+}
+
 // ---------------------------------------------------------------- démarrage
 
 (async function start() {
@@ -2151,7 +2196,9 @@ function sharePanel(d, data, sync) {
   try { S.status = await api('/api/status'); } catch (error) { /* affiché par la page */ }
   renderCapture();
   await render();
-  if (S.status && !S.status.onboarded) startTour(); // premier démarrage : la visite guidée
+  const fresh = S.status && !S.status.onboarded;
+  showNotes(); // avant la visite : une installation neuve retient qu'elle n'a rien à rattraper
+  if (fresh) startTour(); // premier démarrage : la visite guidée
   await poll();
   setInterval(poll, 5000);
   setInterval(renderCapture, 30000);
