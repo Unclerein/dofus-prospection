@@ -2225,6 +2225,7 @@ const NOTES = [
     ['Annonces similaires :', 'tes équipements sont comparés aux annonces HDV du même modèle qui ont les mêmes exos, les mêmes overs et des jets au moins aussi bons, à 10 % près. Mes ventes dit si tu es le moins cher ; le journal de forgemagie s’en sert pour estimer un objet pas encore en vente, avec un niveau de confiance.'],
     ['Forgemagie › Mon journal :', 'au survol d’un objet, ses jets réels après forgemagie, et plus ceux du modèle.'],
     ['Quantités vendues :', 'sur 7 et 30 jours, dans Crafts et dans le classement de forgemagie. « Non consulté » : ouvre le cours du marché de l’objet en jeu.'],
+    ['Optimisation :', 'l’app prend moins de mémoire et de place sur le disque, et le classement de forgemagie s’ouvre plus vite.'],
   ] },
   { id: 1, date: '7 octobre 2026', title: 'Journal de forgemagie et ventes hors ligne', hash: '#/forge/journal', go: 'Voir mon journal', points: [
     ['Forgemagie › Mon journal :', 'chaque rune que tu passes en jeu est notée toute seule. Un dossier par objet : runes passées, coût, taux de réussite, jets avant et après.'],
