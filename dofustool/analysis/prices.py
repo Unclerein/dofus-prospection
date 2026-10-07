@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import DAY, GRAIN_DAY, GRAIN_HOUR, HOUR
+from . import cours
 from . import estimate as estimation
 from .forgemagie import MARKERS, classify
 
@@ -130,6 +131,8 @@ class PriceBook:
             sold[period] = sold.get(period, 0) + qty
             if period == GRAIN_HOUR:
                 hourly.setdefault(item_id, []).append((price, qty))
+        # Cours reconstitué depuis le relevé (analysis.cours) : il prolonge les quantités vendues jusqu'au dernier prix moyen.
+        self._rebuilt = cours.liquidity(conn)
         self._median: dict[int, tuple[float, float]] = {
             item_id: (weighted_median(points), self._seen[item_id])
             for item_id, points in hourly.items()
@@ -234,11 +237,19 @@ class PriceBook:
         return median[0] if median else None
 
     def liquidity(self, item_id: int) -> Liquidity:
+        rebuilt = self._rebuilt.get(item_id)
+        if rebuilt is not None:
+            return Liquidity(rebuilt[0], rebuilt[1])
         if item_id not in self._seen:
             return Liquidity()
         # Cours consulté mais aucune vente dans la fenêtre : la quantité est 0, pas inconnue.
         sold = self._liquidity.get(item_id, {})
         return Liquidity(sold.get(GRAIN_HOUR, 0), sold.get(GRAIN_DAY, 0))
+
+    def rebuilt_at(self, item_id: int) -> float | None:
+        """Date du dernier prix moyen pris en compte dans les quantités vendues, si elles sont reconstituées."""
+        rebuilt = self._rebuilt.get(item_id)
+        return rebuilt[2] if rebuilt is not None else None
 
     def market_seen_at(self, item_id: int) -> float | None:
         """Date de la dernière consultation du cours du marché de l'item."""

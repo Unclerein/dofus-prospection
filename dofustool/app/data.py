@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from ..analysis import GRAIN_DAY, GRAIN_HOUR
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours
 from ..analysis.forgemagie import MARKERS, classify
 from ..analysis.crafts import CraftCalculator, CraftResult, Item, load_items, load_recipes, rank_crafts, resolve_jobs
 from ..analysis.prices import PriceBook, PriceRef
@@ -32,6 +32,7 @@ class Workspace:
 
 def build_workspace(conn: sqlite3.Connection, cfg: Config, now: float) -> Workspace:
     items = load_items(conn)
+    cours.update(conn)  # incrémental : seuls les prix moyens arrivés depuis le dernier passage
     prices = PriceBook(conn, now, cfg.last_sale_max_age_hours, cfg.use_estimated_prices, cfg.equipment_price)
     job_levels, unknown = resolve_jobs(conn, cfg.jobs)
     calculator = CraftCalculator(items, load_recipes(conn), prices, cfg.hdv_tax, job_levels or None, cfg.min_liquidity)

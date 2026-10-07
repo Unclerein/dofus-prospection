@@ -114,6 +114,27 @@ CREATE TABLE IF NOT EXISTS market_history (
     captured_at REAL NOT NULL,
     PRIMARY KEY (item_id, period, bucket_ts)
 ) WITHOUT ROWID;
+-- Cours reconstitué à partir des prix moyens (analysis.cours), après un relevé réel du cours.
+-- Jamais mélangé à market_history, qui ne contient que du réel et part au hub.
+CREATE TABLE IF NOT EXISTS cours_state (
+    item_id      INTEGER PRIMARY KEY,
+    base_at      REAL NOT NULL,  -- captured_at du relevé de départ
+    processed_ts REAL NOT NULL,  -- dernier relevé de prix moyens traité
+    last_price   REAL,           -- dernier prix de vente connu, sert de référence sans annonce HDV
+    month_qty    INTEGER,        -- quantité vendue sur 30 j, d'après la reconstitution
+    min_qty      REAL            -- plus petite vente visible dans le prix moyen arrondi
+);
+-- Un point par intervalle entre deux relevés de prix moyens où une vente a été détectée.
+-- qty = 0 : resynchronisation (signe incohérent ou prix absurde), total est alors l'écart rattrapé.
+CREATE TABLE IF NOT EXISTS cours_points (
+    item_id INTEGER NOT NULL,
+    end_ts  REAL NOT NULL,
+    hours   REAL NOT NULL,
+    total   REAL NOT NULL,
+    qty     INTEGER NOT NULL,
+    sure    INTEGER NOT NULL,
+    PRIMARY KEY (item_id, end_ts)
+) WITHOUT ROWID;
 -- Annonces HDV : une ligne par annonce, avec la première et la dernière consultation où elle
 -- a été vue (captured_at). Une annonce absente de la dernière consultation de son item a été
 -- vendue ou retirée ; elle est gardée comme historique.
