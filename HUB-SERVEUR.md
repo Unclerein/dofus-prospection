@@ -37,10 +37,10 @@ root**. Vérifier aussi que le pare-feu de l'hébergeur laisse passer les ports 
 Le chiffrement HTTPS exige un nom, pas seulement une adresse IP. DuckDNS en donne un gratuitement.
 
 1. Aller sur <https://www.duckdns.org> et se connecter (compte Google ou GitHub).
-2. Choisir un nom, par exemple `prospection-kourial`, et cliquer **add domain**.
+2. Choisir un nom, par exemple `mon-hub`, et cliquer **add domain**.
 3. Dans le champ **current ip** de ce domaine, saisir l'adresse IP du serveur, puis **update ip**.
 
-Le hub sera joignable à `https://prospection-kourial.duckdns.org` (avec le nom choisi).
+Le hub sera joignable à `https://mon-hub.duckdns.org` (avec le nom choisi).
 
 ## 3. Fabriquer l'archive du hub
 
@@ -82,7 +82,7 @@ unzip -o prospection-hub.zip -d hub
 ```
 
 ```bash
-bash hub/setup.sh prospection-kourial.duckdns.org
+bash hub/setup.sh mon-hub.duckdns.org
 ```
 
 Le script installe Python et Caddy (qui gère le HTTPS), place le hub dans `/opt/prospection`, le
@@ -109,7 +109,7 @@ passe ; l'envoyer à chaque ami en privé, jamais dans un salon public.
 Pour vérifier que tout répond, depuis le serveur :
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://prospection-kourial.duckdns.org/
+curl -s -o /dev/null -w "%{http_code}\n" https://mon-hub.duckdns.org/
 ```
 
 La réponse attendue est `404` : le hub est joignable en HTTPS et ne répond qu'aux applis. (Une
@@ -122,7 +122,7 @@ Taper `exit` pour quitter le serveur.
 Chez chaque joueur, dans Prospection, onglet **Config**, section « Partage avec des amis » :
 
 - **Mon pseudo** : celui déclaré sur le hub ;
-- **Adresse du hub** : `https://prospection-kourial.duckdns.org` ;
+- **Adresse du hub** : `https://mon-hub.duckdns.org` ;
 - **Mon jeton** : celui reçu ;
 - laisser **« Ce PC héberge le hub »** décoché ;
 - **Enregistrer**.
