@@ -61,6 +61,7 @@ Tests :
 
 - **Les prix moyens sont théoriques.** Ils sont lissés, en retard sur le marché et ne distinguent pas les lots. Il n'y a pas de profondeur de marché en v1.
 - **Les données précises ne couvrent que les objets consultés manuellement.** Le partage entre amis (voir INSTALL.md) additionne ce que chacun relève.
+- **Le cours reconstitué est une déduction.** Après un relevé du cours, les ventes suivantes sont déduites des prix moyens horaires (points creux sur la fiche objet). Une seule équation pour deux inconnues : la quantité n'est juste que si la vente s'est faite près du prix de référence (annonce HDV récente, sinon dernier prix connu). Rien pour les objets bon marché très échangés, dont le prix moyen arrondi ne bouge pas. Sans relevé, la fiche ne montre qu'une part relative du volume mensuel.
 - **Les tendances sont faibles au début** pour les objets jamais consultés dans le cours du marché.
 - **Les marges ignorent** le temps passé, la valeur des ressources farmées soi-même au-delà du coût d'opportunité et l'XP de métier.
 - **Chaque mise à jour du jeu change les clés des messages.** La capture les retrouve seule dans la plupart des cas ; sinon, voir [MAINTENANCE.md](MAINTENANCE.md).

@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import config, db
-from ..analysis import GRAIN_DAY, GRAIN_HOUR
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours
 from ..analysis.forgemagie import Filter, base_lines
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
@@ -324,6 +324,28 @@ class Api:
                     best = hdv["frame"].loc[hdv["frame"]["Prix unitaire"].idxmin()]  # à égalité, le plus petit lot
                     hdv_unit, hdv_lot = float(best["Prix unitaire"]), int(best["Lot"].lstrip("x"))
                 hdv = {**hdv, "frame": records(hdv["frame"])}
+            rebuilt = detail["rebuilt"]
+            if rebuilt is not None and rebuilt.processed_ts > rebuilt.base_at:
+                rebuilt = {
+                    "processed_ts": rebuilt.processed_ts,
+                    "blind": rebuilt.blind,
+                    "min_qty": rebuilt.min_qty,
+                    "hourly": [[p.end, p.price, p.qty, p.sure, p.hours] for p in rebuilt.points if p.qty],
+                    "daily": cours.daily(conn, item_id, rebuilt),
+                }
+            else:
+                rebuilt = None
+            relative = None
+            if detail["relative"] is not None and detail["relative"][0] is not None:
+                found, observed = detail["relative"]
+                relative = {
+                    "observed": observed,
+                    "pace": found.pace if observed else None,
+                    "hours": found.hours,
+                    "moved": found.moved,
+                    "skipped": found.skipped,
+                    "points": [[end, hours, share * 100] for end, hours, share in found.points],
+                }
             avg = conn.execute(
                 "SELECT p.price, s.ts FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
                 "WHERE p.item_id = ? ORDER BY s.ts DESC LIMIT 1",
@@ -357,6 +379,8 @@ class Api:
                     "qty_24h": liquidity.qty_24h,
                     "qty_7d": liquidity.qty_7d,
                     "market_seen_at": detail["market_seen_at"],
+                    "rebuilt": rebuilt,
+                    "relative": relative,
                     "hourly": series(GRAIN_HOUR),
                     "daily": series(GRAIN_DAY),
                     "snapshots": conn.execute(

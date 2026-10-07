@@ -1159,7 +1159,10 @@ async function pageTrends() {
 
 // ---------------------------------------------------------------- graphiques
 
-/** Courbe ou barres à une seule série, avec survol. points : [[ts, valeur]]. */
+/**
+ * Courbe ou barres à une seule série, avec survol. points : [[ts, valeur, marque facultative]].
+ * La marque est une classe CSS : « rebuilt » pour un point reconstitué, « rebuilt unsure » s'il est incertain.
+ */
 function chart(points, { bars = false, height = 220, unit = '', detail } = {}) {
   const W = 720, H = height, L = 64, R = 12, T = 10, B = 26;
   const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
@@ -1186,10 +1189,11 @@ function chart(points, { bars = false, height = 220, unit = '', detail } = {}) {
   }
   if (bars) {
     const w = Math.max(3, Math.min(18, (W - L - R) / points.length - 4));
-    root.append(svg('g', { class: 'bars' }, points.map((p) => svg('rect', { x: X(p[0]) - w / 2, y: Y(p[1]), width: w, height: Math.max(0, Y(lo) - Y(p[1])), rx: 2 }))));
+    root.append(svg('g', { class: 'bars' }, points.map((p) => svg('rect', { class: p[2] || '', x: X(p[0]) - w / 2, y: Y(p[1]), width: w, height: Math.max(0, Y(lo) - Y(p[1])), rx: 2 }))));
   } else {
     const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(' ');
     root.append(svg('path', { class: 'area', d: `${path} L${X(x1)} ${Y(lo)} L${X(x0)} ${Y(lo)} Z` }), svg('path', { class: 'series', d: path }));
+    root.append(...points.filter((p) => p[2]).map((p) => svg('circle', { class: 'mark ' + p[2], r: 3.5, cx: X(p[0]), cy: Y(p[1]) })));
   }
   const cross = svg('line', { class: 'cross', y1: T, y2: H - B, visibility: 'hidden' });
   const point = svg('circle', { class: 'point', r: 4.5, visibility: 'hidden' });
@@ -1276,8 +1280,9 @@ async function pageItem(r) {
         h('span', { class: 'dot est' }), `${d.estimate.confidence} · ${fmt(d.estimate.price * (1 - d.estimate.spread))} à ${fmt(d.estimate.price * (1 + d.estimate.spread))}`),
       d.estimate.delta > 0 ? 'warn' : 'gain'),
     kpi('Coût le plus bas', fmt(d.unit_cost.cost), d.unit_cost.mode || 'prix manquant'),
-    kpi('Vendus sur 24 h', fmt(d.qty_24h), d.market_seen_at ? ago(d.market_seen_at, now) : 'cours non consulté'),
-    kpi('Vendus sur 7 j', fmt(d.qty_7d)));
+    kpi('Vendus sur 24 h', fmt(d.qty_24h), d.market_seen_at ? `${ago(d.market_seen_at, now)}${d.rebuilt && !d.rebuilt.blind ? ' + reconstitué' : ''}` : 'cours non consulté'),
+    kpi('Vendus sur 7 j', fmt(d.qty_7d)),
+    d.relative && d.relative.pace !== null && !d.market_seen_at && kpi('Rythme des ventes', `×${(Math.round(d.relative.pace * 10) / 10).toString().replace('.', ',')}`, 'estimé · 1 = moyenne du mois'));
 
   // Écart entre le prix réellement demandé à l'HDV et le prix moyen annoncé par le jeu.
   let gap = null;
@@ -1294,13 +1299,32 @@ async function pageItem(r) {
   }
 
   const noMarket = "Cours du marché non consulté.";
-  const hourlyQty = new Map(d.hourly.map((p) => [p[0], p[2]]));
-  const dailyQty = new Map(d.daily.map((p) => [p[0], p[2]]));
+  // Cours relevé, prolongé par les points reconstitués d'après les prix moyens (creux, pointillés si incertains).
+  const rb = d.rebuilt && !d.rebuilt.blind ? d.rebuilt : null;
+  const hourly = d.hourly.map((p) => [p[0], p[1], '', p[2]])
+    .concat(rb ? rb.hourly.map((p) => [p[0], p[1], p[3] ? 'rebuilt' : 'rebuilt unsure', p[2], p[4]]) : []);
+  const rebuiltDays = new Set(rb ? rb.daily.map((p) => p[0]) : []);
+  const daily = d.daily.filter((p) => !rebuiltDays.has(p[0])).map((p) => [p[0], p[1], '', p[2]])
+    .concat(rb ? rb.daily.map((p) => [p[0], p[1], 'rebuilt', p[2]]) : []).sort((a, b) => a[0] - b[0]);
+  const sold = (p) => `${fmt(p[3])} vendus${p[2] ? ` · reconstitué${p[2].includes('unsure') ? ', incertain' : ''}${p[4] > 1.5 ? ` sur ${Math.round(p[4])} h` : ''}` : ''}`;
+  const hourNote = rb ? '24 h du relevé + reconstitué' : '24 dernières heures';
+  let qtyPanel = chartPanel('Quantités vendues par heure', null, hourly.filter((p) => p[3] !== null).map((p) => [p[0], p[3], p[2], p[3], p[4]]), { bars: true, height: 220, detail: sold }, noMarket);
+  const rel = !d.market_seen_at && d.relative && d.relative.points.length ? d.relative : null;
+  if (rel) {
+    qtyPanel = chartPanel('Ventes relatives par relevé', 'estimé · % du volume sur 30 j', rel.points.map((p) => [p[0], p[2], '', null, p[1]]),
+      { bars: true, height: 220, unit: ' %', detail: (p) => `sur ${Math.round(p[4] * 10) / 10} h` }, noMarket);
+  }
   const charts = h('div', { class: 'grid2' },
-    chartPanel('Prix par heure', '24 dernières heures', d.hourly.map((p) => [p[0], p[1]]), { detail: (p) => `${fmt(hourlyQty.get(p[0]))} vendus` }, noMarket),
-    chartPanel('Quantités vendues par heure', null, d.hourly.filter((p) => p[2] !== null).map((p) => [p[0], p[2]]), { bars: true, height: 220 }, noMarket),
-    chartPanel('Prix par jour', `${d.daily.length} jours`, d.daily.map((p) => [p[0], p[1]]), { detail: (p) => `${fmt(dailyQty.get(p[0]))} vendus` }, noMarket),
+    chartPanel('Prix par heure', hourNote, hourly, { detail: sold }, noMarket),
+    qtyPanel,
+    chartPanel('Prix par jour', `${daily.length} jours`, daily, { detail: sold }, noMarket),
     chartPanel('Prix moyen au fil des relevés', `${d.snapshots.length} relevé${d.snapshots.length > 1 ? 's' : ''}`, d.snapshots, {}, "Aucun relevé."));
+  const minQty = d.rebuilt && d.rebuilt.min_qty >= 1.5 ? ` Ventes de moins de ${fmt(d.rebuilt.min_qty)} invisibles.` : '';
+  const coursNote = d.rebuilt && d.rebuilt.blind
+    ? h('div', { class: 'note' }, `Prix moyen trop peu sensible : ventes non reconstituées depuis le relevé.${minQty}`)
+    : rb ? h('div', { class: 'note' }, `Points creux : ventes reconstituées d'après les prix moyens, jusqu'au ${when(rb.processed_ts)} (pointillés : incertaines).${minQty}`)
+    : rel ? h('div', { class: 'note' }, `Sans relevé du cours : valeurs relatives et estimées, d'après ${Math.round(rel.hours)} h de prix moyens.${rel.observed ? '' : " Rythme inconnu sans prix relevé à l'HDV."}`)
+    : null;
 
   let hdv;
   if (!d.hdv) {
@@ -1351,7 +1375,7 @@ async function pageItem(r) {
           h('td', { class: 'soft' }, fmt(row['Quantité utilisée'])), h('td', {}, fmt(row['Prix de vente'])),
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
 
-  return [head, header, ignoredNote, kpis, gap, charts, hdvPanel, recipePanel, usedPanel];
+  return [head, header, ignoredNote, kpis, gap, charts, coursNote, hdvPanel, recipePanel, usedPanel];
 }
 
 // ---------------------------------------------------------------- page Combat (Comte Harebourg)

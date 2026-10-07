@@ -215,3 +215,41 @@ def test_relative_share_without_capture(conn):
     snapshots(conn, {ITEM: sales}, [D + DAY + 1 * HOUR])
     assert len(cours.relative(conn, ITEM, 410_000).points) == 4
     assert cours.relative(conn, ITEM, None) is None
+
+
+def test_item_page(tmp_path):
+    import time
+
+    from dofustool.web.api import Api
+
+    path = tmp_path / "market.sqlite"
+    conn = db.connect(path)
+    conn.executemany(
+        "INSERT INTO items VALUES (?, ?, 1, 'Ressource diverse', 1, 1, 0, 2)",
+        [(ITEM, "Écaille"), (CHEAP, "Sans relevé"), (FILLER, "Remplissage")],
+    )
+    day = int(time.time() // DAY - 1) * DAY  # hier, minuit UTC : toute la série est passée
+    shift = day - D
+    sales = [(ts + shift, p, q) for ts, p, q in history()]
+    other = [(ts + shift, p // 2, q) for ts, p, q in history()]
+    capture(conn, sales, day + 1 * HOUR)
+    hdv(conn, ITEM, 410_000, day + 1 * HOUR)
+    hdv(conn, CHEAP, 205_000, time.time() - 60)  # annonce fraîche : le rythme est calculable
+    sales.append((day + 2.5 * HOUR, 410_000, 3))
+    other.append((day + 2.5 * HOUR, 205_000, 2))
+    snapshots(conn, {ITEM: sales, CHEAP: other}, [day + h * HOUR for h in (2, 3, 4)])
+    conn.close()
+
+    api = Api(path, tmp_path / "config.toml")
+    page = api.item(ITEM)
+    assert page["relative"] is None and not page["rebuilt"]["blind"]
+    assert [(q, sure) for _, _, q, sure, _ in page["rebuilt"]["hourly"]] == [(3, True)]
+    assert page["rebuilt"]["daily"] == [[day, pytest.approx(410_000, rel=0.002), 3]]  # relevé fait à 1 h, avant la vente de midi
+    assert page["qty_7d"] == PriceBook(db.connect(path), time.time(), 24).liquidity(ITEM).qty_7d
+
+    page = api.item(CHEAP)
+    assert page["rebuilt"] is None and page["relative"]["observed"]
+    month = sum(q for ts, _, q in other if ts <= day + 2 * HOUR)  # volume de la fenêtre au début de l'intervalle
+    # L'arrondi au kama d'un prix moyen qui bouge de 80 kamas pèse quelques pour cent.
+    assert [p[2] for p in page["relative"]["points"]] == [pytest.approx(100 * 2 / month, rel=0.05), 0]
+    assert page["relative"]["pace"] > 0

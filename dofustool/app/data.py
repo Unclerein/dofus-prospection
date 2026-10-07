@@ -9,7 +9,7 @@ import pandas as pd
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours
 from ..analysis.forgemagie import MARKERS, classify
 from ..analysis.crafts import CraftCalculator, CraftResult, Item, load_items, load_recipes, rank_crafts, resolve_jobs
-from ..analysis.prices import PriceBook, PriceRef
+from ..analysis.prices import AVG_PRICE, ESTIMATED, PriceBook, PriceRef
 from ..analysis.trends import INSUFFICIENT, compute_trends
 from ..config import Config
 
@@ -143,6 +143,22 @@ def _local_dates(seconds: pd.Series) -> pd.Series:
     return pd.to_datetime(seconds, unit="s", utc=True).dt.tz_convert(local).dt.tz_localize(None)
 
 
+def moment_price(prices: PriceBook, item_id: int) -> tuple[float | None, bool]:
+    """(prix du moment, observé ou non) pour le cours relatif : annonce HDV, sinon prix relevé, sinon prix estimé.
+
+    Le prix estimé vient du glissement des mêmes prix moyens : avec lui, le rythme total vaut 1 par
+    construction. Seule la répartition des ventes dans le temps a alors un sens.
+    """
+    ask = prices.hdv_ask(item_id)
+    if ask is not None:
+        return ask[0], True
+    ref = prices.get(item_id)
+    if ref is not None and ref.source not in (AVG_PRICE, ESTIMATED):
+        return ref.price, True
+    guess = prices.estimate(item_id)
+    return (guess.price, False) if guess is not None else (None, False)
+
+
 def _ref_row(ref: PriceRef | None, now: float) -> tuple[int | None, str | None, float | None, int | None]:
     return (ref.price, ref.source, round(ref.age_hours(now), 1), ref.lot) if ref else (None, None, None, None)
 
@@ -187,6 +203,12 @@ def item_detail(conn: sqlite3.Connection, ws: Workspace, item_id: int) -> dict:
             history[title] = frame
     detail["history"] = history
     detail["market_seen_at"] = ws.prices.market_seen_at(item_id)
+    # Cours reconstitué après un relevé, sinon cours relatif tiré des seuls prix moyens.
+    detail["rebuilt"] = cours.rebuilt(conn, item_id)
+    detail["relative"] = None
+    if detail["market_seen_at"] is None:
+        price, observed = moment_price(ws.prices, item_id)
+        detail["relative"] = (cours.relative(conn, item_id, price), observed)
 
     detail["hdv"] = hdv_detail(conn, ws, item_id)
 
