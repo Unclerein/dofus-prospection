@@ -479,3 +479,5 @@ table.dense .th-sort .stat-ico { margin-right: 0; }
 .tip-line.base { grid-template-columns: 78px minmax(0, 1fr) auto; }
 .tip-prices { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-strong); }
 .tip-prices .tip-price { grid-template-columns: 120px auto minmax(0, 1fr); }
+
+.tip-note { color: var(--accent); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }

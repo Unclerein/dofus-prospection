@@ -110,6 +110,30 @@ function hoverTip(itemId) {
   };
 }
 
+/** Survol d'un prix d'équipement tiré d'une annonce HDV : les jets de l'exemplaire retenu. */
+const listingData = {};
+function hoverListing(itemId, source, price) {
+  if (!source || !(source.includes('sans exo') || source.includes('compris'))) return {}; // sources propres aux équipements
+  const cheapest = source.includes('compris'); // sinon : jet de base
+  return {
+    onmouseenter: (event) => {
+      tipWanted = `listing-${itemId}`;
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(async () => {
+        if (!listingData[itemId]) listingData[itemId] = api(`/api/forge/item/${itemId}`).catch(() => { delete listingData[itemId]; return null; });
+        const d = await listingData[itemId];
+        if (!d || !d.template_known || tipWanted !== `listing-${itemId}`) return;
+        const pool = d.listings.filter((l) => (cheapest ? l.missing.length <= 2 : l.plain)).sort((a, b) => a.price - b.price);
+        const chosen = pool.find((l) => l.price === price) || pool[0];
+        if (!chosen) return;
+        showTip(event, [h('div', { class: 'tip-note' }, cheapest ? 'Exemplaire le moins cher en vente' : 'Jet de base le moins cher en vente'), ...itemTooltip(chosen, d)]);
+      }, 180);
+    },
+    onmousemove: (event) => { if (!$tip.hidden && tipWanted === `listing-${itemId}`) placeTip(event); },
+    onmouseleave: () => { tipWanted = null; clearTimeout(tipTimer); $tip.hidden = true; },
+  };
+}
+
 function baseTooltip(d) {
   const range = (line) => (line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`);
   const row = (line, cls) => h('div', { class: 'tip-line base ' + cls }, h('span', { class: 'v' }, range(line)), h('span', { class: 'n with-ico' }, statIcon(line.asset), line.name), h('span', { class: 'r' }, ''));
@@ -418,7 +442,7 @@ async function pageCrafts() {
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], null, r.item_id)),
       h('td', { class: 'l soft' }, r['Métier'], h('span', { class: 'muted' }, ` · ${r['Niveau']}`)),
-      h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente']),
+      h('td', r.equipment ? hoverListing(r.item_id, r['Source du prix'], r['Prix de vente']) : {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente']),
         // Équipement vendu au prix d'un jet de base : le prix moyen du jeu reste visible à côté.
         r.equipment && r.avg && observed(r['Source du prix']) && h('div', { class: 'muted small' }, `moyen ${fmt(r.avg)}`)),
       h('td', { class: 'soft' }, fmt(r['Coût'])),
@@ -532,7 +556,7 @@ function stockCrafts(data) {
 
   const body = rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
     h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`, row.item_id)),
-    h('td', {}, row.sell === null ? h('span', { class: 'muted' }, '—')
+    h('td', hoverListing(row.item_id, row.source, row.sell), row.sell === null ? h('span', { class: 'muted' }, '—')
       : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
     h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
     h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
