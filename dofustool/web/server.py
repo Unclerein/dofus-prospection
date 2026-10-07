@@ -183,6 +183,12 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                 self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 65536))
                 return self._json({"error": "requête refusée"}, HTTPStatus.FORBIDDEN)
             try:
+                if path == "/api/equipment-price":
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict) or not isinstance(payload.get("mode"), str):
+                        raise ValueError("mode attendu")
+                    return self._json(api.set_equipment_price(payload["mode"]))
                 if path == "/api/config":
                     length = min(int(self.headers.get("Content-Length") or 0), 65536)
                     payload = json.loads(self.rfile.read(length) or b"{}")

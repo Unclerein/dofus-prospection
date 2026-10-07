@@ -21,6 +21,7 @@ class Config:
     min_liquidity: int = 0
     trend_threshold: float = 0.15
     use_estimated_prices: bool = True
+    equipment_price: str = "both"  # prix de vente d'un équipement : both, base (jet de base) ou avg (prix moyen)
     iface: str | None = None
     avg_prices_timeout_s: float = 60.0
     ankama_path: str = r"C:\Program Files\Ankama\Ankama Launcher\Ankama Launcher.exe"
@@ -55,6 +56,7 @@ def _from_raw(raw: dict) -> Config:
         min_liquidity=int(market.get("min_liquidity", defaults.min_liquidity)),
         trend_threshold=float(market.get("trend_threshold", defaults.trend_threshold)),
         use_estimated_prices=bool(market.get("use_estimated_prices", defaults.use_estimated_prices)),
+        equipment_price=str(market.get("equipment_price", defaults.equipment_price)),
         iface=capture.get("iface") or None,
         avg_prices_timeout_s=float(capture.get("avg_prices_timeout_s", defaults.avg_prices_timeout_s)),
         ankama_path=launcher.get("ankama_path", defaults.ankama_path),
@@ -86,6 +88,12 @@ def _number(values: dict, key: str, label: str, low: float, high: float, integer
     if not low <= value <= high:
         raise ValueError(f"{label} : doit être entre {low:g} et {high:g}")
     return int(value) if integer else float(value)
+
+
+def _choice(value, allowed: tuple[str, ...], label: str) -> str:
+    if value not in allowed:
+        raise ValueError(f"{label} : valeur inconnue")
+    return value
 
 
 def from_values(values: dict) -> Config:
@@ -126,6 +134,7 @@ def from_values(values: dict) -> Config:
         min_liquidity=_number(values, "min_liquidity", "Liquidité minimale", 0, 10**9, integer=True),
         trend_threshold=_number(values, "trend_threshold", "Seuil de tendance", 0.01, 5),
         use_estimated_prices=bool(values.get("use_estimated_prices", True)),
+        equipment_price=_choice(values.get("equipment_price", "both"), ("both", "base", "avg"), "Prix des équipements"),
         iface=_text(values, "iface", "Interface réseau") or None,
         avg_prices_timeout_s=_number(values, "avg_prices_timeout_s", "Délai d'alerte", 5, 3600),
         ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
@@ -181,6 +190,9 @@ min_liquidity = {cfg.min_liquidity}
 trend_threshold = {repr(cfg.trend_threshold)}
 # Sans annonce HDV ni vente récente, utiliser le prix estimé (jugé fiable) plutôt que le prix moyen.
 use_estimated_prices = {"true" if cfg.use_estimated_prices else "false"}
+# Prix de vente d'un équipement face à son coût de craft : "base" = annonce HDV jet de base (ni exo ni
+# over, deux lignes perdues au plus), "avg" = prix moyen du jeu, "both" = jet de base, sinon prix moyen.
+equipment_price = {_quoted(cfg.equipment_price)}
 
 [capture]
 # Interface réseau à écouter. Vide = interface par défaut.

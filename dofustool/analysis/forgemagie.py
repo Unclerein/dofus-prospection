@@ -19,6 +19,9 @@ MARKERS = frozenset({MODIFIED_BY, CRAFTED_BY, NO_MORE_FM})
 Template = dict[int, tuple[int, int]]
 
 
+BASE_MAX_MISSING = 2
+
+
 @dataclass(frozen=True, slots=True)
 class Classification:
     values: dict[int, int]  # valeur de chaque caractéristique de l'exemplaire
@@ -33,6 +36,14 @@ class Classification:
     def plain(self) -> bool:
         """Comparable à un exemplaire tout juste fabriqué : ni exo, ni over, ni ligne manquante."""
         return not self.exo and not self.over and not self.missing
+
+    @property
+    def base_like(self) -> bool:
+        """« Jet de base » au sens du marché : ni exo ni over, et au plus deux lignes perdues.
+
+        C'est l'exemplaire dont le prix se compare à celui d'un craft tout juste sorti.
+        """
+        return not self.exo and not self.over and len(self.missing) <= BASE_MAX_MISSING
 
     @property
     def perfect(self) -> bool:

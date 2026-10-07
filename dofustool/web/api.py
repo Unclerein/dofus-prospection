@@ -210,6 +210,7 @@ class Api:
                     "min_snapshots_for_trend": cfg.min_snapshots_for_trend,
                     "min_liquidity": cfg.min_liquidity,
                     "use_estimated_prices": cfg.use_estimated_prices,
+                    "equipment_price": cfg.equipment_price,
                     "onboarded": cfg.onboarded,
                     "share": share_client.status(conn, cfg),
                     "estimates": {
@@ -231,9 +232,12 @@ class Api:
             frame = state["crafts"]
             hidden = self._hidden(conn, state)
             rows = [row for row in (records(frame) if not frame.empty else []) if not hidden(row["item_id"])]
+            prices = state["ws"].prices
             for row in rows:
                 row["icon"] = state["icons"].get(row["item_id"])
                 row["craftable"] = state["craftable"].get(row["item_id"], 0)
+                row["equipment"] = prices.is_equipment(row["item_id"])
+                row["avg"] = prices.avg_price(row["item_id"]) if row["equipment"] else None
             return {
                 "rows": rows,
                 "jobs": sorted(frame["Métier"].unique()) if not frame.empty else [],
@@ -399,6 +403,15 @@ class Api:
             }
         finally:
             conn.close()
+
+    def set_equipment_price(self, mode: str) -> dict:
+        """Change le prix de vente retenu pour les équipements (réglage de config.toml)."""
+        import dataclasses
+
+        if mode not in ("both", "base", "avg"):
+            raise ValueError("mode inconnu")
+        config.save(dataclasses.replace(config.load(self.config_path), equipment_price=mode), self.config_path)
+        return {"equipment_price": mode}
 
     def save_config(self, values: dict) -> dict:
         """Valide les valeurs saisies et réécrit config.toml. ValueError si l'une est invalide."""

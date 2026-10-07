@@ -15,6 +15,10 @@ ESTIMATED = "prix estimé"
 AVG_PRICE = "prix moyen"
 
 EQUIPMENT = 0  # items.category_id
+# Prix de vente retenu pour un équipement : annonce « jet de base » si elle existe sinon prix moyen,
+# annonce « jet de base » seulement, ou prix moyen seulement.
+EQUIP_BOTH, EQUIP_BASE, EQUIP_AVG = "both", "base", "avg"
+EQUIP_MODES = (EQUIP_BOTH, EQUIP_BASE, EQUIP_AVG)
 LOT_SIZES = (1, 10, 100, 1000)
 
 
@@ -65,7 +69,8 @@ class PriceBook:
 
     Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix
     estimé (s'il est jugé fiable et que `use_estimates` est vrai), puis prix moyen.
-    Équipements : annonce HDV la moins chère sans exo ni over, puis prix médian sur 24 h, puis prix moyen.
+    Équipements : annonce HDV la moins chère « jet de base » (ni exo ni over, deux lignes perdues au
+    plus), puis prix médian sur 24 h, puis prix moyen — ou seulement l'un des deux, selon `equipment_price`.
     Le prix d'un équipement dépend de ses jets et de sa forgemagie : une vente isolée ou une
     annonce exotique ne dit rien du prix d'un exemplaire tout juste fabriqué.
 
@@ -73,9 +78,15 @@ class PriceBook:
     """
 
     def __init__(
-        self, conn: sqlite3.Connection, now: float, last_sale_max_age_hours: float, use_estimates: bool = False
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        last_sale_max_age_hours: float,
+        use_estimates: bool = False,
+        equipment_price: str = EQUIP_BOTH,
     ) -> None:
         self.now = now
+        self.equipment_price = equipment_price if equipment_price in EQUIP_MODES else EQUIP_BOTH
         oldest = now - last_sale_max_age_hours * 3600
         self.use_estimates = use_estimates
         # Estimations de tous les objets, pour l'affichage ; un relevé trop ancien ne s'extrapole pas.
@@ -141,7 +152,7 @@ class PriceBook:
             if item_id in self._equipment:
                 template = templates.get(item_id)
                 listed = [tuple(e) for e in json.loads(effects) if e[0] not in non_stats]
-                if template is None or not classify(listed, template).plain:
+                if template is None or not classify(listed, template).base_like:
                     continue
                 source = HDV_PLAIN
             else:
@@ -155,12 +166,17 @@ class PriceBook:
     def get(self, item_id: int) -> PriceRef | None:
         hdv = self._hdv.get(item_id)
         if item_id in self._equipment:
-            median = self._median.get(item_id)
-            if median is not None and median[0] is not None:
-                # Une annonce n'est pas une vente : si les ventes récentes sont plus basses, elles priment.
-                if hdv is None or median[0] < hdv[0]:
-                    return PriceRef(median[0], MEDIAN_24H, median[1])
-        if hdv is not None:
+            if self.equipment_price != EQUIP_AVG:
+                median = self._median.get(item_id)
+                if median is not None and median[0] is not None:
+                    # Une annonce n'est pas une vente : si les ventes récentes sont plus basses, elles priment.
+                    if hdv is None or median[0] < hdv[0]:
+                        return PriceRef(median[0], MEDIAN_24H, median[1])
+                if hdv is not None:
+                    return PriceRef(*hdv)
+            if self.equipment_price == EQUIP_BASE:
+                return None  # pas d'exemplaire de base relevé : pas de prix, plutôt qu'un prix moyen
+        elif hdv is not None:
             return PriceRef(*hdv)
         if item_id not in self._equipment:
             sale = self._last_sales.get(item_id)

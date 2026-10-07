@@ -377,7 +377,9 @@ async function pageCrafts() {
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], null, r.item_id)),
       h('td', { class: 'l soft' }, r['Métier'], h('span', { class: 'muted' }, ` · ${r['Niveau']}`)),
-      h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente'])),
+      h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente']),
+        // Équipement vendu au prix d'un jet de base : le prix moyen du jeu reste visible à côté.
+        r.equipment && r.avg && observed(r['Source du prix']) && h('div', { class: 'muted small' }, `moyen ${fmt(r.avg)}`)),
       h('td', { class: 'soft' }, fmt(r['Coût'])),
       h('td', { class: 'strong ' + (r['Marge'] === null ? 'muted' : r['Marge'] >= 0 ? 'gain' : 'warn') }, signed(r['Marge'])),
       h('td', { class: 'soft' }, r['Marge %'] === null ? '—' : `${fmt(r['Marge %'])} %`),
@@ -389,7 +391,14 @@ async function pageCrafts() {
 
   return [
     h('header', { class: 'head' },
-      h('div', {}, h('h1', {}, 'Crafts'), h('div', { class: 'lead' }, `${fmt(computable)} recettes · taxe ${Math.round((status.hdv_tax || 0) * 100)} % · clique un en-tête pour trier`))),
+      h('div', {}, h('h1', {}, 'Crafts'), h('div', { class: 'lead' }, `${fmt(computable)} recettes · taxe ${Math.round((status.hdv_tax || 0) * 100)} % · clique un en-tête pour trier`)),
+      h('div', { class: 'field' }, h('span', { class: 'label', title: 'Jet de base : annonce HDV sans exo ni over, avec deux lignes perdues au plus' }, 'Prix de vente des équipements'),
+        segmented('Prix de vente des équipements', [['both', 'Jet de base, sinon prix moyen'], ['base', 'Jet de base'], ['avg', 'Prix moyen']], status.equipment_price || 'both', async (mode) => {
+          try {
+            await api('/api/equipment-price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+          } catch (error) { return notify(`Non enregistré. ${error.message}`); }
+          S.cache = {}; S.status = await api('/api/status'); refresh();
+        }))),
     filters,
     h('section', { class: 'panel', 'aria-label': 'Classement' },
       rows.length === 0
