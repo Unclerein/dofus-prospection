@@ -46,8 +46,7 @@ http://localhost:8600 et se met à jour toute seule pendant une capture :
 Le raccourci bureau « Prospection » l'ouvre seule, sans jeu ni capture (`launcher\dashboard.ps1`,
 avec `-Stop` pour l'arrêter). Le lanceur l'ouvre avec le jeu tant que `start_dashboard` vaut `true` dans `config.toml`. Les
 icônes des objets sont téléchargées depuis DofusDB à leur premier affichage, puis gardées dans
-`data\icons`. L'ancien dashboard Streamlit reste disponible :
-`.\.venv\Scripts\streamlit.exe run dofustool\app\main.py`.
+`data\icons`.
 
 Le journal est dans `data\capture.log` : une ligne par relevé enregistré et par alerte.
 

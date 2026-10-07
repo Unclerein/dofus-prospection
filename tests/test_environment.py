@@ -3,7 +3,7 @@ import importlib
 import pytest
 
 
-@pytest.mark.parametrize("module", ["scapy.all", "google.protobuf", "blackboxprotobuf", "streamlit"])
+@pytest.mark.parametrize("module", ["scapy.all", "google.protobuf", "blackboxprotobuf", "pandas"])
 def test_dependency_imports(module):
     importlib.import_module(module)
 

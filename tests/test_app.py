@@ -12,7 +12,6 @@ from dofustool.config import Config
 from .test_analysis import AVG, HOUR, ITEMS, NOW, RECIPES, conn  # noqa: F401  (fixture)
 
 CFG = Config(jobs={"Paysan": 20}, min_snapshots_for_trend=2, trend_threshold=0.15)
-APP = Path(__file__).resolve().parents[1] / "dofustool" / "app" / "main.py"
 
 
 def test_crafts_frame_and_filters(conn):  # noqa: F811
@@ -116,17 +115,3 @@ def app_db(tmp_path, monkeypatch):
     c.close()
     monkeypatch.setenv("DOFUSTOOL_DB", str(path))
     return path
-
-
-@pytest.mark.parametrize("page", ["Crafts", "Forgemagie", "Tendances", "Fiche objet", "État"])
-def test_app_pages_render_without_error(app_db, page):
-    from streamlit.testing.v1 import AppTest
-
-    at = AppTest.from_file(str(APP), default_timeout=60)
-    at.session_state["page"] = page
-    at.session_state["item_id"] = 3
-    at.run()
-    assert not at.exception, at.exception
-    assert at.title[0].value == page
-    if page != "État":
-        assert any("Alerte de décodage" in e.value for e in at.error)

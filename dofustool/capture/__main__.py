@@ -43,7 +43,14 @@ def main() -> int:
     market = db.connect()
     archive = Archive()
     keymap_path = runtime_keymap_path()
-    pipeline = Pipeline(archive, market, load_keymap(keymap_path), cfg.avg_prices_timeout_s, keymap_path)
+    keymap = load_keymap(keymap_path)
+    try:
+        removed = archive.prune(time.time(), {mapping.key for mapping in keymap.values()})
+        if removed:
+            log.info("Archive allégée : %d anciens messages non décodés supprimés.", removed)
+    except Exception as exc:  # le ménage ne doit jamais empêcher la capture
+        log.warning("Archive non allégée : %s", exc)
+    pipeline = Pipeline(archive, market, keymap, cfg.avg_prices_timeout_s, keymap_path)
     source = LiveSource(iface=args.iface or cfg.iface)
     try:
         source.start()

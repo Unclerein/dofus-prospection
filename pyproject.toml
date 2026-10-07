@@ -7,7 +7,7 @@ dependencies = [
     "scapy>=2.6",
     "protobuf>=5",
     "bbpb>=1.4",
-    "streamlit>=1.40",
+    "pandas>=2.2",
     "truststore>=0.9",
 ]
 

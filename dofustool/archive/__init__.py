@@ -1,6 +1,10 @@
 """Archive brute de tous les messages du flux de jeu (data/archive.sqlite).
 
 Donnée privée : contient le chat et le handshake de session. Reste en local, jamais commitée.
+
+Elle sert à retrouver les messages après une mise à jour du jeu et à rejouer ce qu'une nouvelle
+version sait décoder. Au-delà de KEEP_DAYS jours, seuls les messages que l'outil décode sont
+gardés : le reste (déplacements, combats, chat) ne sert plus et pèse environ 30 Mo par jour de jeu.
 """
 import sqlite3
 from pathlib import Path
@@ -8,6 +12,7 @@ from pathlib import Path
 from ..protocol.session import Message
 
 ARCHIVE_PATH = Path(__file__).resolve().parents[2] / "data" / "archive.sqlite"
+KEEP_DAYS = 14
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS connections (
@@ -69,6 +74,21 @@ class Archive:
     def latest_body(self, key: str) -> bytes | None:
         row = self._db.execute("SELECT body FROM messages WHERE key = ? ORDER BY ts DESC LIMIT 1", (key,)).fetchone()
         return row[0] if row else None
+
+    def prune(self, now: float, keep_keys: set[str], keep_days: float = KEEP_DAYS) -> int:
+        """Supprime les messages non décodés des connexions ouvertes il y a plus de keep_days jours. Renvoie leur nombre.
+
+        keep_keys : clés des messages que l'outil sait décoder, conservés sans limite de durée.
+        L'espace libéré est réutilisé par les messages suivants : le fichier cesse de grossir.
+        """
+        marks = ",".join("?" * len(keep_keys))
+        cur = self._db.execute(
+            f"DELETE FROM messages WHERE key NOT IN ({marks}) "
+            "AND connection_id IN (SELECT id FROM connections WHERE started_at < ?)",
+            (*sorted(keep_keys), now - keep_days * 86400),
+        )
+        self._db.commit()
+        return cur.rowcount
 
     @property
     def db(self) -> sqlite3.Connection:
