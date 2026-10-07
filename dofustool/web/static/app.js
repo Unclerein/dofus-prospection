@@ -105,6 +105,26 @@ const lotLabel = (lot) => (lot > 1 ? `x${lot}` : '');
 const lotTitle = (lot, unitPrice) =>
   lot > 1 && unitPrice !== null && unitPrice !== undefined ? `Prix HDV d'un lot de ${lot} : ${fmt(unitPrice * lot)} kamas, ramené à l'unité` : null;
 
+/** En-tête de colonne cliquable : un clic trie dans le sens naturel de la colonne, un second l'inverse. */
+function sortTh(sort, key, label, { left = false, title = null, first = -1, onchange = refresh } = {}) {
+  const active = sort.key === key;
+  return h('th', { class: (left ? 'l ' : '') + (active ? 'sorted' : ''), title, 'aria-sort': active ? (sort.dir > 0 ? 'ascending' : 'descending') : null },
+    h('button', { class: 'th-sort', onclick: () => { if (active) sort.dir = -sort.dir; else { sort.key = key; sort.dir = first; } onchange(); } },
+      label, active ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''));
+}
+
+/** Copie triée selon l'en-tête choisi. Les lignes sans valeur restent en bas, quel que soit le sens. */
+function sortedBy(rows, sort, getters) {
+  const get = getters[sort.key];
+  if (!get) return rows;
+  return rows.slice().sort((a, b) => {
+    const x = get(a), y = get(b);
+    const noX = x === null || x === undefined, noY = y === null || y === undefined;
+    if (noX || noY) return noX - noY;
+    return (typeof x === 'string' ? x.localeCompare(y, 'fr') : x - y) * sort.dir;
+  });
+}
+
 /** Libellé court de la source d'un prix, avec la taille du lot HDV d'où vient le prix unitaire. */
 function shortSource(source, lot) {
   if (!source) return 'inconnu';
@@ -311,7 +331,7 @@ async function pageIgnored() {
 async function pageCrafts() {
   const data = await cached('crafts', '/api/crafts');
   const status = S.status || {};
-  const ui = S.ui.crafts || (S.ui.crafts = { doable: false, q: '', job: '', min: 1, max: 200, capital: '', sold: status.min_liquidity || 0, own: false, incomplete: false, sort: 'margin', limit: 100 });
+  const ui = S.ui.crafts || (S.ui.crafts = { doable: false, q: '', job: '', min: 1, max: 200, capital: '', sold: status.min_liquidity || 0, own: false, incomplete: false, sort: { key: 'margin', dir: -1 }, limit: 100 });
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
 
   const query = norm((ui.q || '').trim());
@@ -324,8 +344,12 @@ async function pageCrafts() {
     (ui.incomplete || r['Marge'] !== null) &&
     (!ui.capital || r['Coût'] === null || r['Coût'] <= Number(ui.capital)) &&
     (!(ui.sold > 0) || r['Vendus 7 j'] === null || r['Vendus 7 j'] >= ui.sold));
-  const key = ui.sort === 'margin' ? 'Marge pondérée' : 'Marge %';
-  rows = rows.slice().sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
+  rows = sortedBy(rows, ui.sort, {
+    name: (r) => r['Objet'], job: (r) => `${r['Métier']} ${String(r['Niveau']).padStart(3, '0')}`,
+    sell: (r) => r['Prix de vente'], cost: (r) => r['Coût'], margin: (r) => r['Marge pondérée'], pct: (r) => r['Marge %'],
+    sold: (r) => r['Vendus 7 j'], stock: (r) => r.craftable || null,
+  });
+  const th = (key, label, options = {}) => sortTh(ui.sort, key, label, { ...options, onchange: () => set({ limit: 100 }) });
   const computable = data.rows.filter((r) => r['Marge'] !== null).length;
 
   const number = (id, label, value, onchange, extra) => h('div', { class: 'field', style: extra || 'flex: 0 1 150px' },
@@ -365,16 +389,14 @@ async function pageCrafts() {
 
   return [
     h('header', { class: 'head' },
-      h('div', {}, h('h1', {}, 'Crafts'), h('div', { class: 'lead' }, `${fmt(computable)} recettes · taxe ${Math.round((status.hdv_tax || 0) * 100)} %`)),
-      segmented('Classer par', [['margin', 'Marge'], ['pct', 'Marge %']], ui.sort, (sort) => set({ sort }))),
+      h('div', {}, h('h1', {}, 'Crafts'), h('div', { class: 'lead' }, `${fmt(computable)} recettes · taxe ${Math.round((status.hdv_tax || 0) * 100)} % · clique un en-tête pour trier`))),
     filters,
     h('section', { class: 'panel', 'aria-label': 'Classement' },
       rows.length === 0
         ? h('div', { class: 'empty' }, data.rows.length ? 'Aucune recette ne correspond à ces filtres.' : "Aucune recette : importe les données statiques, puis lance une capture.")
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
-          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, 'Métier'), h('th', {}, 'Prix de vente'), h('th', {}, 'Coût'),
-            h('th', { class: ui.sort === 'margin' ? 'sorted' : '' }, 'Marge' + (ui.sort === 'margin' ? ' ↓' : '')),
-            h('th', { class: ui.sort === 'pct' ? 'sorted' : '' }, 'Marge %' + (ui.sort === 'pct' ? ' ↓' : '')), h('th', {}, 'Vendus 7 j'), h('th', { title: 'Nombre faisable avec ton inventaire et ta banque' }, 'En stock'), h('th', { class: 'l' }, 'À savoir'), h('th', {}, ''))),
+          h('thead', {}, h('tr', {}, th('name', 'Objet', { left: true, first: 1 }), th('job', 'Métier', { left: true, first: 1 }), th('sell', 'Prix de vente'), th('cost', 'Coût'),
+            th('margin', 'Marge'), th('pct', 'Marge %'), th('sold', 'Vendus 7 j'), th('stock', 'En stock', { title: 'Nombre faisable avec ton inventaire et ta banque' }), h('th', { class: 'l' }, 'À savoir'), h('th', {}, ''))),
           h('tbody', {}, body))),
       h('div', { class: 'panel-foot' },
         h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'dot on' }), 'prix observé'), h('span', {}, h('span', { class: 'dot' }), 'prix moyen')),
@@ -435,8 +457,12 @@ function stockCrafts(data) {
     (!query || norm(row.name).includes(query) || row.ingredients.some((i) => norm(i.name).includes(query))) &&
     (!ui.job || row.job === ui.job) && (!ui.own || row.own_job === true));
   const ready = base.filter((row) => row.craftable > 0);
-  const close = base.filter((row) => row.craftable === 0 && row.lines - row.covered === 1);
-  let rows = ui.view === 'ready' ? ready : ui.view === 'close' ? close : base;
+  // Ingrédients qu'il faut encore se procurer pour un craft (une ligne en quantité insuffisante compte).
+  const missing = (row) => (row.craftable > 0 ? 0 : row.lines - row.covered);
+  const lacking = (n) => base.filter((row) => (n === 4 ? missing(row) >= 4 : missing(row) === n));
+  const close = lacking(1);
+  const views = { ready, m1: close, m2: lacking(2), m3: lacking(3), m4: lacking(4), all: base };
+  let rows = views[ui.view] || base;
   rows = rows.slice().sort(ui.view === 'ready'
     ? (a, b) => (b.total_margin ?? -Infinity) - (a.total_margin ?? -Infinity)
     : (a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity));
@@ -445,7 +471,7 @@ function stockCrafts(data) {
   let typing = null;
   const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Recettes'),
-      segmented('Recettes', [['ready', `Faisables maintenant · ${ready.length}`], ['close', `Il manque un ingrédient · ${close.length}`], ['all', `Toutes · ${base.length}`]], ui.view, (view) => set({ view, limit: 100 }))),
+      segmented('Recettes', [['ready', `Tout en stock · ${ready.length}`], ['m1', `1 manquant · ${views.m1.length}`], ['m2', `2 · ${views.m2.length}`], ['m3', `3 · ${views.m3.length}`], ['m4', `4 et plus · ${views.m4.length}`], ['all', `Toutes · ${base.length}`]], ui.view, (view) => set({ view, limit: 100 }))),
     h('div', { class: 'field', style: 'flex: 1 1 220px' }, h('label', { for: 's-q' }, 'Objet ou ingrédient'),
       h('input', { id: 's-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
         oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => set({ q: value, limit: 100 }), 220); } })),
@@ -939,8 +965,12 @@ async function forgeRanking() {
   const typeCounts = new Map();
   for (const r of data.rows) if (r['Moins cher selon critère'] !== null) typeCounts.set(r.type || 'Autres', (typeCounts.get(r.type || 'Autres') || 0) + 1);
   if (ui.type && !typeCounts.has(ui.type)) ui.type = '';
-  const rows = data.rows.filter((r) => r['Moins cher selon critère'] !== null && (!ui.type || (r.type || 'Autres') === ui.type))
-    .sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
+  const other = ui.start === 'base' ? 'Gain sur le craft' : 'Prime sur la base';
+  const sort = ui.sort || (ui.sort = { key: 'main', dir: -1 });
+  const rows = sortedBy(data.rows.filter((r) => r['Moins cher selon critère'] !== null && (!ui.type || (r.type || 'Autres') === ui.type)), sort, {
+    name: (r) => r['Objet'], base: (r) => r['Moins cher de base'], with: (r) => r['Moins cher selon critère'],
+    main: (r) => r[key], craft: (r) => r['Coût de craft'], other: (r) => r[other],
+  });
   const top = Math.max(1, ...rows.map((r) => r[key] || 0));
 
   const controls = h('section', { class: 'panel pad filters', 'aria-label': 'Comparaison' },
@@ -982,9 +1012,9 @@ async function forgeRanking() {
         : ui.criterion === 'over' ? `Aucune annonce connue avec ${lineName} à ${ui.amount} ou plus au-dessus de son jet parfait, parmi les ${data.rows.length} objets qui ont cette ligne de base.`
         : 'Aucun objet connu ne répond à ce critère.')
       : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 940px' },
-        h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'De base'), h('th', {}, label),
-          h('th', { class: 'l sorted' }, (ui.start === 'base' ? 'Marge sur la base' : 'Marge sur un craft') + ' ↓'), h('th', {}, 'Coût de craft'),
-          h('th', {}, ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'))),
+        h('thead', {}, h('tr', {}, h('th', {}, '#'), sortTh(sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(sort, 'base', 'De base'), sortTh(sort, 'with', label),
+          sortTh(sort, 'main', ui.start === 'base' ? 'Marge sur la base' : 'Marge sur un craft', { left: true }), sortTh(sort, 'craft', 'Coût de craft'),
+          sortTh(sort, 'other', ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'))),
         h('tbody', {}, body))),
     h('div', { class: 'panel-foot' },
       h('span', {}, ui.criterion === 'over'
@@ -1010,7 +1040,8 @@ async function pageTrends() {
     h('div', { class: 'panel-head' }, h('h2', {}, title), h('span', { class: 'muted small' }, `${rows.length} objet${rows.length > 1 ? 's' : ''}`)),
     rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun pour le moment.')
       : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 600px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'), h('th', {}, 'Comparé à'), h('th', {}, 'Écart en kamas'), h('th', { class: 'sorted' }, 'Écart'), h('th', {}, 'Recettes'), h('th', {}, ''))),
+        h('thead', {}, h('tr', {}, sortTh(ui.sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(ui.sort, 'price', 'Prix'), sortTh(ui.sort, 'ref', 'Comparé à'),
+          sortTh(ui.sort, 'kamas', 'Écart en kamas'), sortTh(ui.sort, 'gap', 'Écart'), sortTh(ui.sort, 'recipes', 'Recettes'), h('th', {}, ''))),
         h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '), r.item_id)),
           h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
@@ -1020,7 +1051,7 @@ async function pageTrends() {
           h('td', { class: r.recipes ? 'soft' : 'muted' }, r.recipes || '—'),
           h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet']))))))),
     rows.length > 150 ? h('div', { class: 'panel-foot' }, h('span', {}, `150 sur ${fmt(rows.length)}`)) : null);
-  const ui = S.ui.trends || (S.ui.trends = { category: '', type: '', usedOnly: false, pct: Math.round((status.trend_threshold || 0.15) * 100), kamas: 0 });
+  const ui = S.ui.trends || (S.ui.trends = { category: '', type: '', usedOnly: false, pct: Math.round((status.trend_threshold || 0.15) * 100), kamas: 0, sort: { key: 'gap', dir: -1 } });
   const refValue = (r) => (r['Prix moyen'] !== null && r['Prix moyen'] !== undefined ? r['Prix moyen'] : r['Moyenne 30 j'] !== null ? r['Moyenne 30 j'] : r['Moyenne 7 j']);
   const kamasGap = (r) => Math.abs(r['Prix'] - refValue(r));
   // L'écart minimum remplace le seuil de signal fixe : c'est toi qui le règles.
@@ -1045,8 +1076,10 @@ async function pageTrends() {
     h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 't-kamas' }, 'Écart min. en kamas'),
       h('input', { id: 't-kamas', type: 'number', min: 0, value: ui.kamas || '', placeholder: 'Sans minimum', class: ui.kamas > 0 ? 'set' : '', onchange: (e) => { ui.kamas = Math.max(0, Number(e.target.value) || 0); refresh(); } })),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.usedOnly, onchange: (e) => { ui.usedOnly = e.target.checked; refresh(); } }), 'Masquer ce qui ne sert dans aucune recette'));
-  const under = kept.filter((r) => r['Écart %'] < 0).sort((a, b) => a['Écart %'] - b['Écart %']);
-  const over = kept.filter((r) => r['Écart %'] > 0).sort((a, b) => b['Écart %'] - a['Écart %']);
+  // Même tri pour les deux tableaux ; « Écart » classe par ampleur, le plus fort d'abord.
+  const getters = { name: (r) => r['Objet'], price: (r) => r['Prix'], ref: refValue, kamas: kamasGap, gap: (r) => Math.abs(r['Écart %']), recipes: (r) => r.recipes || 0 };
+  const under = sortedBy(kept.filter((r) => r['Écart %'] < 0), ui.sort, getters);
+  const over = sortedBy(kept.filter((r) => r['Écart %'] > 0), ui.sort, getters);
   return [head, filters, h('div', { class: 'grid2' }, table('Sous-cotés, à acheter', under, false), table('Sur-cotés, à vendre', over, true))];
 }
 
@@ -1527,7 +1560,21 @@ async function startTour() {
     tab('crafts', 'Crafts', 'Toutes les recettes, classées par marge : prix de vente, coût des ingrédients et taxe compris. Un clic ouvre la fiche de l\'objet.'),
     tab('stock', 'Mon stock', 'Ce que tu possèdes, sa valeur, et les recettes que tu peux déjà lancer avec ce que tu as.'),
     tab('sales', 'Mes ventes', 'Tes lots en vente, et ceux qui ne sont plus les moins chers de l\'HDV.'),
-    tab('forge', 'Forgemagie', 'Les équipements en vente avec leurs jets : exos, overs, et ce que rapporte une amélioration.'),
+    { target: 'forge', hash: '#/forge', title: 'Forgemagie : un équipement à la loupe', body: () => [
+      h('p', {}, 'Cherche un équipement que tu as ouvert à l\'HDV : chaque exemplaire en vente apparaît avec ses jets.'),
+      h('ul', { class: 'tour-points' },
+        point('Exo, over, ligne perdue :', 'chaque exemplaire est étiqueté, avec la qualité de ses jets en %.'),
+        point('Tes critères, à gauche :', 'un minimum par caractéristique, un exo voulu. Seuls les exemplaires qui les respectent restent.'),
+        point('En haut, le calcul :', 'coût de craft, moins cher de base, et ce que tu gagnes en l\'améliorant toi-même.'),
+        point('Survole une ligne', 'pour voir l\'objet comme en jeu ; clique un en-tête pour trier par ce jet.'))] },
+    { target: 'forge', hash: '#/forge/ranking', title: 'Forgemagie : le classement général', body: () => [
+      h('p', {}, 'Quels équipements rapportent le plus à forgemager ? Choisis une amélioration, l\'outil compare tous ceux que tu as relevés.'),
+      h('ul', { class: 'tour-points' },
+        point('Un exo :', 'par exemple PA. Il compare le moins cher de base au moins cher avec cet exo.'),
+        point('Un over :', 'une caractéristique poussée au-dessus de son jet parfait, du montant que tu choisis.'),
+        point('Mes critères :', 'ceux que tu as enregistrés objet par objet.'),
+        point('Point de départ :', 'acheter l\'objet de base, ou le fabriquer.')),
+      h('p', { class: 'muted small' }, 'Les marges sont avant runes. « 1 seule annonce » signale un prix fragile : un seul vendeur le demande.')] },
     tab('trends', 'Tendances', 'Les objets vendus nettement sous ou au-dessus de leur prix habituel.'),
     tab('status', 'État', 'La capture tourne-t-elle, que vaut le prix estimé, où en est le partage avec tes amis.'),
     { title: 'C\'est parti', body: () => [
@@ -1591,7 +1638,8 @@ async function startTour() {
     const last = index === steps.length - 1;
     clearInterval(poller);
     if (step.live) poller = setInterval(async () => { try { live = await api('/api/status'); if (steps[index].live) draw(); } catch (error) { /* réessai */ } }, 3000);
-    if (step.target && location.hash !== `#/${step.target}`) location.hash = `#/${step.target}`;
+    const hash = step.hash || (step.target && `#/${step.target}`);
+    if (hash && location.hash !== hash) location.hash = hash;
     const focused = document.activeElement && document.activeElement.id;
     $card.replaceChildren(
       h('div', { class: 'tour-progress', 'aria-hidden': 'true' }, steps.map((_, i) => h('span', { class: i <= index ? 'on' : '' }))),
