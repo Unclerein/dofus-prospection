@@ -9,7 +9,7 @@ import sys
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, characters, hdv_listings, market_history, sales, storage
+from ..messages import avg_prices, characters, hdv_listings, market_history, sales, storage, trades
 from ..messages import load_runtime_keymap as load_keymap
 
 
@@ -81,6 +81,15 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             if parsed is not None:
                 db.save_sales(market, parsed, ts)
                 counts["listes de ventes lues"] += 1
+    text = keymap.get("info_text")
+    if text is not None:
+        counts["ventes et achats ajoutés"] = 0
+        for source_id, ts, body in archive.execute(
+            "SELECT id, ts, body FROM messages WHERE key = ? AND direction = 's2c' ORDER BY id", (text.key,)
+        ):
+            trade = trades.parse_text(body, text)
+            if trade is not None and db.save_trade(market, source_id, trade, ts):
+                counts["ventes et achats ajoutés"] += 1
     listing, select, jobs = (keymap.get(k) for k in ("character_list", "character_select", "job_levels"))
     if listing is not None:
         for ts, body in archive.execute(

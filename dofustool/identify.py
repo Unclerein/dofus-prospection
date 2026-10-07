@@ -19,14 +19,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .analysis.jobxp import level_to_xp
-from .messages import Mapping, avg_prices, characters, hdv_listings, market_history, sales, storage
+from .messages import Mapping, avg_prices, characters, hdv_listings, market_history, sales, storage, trades
 from .protocol.tcp import C2S, S2C
 from .protocol.wire import LEN, VARINT, WireError, iter_fields, read_varint
 
 NAMES = (
     "avg_prices", "inventory", "bank", "character_list", "character_select",
-    "job_levels", "market_history", "hdv_listings", "my_sales",
+    "job_levels", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update",
 )  # fmt: skip
+TEXT_MAX_BYTES = 200  # un message d'information est court
+TEXT_MIN_SEEN = 3  # nombre de messages à paramètres chiffrés qu'il faut avoir vus pour reconnaître la clé
 INVENTORY_WINDOW_S = 90.0  # l'inventaire arrive tout seul juste après le choix du personnage ; la banque, non
 MIN_KNOWN = 0.95
 
@@ -370,6 +372,52 @@ def match_my_sales(body: bytes, ctx: Context) -> dict[str, int] | None:
     return None
 
 
+def match_sale_update(body: bytes, ctx: Context) -> dict[str, int] | None:
+    """Lot créé ou modifié : la même forme qu'une entrée de la liste des lots en vente, seule dans son message."""
+    top = _fields(body)
+    if not top or len(top) != 3:
+        return None
+    refs = [(n, v) for n, t, v in top if t == LEN]
+    outer = [n for n, t, _ in top if t == VARINT]
+    if len(refs) != 1 or len(outer) != 2:
+        return None
+    inner = _fields(refs[0][1])
+    if inner is None:
+        return None
+    values = _varints(inner)  # un lot d'équipement porte aussi ses effets : seuls les entiers comptent
+    lot = [n for n, v in values.items() if v in sales.LOT_SIZES]
+    item = [n for n, v in values.items() if n not in lot and v in ctx.items]
+    if len(lot) != 1 or len(item) != 1 or len(values) != 3:
+        return None
+    uid = next(n for n in values if n not in (lot[0], item[0]))
+    found = []
+    for price, remaining in (outer, outer[::-1]):
+        fields = {"price": price, "ref": refs[0][0], "remaining": remaining, "item_id": item[0], "uid": uid, "lot": lot[0]}
+        parsed = trades.parse_lot_update(body, Mapping("", fields))
+        reference = ctx.avg.get(parsed.item_id) if parsed else None
+        # Comme pour la liste des lots : le prix demandé reste dans l'ordre de grandeur du prix moyen.
+        if reference and 0.1 <= parsed.price / parsed.lot / reference <= 10:
+            found.append(fields)
+    return found[0] if len(found) == 1 else None
+
+
+def text_signature(body: bytes) -> tuple[int, int, bool] | None:
+    """Forme d'un message d'information : (champ du numéro de texte, champ des paramètres, paramètres tous chiffrés).
+
+    None si le message n'a pas cette forme : des entiers, et au plus un champ répété de courtes chaînes.
+    """
+    top = _fields(body)
+    if not top:
+        return None
+    texts = {n for n, t, _ in top if t == LEN}
+    numbers = [n for n, t, _ in top if t == VARINT]
+    if len(texts) > 1 or not numbers or any(t not in (LEN, VARINT) for _, t, _ in top):
+        return None
+    params = [v for _, t, v in top if t == LEN]
+    digits = len(params) >= 2 and all(v.isdigit() and len(v) <= trades.MAX_DIGITS for v in params)
+    return numbers[0], next(iter(texts), 0), digits  # 0 : texte sans paramètre
+
+
 # --- balayage d'une connexion ------------------------------------------------
 
 
@@ -384,6 +432,8 @@ class Scan:
     order: dict[tuple[str, str], int] = field(default_factory=dict)
     dirty: set[tuple[str, str]] = field(default_factory=set)
     matches: dict[tuple[str, str], dict[str, Found]] = field(default_factory=dict)
+    # Messages d'information : par clé, les formes vues parmi les messages courts (None : autre forme).
+    texts: dict[tuple[str, str], Counter] = field(default_factory=dict)
 
     def feed(self, archive: sqlite3.Connection, connection_id: int) -> None:
         rows = archive.execute(
@@ -399,6 +449,8 @@ class Scan:
             if slot not in self.best or len(body) > len(self.best[slot]):
                 self.best[slot] = body
                 self.dirty.add(slot)
+            if direction == S2C and 0 < len(body) <= TEXT_MAX_BYTES:
+                self.texts.setdefault(slot, Counter())[text_signature(body)] += 1
 
 
 def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], dict[str, str]]:
@@ -416,6 +468,7 @@ def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], 
                 "job_levels": match_job_levels,
                 "market_history": match_market_history,
                 "my_sales": match_my_sales,
+                "my_sale_update": match_sale_update,
             }
             for name, matcher in simple.items():
                 fields = matcher(body, ctx)
@@ -439,6 +492,19 @@ def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], 
                 name = "inventory" if early else "bank"
                 item = Found(name, item.key, item.fields)
             candidates.setdefault(name, []).append(item)
+
+    # Message d'information : une clé dont tous les messages courts ont la même forme (un numéro de texte et
+    # des paramètres), et dont plusieurs ont des paramètres entièrement chiffrés.
+    if "info_text" in wanted:
+        for slot, seen in scan.texts.items():
+            shapes = {(sig[0], sig[1]) for sig in seen if sig is not None and sig[1]}
+            strong = sum(n for sig, n in seen.items() if sig is not None and sig[2])
+            if None in seen or len(shapes) != 1 or strong < TEXT_MIN_SEEN or len(scan.best[slot]) > TEXT_MAX_BYTES:
+                continue
+            id_field, params_field = next(iter(shapes))
+            if any(sig[0] != id_field for sig in seen):
+                continue
+            candidates.setdefault("info_text", []).append(Found("info_text", slot[1], {"id": id_field, "params": params_field}))
 
     # Choix du personnage : une requête du client faite d'un seul entier, que la liste reçue juste avant contient.
     if "character_select" in wanted or "character_list" in wanted:

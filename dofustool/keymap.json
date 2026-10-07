@@ -89,5 +89,23 @@
       "price": 4,
       "remaining": 1
     }
+  },
+  "info_text": {
+    "key": "lof",
+    "fields": {
+      "id": 2,
+      "params": 4
+    }
+  },
+  "my_sale_update": {
+    "key": "jxt",
+    "fields": {
+      "price": 1,
+      "ref": 2,
+      "remaining": 3,
+      "item_id": 1,
+      "uid": 3,
+      "lot": 4
+    }
   }
 }

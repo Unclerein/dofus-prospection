@@ -43,7 +43,7 @@ def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH)
         "(SELECT MAX(captured_at) FROM holdings_meta), "
         # Somme des niveaux, pas la date du relevé : un gain d'expérience ne doit pas tout recalculer.
         "(SELECT COUNT(*) FROM characters), (SELECT SUM(level) FROM character_jobs), "
-        "(SELECT MAX(captured_at) FROM my_sales_meta), "
+        "(SELECT MAX(captured_at) FROM my_sales_meta), (SELECT COUNT(*) FROM my_sales), (SELECT COUNT(*) FROM trades), "
         "(SELECT group_concat(key || '=' || value, '|') FROM capture_status "
         " WHERE key IN ('started_ts', 'stopped_ts', 'decode_alert'))"
     ).fetchone()
@@ -725,7 +725,39 @@ class Api:
                 )
             rows.sort(key=lambda r: (-(r["undercut"] > 0), -r["price"]))
             meta = conn.execute("SELECT COUNT(*), MIN(captured_at), MAX(captured_at) FROM my_sales_meta").fetchone()
-            return clean({"rows": rows, "markets": meta[0], "oldest": meta[1], "latest": meta[2], "tax": cfg.hdv_tax, "now": now})
+            # Journal : ventes conclues et achats annoncés par le jeu, les plus récents d'abord.
+            trades = []
+            for ts, kind, item_id, quantity, price in conn.execute(
+                "SELECT ts, kind, item_id, quantity, price FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
+            ):
+                item = ws.items.get(item_id)
+                avg = ws.prices.avg_price(item_id)
+                trades.append(
+                    {
+                        "ts": ts,
+                        "kind": kind,
+                        "item_id": item_id,
+                        "name": item.name if item else f"#{item_id}",
+                        "icon": state["icons"].get(item_id),
+                        "quantity": quantity,
+                        "price": price,
+                        "avg": avg * quantity if avg else None,
+                    }
+                )
+            totals = {
+                f"{kind}_{label}": conn.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(price), 0) FROM trades WHERE kind = ? AND ts >= ?", (kind, now - days * 86400)
+                ).fetchone()
+                for kind in ("sale", "purchase")
+                for label, days in (("24h", 1), ("7d", 7))
+            }
+            return clean(
+                {
+                    "rows": rows, "markets": meta[0], "oldest": meta[1], "latest": meta[2], "tax": cfg.hdv_tax, "now": now,
+                    "trades": trades, "totals": totals,
+                    "first_trade": conn.execute("SELECT MIN(ts) FROM trades").fetchone()[0],
+                }
+            )  # fmt: skip
         finally:
             conn.close()
 

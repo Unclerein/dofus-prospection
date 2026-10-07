@@ -38,6 +38,8 @@ BUILDS = [
         "market_history": {"hourly": 1, "daily": 2, "quantity": 1, "date": 2, "price": 3, "item_id": 4},
         "hdv_listings": {"item_id": 1, "entries": 2, "effects": 1, "entry_item": 2, "uid": 5, "prices": 6, "effect_id": 1, "effect_value": 10},
         "my_sales": {"entries": 2, "ref": 1, "uid": 1, "item_id": 2, "lot": 3, "price": 2, "remaining": 3},
+        "info_text": {"id": 2, "params": 4},
+        "my_sale_update": {"price": 1, "ref": 2, "remaining": 3, "item_id": 1, "uid": 3, "lot": 4},
     },
     {
         "avg_prices": {"entries": 3, "item_id": 1, "price": 2},
@@ -47,6 +49,8 @@ BUILDS = [
         "market_history": {"hourly": 1, "daily": 3, "quantity": 4, "date": 3, "price": 1, "item_id": 2},
         "hdv_listings": {"item_id": 3, "entries": 1, "effects": 5, "entry_item": 1, "uid": 3, "prices": 2, "effect_id": 10, "effect_value": 5},
         "my_sales": {"entries": 4, "ref": 3, "uid": 2, "item_id": 3, "lot": 1, "price": 5, "remaining": 1},
+        "info_text": {"id": 1, "params": 3},
+        "my_sale_update": {"price": 2, "ref": 1, "remaining": 4, "item_id": 2, "uid": 1, "lot": 3},
     },
 ]
 
@@ -125,6 +129,18 @@ def sales_body(f, lots=12, market_types=(262, 266, 15, 152)) -> bytes:
     return out
 
 
+def text_body(f, ident: int, *params) -> bytes:
+    """Message d'information : un numéro de texte et ses paramètres, écrits en chiffres ou non."""
+    return vi(f["id"], ident) + b"".join(ld(f["params"], str(p).encode()) for p in params)
+
+
+def sale_update_body(f, uid=6_100_000, item=1500, lot=10, price=4_900, equipment=False) -> bytes:
+    ref = vi(f["item_id"], item) + vi(f["uid"], uid) + vi(f["lot"], lot)
+    if equipment:  # un lot d'équipement porte aussi ses effets, jamais lus
+        ref += ld(max(f["item_id"], f["uid"], f["lot"]) + 3, vi(1, 125) + ld(2, b"Nom-De-Joueur"))
+    return vi(f["price"], price) + ld(f["ref"], ref) + vi(f["remaining"], 2_419_200)
+
+
 BODIES = {
     "avg_prices": avg_body, "inventory": storage_body, "job_levels": jobs_body, "character_list": characters_body,
     "market_history": market_body, "my_sales": sales_body,
@@ -179,6 +195,14 @@ def archive_with(build, keys, bank_after=600.0, with_equipment=True) -> tuple[Ar
     if with_equipment:
         add(1810.0, S2C, "hdv_listings", hdv_body(build["hdv_listings"], equipment=True))
     add(1900.0, S2C, "my_sales", sales_body(build["my_sales"]))
+    add(1905.0, S2C, "my_sale_update", sale_update_body(build["my_sale_update"]))
+    add(1906.0, S2C, "my_sale_update", sale_update_body(build["my_sale_update"], uid=6_100_001, equipment=True))
+    text = build["info_text"]
+    for at, body in enumerate((
+        text_body(text, 89), text_body(text, 65, 4_800, 1500, 1500, 10), text_body(text, 252, 1501, 3_602_459, 100, 47_000),
+        text_body(text, 36, "Un-Nom"), text_body(text, 193, 2026, 10, 7, 18, 56), text_body(text, 21, 1, 23_726),
+    )):
+        add(1910.0 + at, S2C, "info_text", body)
     # Du bruit : d'autres requêtes d'un seul entier, et des messages sans rapport.
     archive.add(conn, Message(0, 1950.0, C2S, "zz1", vi(1, 207_619_076), 1, 4))
     archive.add(conn, Message(0, 1951.0, S2C, "zz2", vi(1, 5) + ld(2, b"bonjour"), 2, None))
@@ -294,7 +318,7 @@ def test_pipeline_recovers_alone_from_a_game_update(tmp_path, caplog):
     assert len(db.character_jobs(market, CHOSEN)) == len(JOBS)
     raw = identify.read_keymap(path)
     assert raw["avg_prices"]["key"] == KEYS["avg_prices"] and raw["job_levels"]["fields"] == build["job_levels"]
-    assert identify.pending(raw) == {"bank", "market_history", "hdv_listings", "my_sales"}  # pas encore vus sur ce build
+    assert identify.pending(raw) == {"bank", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update"}  # pas encore vus sur ce build
 
     # Plus tard le joueur ouvre l'onglet Vendre : le message est retrouvé et décodé à la vérification suivante.
     seq += len(ping)

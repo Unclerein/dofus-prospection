@@ -649,10 +649,13 @@ async function pageSales() {
   const data = await cached('sales', '/api/sales');
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Mes ventes'),
     h('div', { class: 'lead' }, data.latest ? `Relevé ${ago(data.latest, data.now)}` + (data.markets > 1 ? ` · ${data.markets} HDV` : '') : 'Lots que tu as mis en vente')));
+  const ui = S.ui.sales || (S.ui.sales = { tab: 'lots', view: 'all', q: '', kind: '' });
+  const tabs = segmented('Vue', [['lots', `Lots en vente · ${data.rows.length}`], ['journal', `Journal · ${data.trades.length}`]], ui.tab, (tab) => { ui.tab = tab; refresh(); });
+  head.append(tabs);
+  if (ui.tab === 'journal') return [head, ...salesJournal(data, ui)];
   if (!data.markets) {
     return [head, h('div', { class: 'panel empty' }, 'Ouvre l\'onglet Vendre d\'un HDV en jeu, capture active : tes lots apparaîtront ici.')];
   }
-  const ui = S.ui.sales || (S.ui.sales = { view: 'all', q: '' });
   const undercut = data.rows.filter((r) => r.undercut > 0);
   const unknown = data.rows.filter((r) => r.hdv === null && !r.equipment);
   const soon = data.rows.filter((r) => r.remaining_s < 3 * 86400);
@@ -693,6 +696,43 @@ async function pageSales() {
           h('td', { class: 'soft' }, fmt(r.avg)),
           h('td', { class: r.remaining_s < 3 * 86400 ? 'warn' : 'soft' }, remainingLabel(r.remaining_s))))))));
   return [head, kpis, filters, table];
+}
+
+/** Journal des ventes conclues et des achats, tels que le jeu les annonce. */
+function salesJournal(data, ui) {
+  const t = data.totals;
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Vendu sur 24 h', fmt(t.sale_24h[1]), `${t.sale_24h[0]} lot${t.sale_24h[0] > 1 ? 's' : ''}`, t.sale_24h[1] ? 'gain' : ''),
+    kpi('Vendu sur 7 j', fmt(t.sale_7d[1]), `${t.sale_7d[0]} lot${t.sale_7d[0] > 1 ? 's' : ''}`),
+    kpi('Acheté sur 24 h', fmt(t.purchase_24h[1]), `${t.purchase_24h[0]} lot${t.purchase_24h[0] > 1 ? 's' : ''}`),
+    kpi('Acheté sur 7 j', fmt(t.purchase_7d[1]), `${t.purchase_7d[0]} lot${t.purchase_7d[0] > 1 ? 's' : ''}`));
+  if (!data.trades.length) {
+    return [kpis, h('div', { class: 'panel empty' }, 'Aucune vente ni achat capté pour l\'instant. Ils s\'ajoutent tout seuls quand le jeu les annonce, capture active.')];
+  }
+  const query = norm(ui.q.trim());
+  const shown = data.trades.filter((r) => (!ui.kind || r.kind === ui.kind) && (!query || norm(r.name).includes(query)));
+  let typing = null;
+  const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
+    segmented('Mouvements', [['', 'Tout'], ['sale', 'Ventes'], ['purchase', 'Achats']], ui.kind, (kind) => { ui.kind = kind; refresh(); }),
+    h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 'j-q' }, 'Objet'),
+      h('input', { id: 'j-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
+        oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));
+  const unit = (r) => r.price / r.quantity;
+  const table = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, `${shown.length} mouvement${shown.length > 1 ? 's' : ''}`),
+      h('span', { class: 'muted small' }, `Depuis le ${when(data.first_trade, false)} · en jeu seulement`)),
+    shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun mouvement ne correspond.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Quand'), h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, ''), h('th', {}, 'Lot'), h('th', {}, 'Prix du lot'), h('th', {}, 'À l\'unité'), h('th', {}, 'Prix moyen du lot'))),
+        h('tbody', {}, shown.slice(0, 300).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+          h('td', { class: 'l soft' }, when(r.ts)),
+          h('td', { class: 'l' }, itemCell(r.icon, r.name, null, r.item_id)),
+          h('td', { class: 'l' }, h('span', { class: 'tag ' + (r.kind === 'sale' ? 'good' : 'info') }, r.kind === 'sale' ? 'vente' : 'achat')),
+          h('td', { class: 'soft' }, `x${r.quantity}`),
+          h('td', { class: 'strong ' + (r.kind === 'sale' ? 'gain' : '') }, `${r.kind === 'sale' ? '+' : '−'}${fmt(r.price)}`),
+          h('td', { class: 'soft' }, r.quantity > 1 ? (unit(r) < 100 && !Number.isInteger(unit(r)) ? unit(r).toFixed(2).replace('.', ',') : fmt(unit(r))) : '—'),
+          h('td', { class: 'soft' }, fmt(r.avg))))))));
+  return [kpis, filters, table];
 }
 
 // ---------------------------------------------------------------- page Métiers

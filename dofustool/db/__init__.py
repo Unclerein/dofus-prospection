@@ -216,6 +216,17 @@ CREATE TABLE IF NOT EXISTS my_sales_meta (
     captured_at REAL NOT NULL,
     lots        INTEGER NOT NULL
 );
+-- Ventes conclues et achats du joueur, annoncés par le jeu. Donnée personnelle, jamais partagée.
+-- source_id : numéro du message dans l'archive brute, pour qu'un rejeu ne compte rien deux fois.
+CREATE TABLE IF NOT EXISTS trades (
+    source_id INTEGER PRIMARY KEY,
+    ts        REAL NOT NULL,
+    kind      TEXT NOT NULL,     -- 'sale' ou 'purchase'
+    item_id   INTEGER NOT NULL,
+    quantity  INTEGER NOT NULL,  -- taille du lot
+    price     INTEGER NOT NULL   -- prix du lot entier
+);
+CREATE INDEX IF NOT EXISTS trades_ts ON trades (ts);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -384,6 +395,46 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
         )
         conn.execute("INSERT OR REPLACE INTO my_sales_meta VALUES (?, ?, ?)", (listing.market, captured_at, len(listing.sales)))
     return True
+
+
+def save_trade(conn: sqlite3.Connection, source_id: int, trade, ts: float) -> bool:
+    """Enregistre une vente ou un achat (messages.trades.Trade). Renvoie False s'il était déjà connu.
+
+    Une vente retire aussi le lot correspondant de la liste des lots en vente, sans attendre le
+    prochain relevé de l'onglet Vendre.
+    """
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO trades VALUES (?, ?, ?, ?, ?, ?)",
+            (source_id, ts, trade.kind, trade.item_id, trade.quantity, trade.price),
+        )
+        if not cur.rowcount:
+            return False
+        if trade.kind == "sale":
+            # Parmi mes lots identiques relevés avant cette vente, un seul part : le plus proche de l'expiration.
+            lot = conn.execute(
+                "SELECT market, uid FROM my_sales WHERE item_id = ? AND lot = ? AND price = ? AND captured_at <= ? "
+                "ORDER BY remaining_s - (? - captured_at) LIMIT 1",
+                (trade.item_id, trade.quantity, trade.price, ts, ts),
+            ).fetchone()
+            if lot is not None:
+                conn.execute("DELETE FROM my_sales WHERE market = ? AND uid = ?", lot)
+    return True
+
+
+def save_lot_update(conn: sqlite3.Connection, sale, ts: float) -> None:
+    """Lot créé ou modifié (messages.sales.Sale) : il garde son HDV s'il est connu, sinon celui du dernier relevé."""
+    row = conn.execute("SELECT market FROM my_sales WHERE uid = ?", (sale.uid,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT market FROM my_sales_meta ORDER BY captured_at DESC LIMIT 1").fetchone()
+    if row is None:
+        return  # aucun relevé de l'onglet Vendre encore : on ne sait pas à quel HDV rattacher ce lot
+    with conn:
+        conn.execute("DELETE FROM my_sales WHERE uid = ?", (sale.uid,))
+        conn.execute(
+            "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (row[0], sale.uid, sale.item_id, sale.lot, sale.price, sale.remaining_s, ts),
+        )
 
 
 def save_characters(conn: sqlite3.Connection, characters, seen_at: float) -> None:

@@ -53,12 +53,14 @@ class Archive:
         )
         return cur.lastrowid if cur.rowcount else None
 
-    def add(self, connection_id: int, msg: Message) -> None:
-        self._db.execute(
+    def add(self, connection_id: int, msg: Message) -> int:
+        """Archive le message et renvoie son numéro."""
+        cur = self._db.execute(
             "INSERT INTO messages (connection_id, ts, direction, key, size, frame_field, correlation, body) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (connection_id, msg.ts, msg.direction, msg.key, msg.size, msg.frame_field, msg.correlation, msg.body),
         )
+        return cur.lastrowid
 
     def add_label(self, ts: float, text: str) -> None:
         """Étiquette saisie par l'utilisateur au moment d'une action en jeu (identify.py)."""

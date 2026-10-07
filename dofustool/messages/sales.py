@@ -64,7 +64,7 @@ def parse(body: bytes, mapping: Mapping) -> SalesList | None:
                 if sub_number == f["ref"] and sub_type == LEN:
                     for r_number, r_type, r_value in iter_fields(sub_value):
                         if r_type != VARINT:
-                            return None
+                            continue  # effets d'un équipement : non lus
                         if r_number == f["uid"]:
                             uid = r_value
                         elif r_number == f["item_id"]:

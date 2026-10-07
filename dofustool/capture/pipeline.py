@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import db, identify
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage
+from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -74,11 +74,10 @@ class Pipeline:
             watch = self._watch[msg.conn] = _ConnWatch(conn.first_ts, msg.ts, archive_id)
             db.set_status(self.market, last_connection_ts=conn.first_ts)
         watch.last_ts = msg.ts
-        if watch.archive_id is not None:
-            self.archive.add(watch.archive_id, msg)
-        self._decode(msg, watch)
+        source_id = self.archive.add(watch.archive_id, msg) if watch.archive_id is not None else None
+        self._decode(msg, watch, source_id)
 
-    def _decode(self, msg: Message, watch: _ConnWatch) -> None:
+    def _decode(self, msg: Message, watch: _ConnWatch, source_id: int | None = None) -> None:
         mapping = self.keymap.get("market_history")
         if mapping is not None and msg.key == mapping.key:
             history = market_history.parse(msg.body, mapping)
@@ -114,6 +113,26 @@ class Pipeline:
                 db.save_job_levels(self.market, watch.character_id, jobs, msg.ts)
                 if len(jobs) > 1:  # la liste complète de la connexion, pas un gain d'expérience
                     log.info("Métiers enregistrés : %d.", len(jobs))
+            return
+
+        mapping = self.keymap.get("info_text")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            trade = trades.parse_text(msg.body, mapping)
+            # Sans numéro d'archive (connexion déjà importée), rien n'est compté : pas de doublon possible.
+            if trade is not None and source_id is not None and db.save_trade(self.market, source_id, trade, msg.ts):
+                row = self.market.execute("SELECT name FROM items WHERE id = ?", (trade.item_id,)).fetchone()
+                log.info(
+                    "%s : %s x%d, %d kamas.",
+                    "Vente" if trade.kind == trades.SALE else "Achat",
+                    row[0] if row else f"item {trade.item_id}", trade.quantity, trade.price,
+                )  # fmt: skip
+            return
+
+        mapping = self.keymap.get("my_sale_update")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            lot = trades.parse_lot_update(msg.body, mapping)
+            if lot is not None:
+                db.save_lot_update(self.market, lot, msg.ts)
             return
 
         mapping = self.keymap.get("my_sales")
@@ -243,12 +262,12 @@ class Pipeline:
             return
         marks = ",".join("?" * len(keys))
         rows = self.archive.db.execute(
-            f"SELECT ts, direction, key, frame_field, correlation, body FROM messages "
+            f"SELECT id, ts, direction, key, frame_field, correlation, body FROM messages "
             f"WHERE connection_id = ? AND key IN ({marks}) ORDER BY id",
             (watch.archive_id, *sorted(keys)),
         ).fetchall()
-        for ts, direction, key, frame_field, correlation, body in rows:
-            self._decode(Message(0, ts, direction, key, body, frame_field, correlation), watch)
+        for source_id, ts, direction, key, frame_field, correlation, body in rows:
+            self._decode(Message(0, ts, direction, key, body, frame_field, correlation), watch, source_id)
 
     def _reload_keymap(self) -> None:
         if self._keymap_path is None or not self._keymap_path.exists():

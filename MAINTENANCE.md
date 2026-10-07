@@ -146,6 +146,13 @@ de l'effet en 10, valeur en 5 ; les lignes de dégâts d'une arme n'ont pas de v
 Contrôle : la vitalité d'un exemplaire doit tomber dans la fourchette de base de l'objet.
 Une annonce portant un sous-message inconnu est refusée plutôt qu'enregistrée sans effets.
 
+Ventes, achats et lots modifiés (build du 6 octobre 2026) : le message d'information `lof` porte un
+numéro de texte en champ 2 et ses paramètres, écrits en chiffres, en champ 4 répété. Texte 65 = vente
+conclue (prix du lot, objet, objet, taille du lot) ; texte 252 = achat (objet, identifiant interne,
+taille du lot, prix du lot). Ces numéros de texte ne changent pas d'un build à l'autre. `jxt` renvoie un
+lot créé ou modifié : prix en 1, temps restant en 3, référence en 2 (objet en 1, lot en 3, taille en 4).
+Les deux sont retrouvés automatiquement, comme les autres.
+
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
 ### 3. Mettre à jour `keymap.json`
