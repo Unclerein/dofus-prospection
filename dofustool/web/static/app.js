@@ -136,23 +136,29 @@ function hoverListing(itemId, source, price) {
 
 /** Survol d'un de mes lots d'équipement en vente : les jets de mon exemplaire, comme une annonce de l'HDV. */
 function hoverLot(r, key) {
-  if (!r.rolls) return hoverTip(r.item_id);
-  const wanted = `lot-${key}`;
+  return r.rolls ? hoverRolls(r.item_id, r.rolls, `lot-${key}`, 'Ton exemplaire en vente') : hoverTip(r.item_id);
+}
+
+/** Survol qui montre un exemplaire précis d'un équipement (jets, exo, over), comme une annonce de l'HDV. */
+function hoverRolls(itemId, rolls, wanted, note) {
   return {
     onmouseenter: (event) => {
       tipWanted = wanted;
       clearTimeout(tipTimer);
       tipTimer = setTimeout(async () => {
-        if (!listingData[r.item_id]) listingData[r.item_id] = api(`/api/forge/item/${r.item_id}`).catch(() => { delete listingData[r.item_id]; return null; });
-        const d = await listingData[r.item_id];
+        if (!listingData[itemId]) listingData[itemId] = api(`/api/forge/item/${itemId}`).catch(() => { delete listingData[itemId]; return null; });
+        const d = await listingData[itemId];
         if (!d || !d.template_known || tipWanted !== wanted) return;
-        showTip(event, [h('div', { class: 'tip-note' }, 'Ton exemplaire en vente'), ...itemTooltip(r.rolls, d)]);
+        showTip(event, [h('div', { class: 'tip-note' }, note), ...itemTooltip(rolls, d)]);
       }, 180);
     },
     onmousemove: (event) => { if (!$tip.hidden && tipWanted === wanted) placeTip(event); },
     onmouseleave: () => { tipWanted = null; clearTimeout(tipTimer); $tip.hidden = true; },
   };
 }
+
+const similarTitle = (x) => `${x.count} annonce${x.count > 1 ? 's' : ''} similaire${x.count > 1 ? 's' : ''} sur ${x.listings} du même modèle : mêmes exos, mêmes overs`
+  + (x.confidence === 'fiable' ? ', jets au moins aussi bons à 10 % près.' : x.confidence === 'approximative' ? ', jets au moins aussi bons à 20 % près.' : ', sans comparer les autres jets.');
 
 function baseTooltip(d) {
   const range = (line) => (line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`);
@@ -685,7 +691,7 @@ async function pageSales() {
     return [head, h('div', { class: 'panel empty' }, 'Ouvre l\'onglet Vendre d\'un HDV en jeu, capture active : tes lots apparaîtront ici.')];
   }
   const undercut = data.rows.filter((r) => r.undercut > 0);
-  const unknown = data.rows.filter((r) => r.hdv === null && !r.equipment);
+  const unknown = data.rows.filter((r) => (r.equipment ? !r.similar : r.hdv === null));
   const soon = data.rows.filter((r) => r.remaining_s < 3 * 86400);
   const total = data.rows.reduce((sum, r) => sum + r.price, 0);
   const kpis = h('section', { class: 'kpis' },
@@ -707,7 +713,15 @@ async function pageSales() {
         oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));
 
   const state = (r) => {
-    if (r.equipment) return r.rolls ? h('span', { class: 'tags', style: 'justify-content: flex-end' }, typeTag(r.rolls), r.rolls.quality !== null && h('span', { class: 'muted small' }, `jets ${r.rolls.quality} %`)) : h('span', { class: 'muted', title: 'Rouvre l\u2019onglet Vendre de cet HDV en jeu pour relever ses jets' }, 'jets non relevés');
+    if (r.equipment) {
+      if (!r.rolls) return h('span', { class: 'muted', title: 'Rouvre l\u2019onglet Vendre de cet HDV en jeu pour relever ses jets' }, 'jets non relevés');
+      const x = r.similar;
+      const versus = !x ? h('div', { class: 'source', title: 'Aucune annonce comparable relevée : ouvre la fiche de cet objet à l\u2019HDV en jeu' }, 'aucune annonce similaire')
+        : h('div', { class: 'source', title: similarTitle(x), ...hoverRolls(r.item_id, x.listing, `sim-${r.item_id}-${r.price}`, 'Annonce similaire la moins chère') },
+          x.confidence === 'grossière' ? null : x.price < r.price ? h('span', { class: 'warn', style: 'font-weight: 600' }, `−${fmt(r.price - x.price)} · `) : h('span', { class: 'gain', style: 'font-weight: 600' }, 'le moins cher · '),
+          `similaire à ${fmt(x.price)} · ${x.confidence}`);
+      return [h('span', { class: 'tags', style: 'justify-content: flex-end' }, typeTag(r.rolls), r.rolls.quality !== null && h('span', { class: 'muted small' }, `jets ${r.rolls.quality} %`)), versus];
+    }
     if (r.hdv === null) return h('span', { class: 'muted' }, 'non relevé');
     if (r.undercut > 0) return [h('div', { class: 'warn', style: 'font-weight: 600' }, `−${fmt(r.undercut)}`), h('div', { class: 'source' }, `HDV à ${fmt(r.hdv)} · ${ago(r.hdv_ts, data.now)}`)];
     return [h('div', { class: 'gain', style: 'font-weight: 600' }, 'le moins cher'), h('div', { class: 'source' }, ago(r.hdv_ts, data.now))];
@@ -928,7 +942,10 @@ async function forgeJournal(uid) {
     kpi('Marge réalisée', sold.length ? signed(realized) : '—', sold.length ? 'sur les objets vendus' : 'aucun objet vendu pour l\'instant', sold.length ? (realized >= 0 ? 'gain' : 'warn') : ''));
 
   const statusTag = (d) => (d.status === 'sold' ? h('span', { class: 'tag good' }, 'vendu')
-    : d.status === 'listed' ? h('span', { class: 'tag info' }, 'en vente') : h('span', { class: 'tag', title: 'Ni vendu ni en vente : prix de référence du modèle, selon le réglage des équipements' }, 'estimé'));
+    : d.status === 'listed' ? h('span', { class: 'tag info' }, 'en vente')
+      : d.similar ? h('span', { class: 'tag ' + (d.similar.confidence === 'fiable' ? 'good' : ''), title: similarTitle(d.similar) }, `estimé · ${d.similar.confidence}`)
+        : d.special ? h('span', { class: 'tag bad', title: 'Objet exo ou over sans annonce similaire relevée : c\u2019est le prix d\u2019un exemplaire ordinaire, sans doute trop bas. Ouvre sa fiche à l\u2019HDV en jeu.' }, 'estimé · peu fiable')
+          : h('span', { class: 'tag', title: 'Aucune annonce similaire relevée : prix de référence du modèle, selon le réglage des équipements' }, 'estimé · prix du modèle'));
   const rows = sortedBy(data.dossiers, ui.sort, {
     name: (d) => d.name, last: (d) => d.last_ts, passes: (d) => d.passes, runes: (d) => d.rune_cost, base: (d) => d.base_cost, sale: (d) => d.sale, margin: (d) => d.margin,
   });
@@ -971,6 +988,12 @@ function forgeDossier(d, data) {
       money('Objet de base', fmt(d.base_cost), BASE_SOURCES[d.base_source] || 'prix inconnu'),
       money('Runes', fmt(d.rune_cost), real !== null ? `${fmt(real)} à ton prix d'achat` : d.real_cost !== null ? `${d.real_passes} passages sur ${d.passes} couverts par tes achats` : 'au prix du marché'),
       money(d.status === 'sold' ? 'Vendu' : d.status === 'listed' ? 'En vente à' : 'Valeur estimée', fmt(d.sale), d.sale !== null ? `taxe de mise en vente ${fmt(d.tax)}` + (d.status === 'sold' && d.sale_ts ? ` · ${when(d.sale_ts)}` : '') : 'aucun prix de référence'),
+      d.status !== 'sold' && h('div', { class: 'kpi', ...(d.similar ? hoverRolls(d.item_id, d.similar.listing, `sim-${d.uid}`, 'Annonce similaire la moins chère') : {}) },
+        h('div', { class: 'label' }, 'Annonces similaires'),
+        h('div', { class: 'value' }, d.similar ? fmt(d.similar.price) : '—'),
+        h('div', { class: 'hint', title: d.similar ? similarTitle(d.similar) : null }, d.similar
+          ? `${d.similar.confidence} · ${d.similar.count} sur ${d.similar.listings} · relevé ${ago(d.similar.captured_at, data.now)}` + (d.similar.floor ? ` · moins bons dès ${fmt(d.similar.floor)}` : '')
+          : d.special ? 'aucune : exo ou over, valeur sans doute sous-estimée' : 'aucune relevée : prix du modèle')),
       money(d.status === 'sold' ? 'Marge' : 'Marge estimée', d.margin === null ? '—' : signed(d.margin), d.margin !== null && d.duration_s > 600 ? `${signed(d.margin / (d.duration_s / 3600))} par heure de forgemagie` : null, d.margin === null ? '' : d.margin >= 0 ? 'gain' : 'warn')),
     h('div', { class: 'filters', style: 'margin-top: 14px; align-items: flex-end' },
       h('div', { class: 'field', style: 'flex: 0 1 220px' }, h('label', { for: 'fm-base' }, "Prix payé pour l'objet de base"),
@@ -2195,6 +2218,12 @@ function sharePanel(d, data, sync) {
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 3, date: '8 octobre 2026', title: 'Tes équipements estimés d\u2019après leurs jets', hash: '#/forge/journal', go: 'Voir mon journal', points: [
+    ['Annonces similaires :', 'un équipement est comparé aux annonces HDV du même modèle qui ont les mêmes exos, les mêmes overs et des jets au moins aussi bons, à 10 % près.'],
+    ['Forgemagie › Mon journal :', 'la valeur estimée d\u2019un objet pas encore en vente vient de l\u2019annonce similaire la moins chère, avec son niveau de confiance.'],
+    ['Mes ventes :', 'chaque équipement en vente est situé face aux annonces similaires : le moins cher, ou sous-enchéri de combien.'],
+    ['Pour que ça marche :', 'ouvre la fiche de l\u2019objet à l\u2019HDV en jeu. Sans annonce similaire, l\u2019estimation le dit.'],
+  ] },
   { id: 2, date: '8 octobre 2026', title: 'Filtres par métier, jets de tes lots, quantités vendues', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d\u2019après tes métiers et leur niveau.'],
     ['Mes critères par objet :', 'ils se règlent dans l\u2019onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],

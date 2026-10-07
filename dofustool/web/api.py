@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import config, db
-from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar
 from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
@@ -186,6 +186,29 @@ class Api:
             "spread": ws.prices.estimate_spread(guess.confidence),
             "ts": guess.ts,
         }
+
+    @staticmethod
+    def _rolls(c, price) -> dict:
+        """Lecture d'un exemplaire, telle que l'infobulle de l'interface l'attend."""
+        return {
+            "price": price, "label": c.label, "plain": c.plain,
+            "quality": round(c.quality * 100) if c.quality is not None else None,
+            "transcended": c.transcended,
+            "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
+        }  # fmt: skip
+
+    def _similar(self, conn: sqlite3.Connection, item_id: int, mine, template, ignored, own_price: int | None = None) -> dict | None:
+        """Valeur d'un exemplaire d'après les annonces HDV similaires du même modèle, ou None s'il n'y en a aucune."""
+        listings, captured_at = similar.load_listings(conn, item_id, template, ignored)
+        if own_price is not None:
+            listings = similar.without_own(listings, own_price, mine)
+        found = similar.estimate(mine, listings, template, captured_at) if listings else None
+        if found is None:
+            return None
+        return {
+            "price": found.price, "confidence": found.confidence, "count": found.count, "floor": found.floor,
+            "captured_at": found.captured_at, "listing": self._rolls(found.listing, found.price), "listings": len(listings),
+        }  # fmt: skip
 
     # --- pages ---------------------------------------------------------------
 
@@ -712,19 +735,16 @@ class Api:
             ):
                 item = ws.items.get(item_id)
                 equipment = ws.prices.is_equipment(item_id)
-                # Jets de mon exemplaire, lus comme une annonce de l'HDV (pour l'infobulle au survol).
-                rolls = None
+                # Jets de mon exemplaire, lus comme une annonce de l'HDV (pour l'infobulle au survol),
+                # et l'annonce similaire la moins chère du même modèle.
+                rolls = close = None
                 if equipment and effects:
                     if item_id not in templates:
                         templates[item_id] = forge.load_template(conn, item_id) if self.ensure_template(conn, item_id) else None
                     if templates[item_id] is not None:
                         c = classify([tuple(e) for e in json.loads(effects) if e[0] not in ignored], templates[item_id])
-                        rolls = {
-                            "price": price, "label": c.label, "plain": c.plain,
-                            "quality": round(c.quality * 100) if c.quality is not None else None,
-                            "transcended": c.transcended,
-                            "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
-                        }  # fmt: skip
+                        rolls = self._rolls(c, price)
+                        close = self._similar(conn, item_id, c, templates[item_id], ignored, own_price=price)
                 seen = cheapest.get(item_id)
                 # Un équipement se compare mal : chaque exemplaire a ses propres jets.
                 hdv = seen[(1, 10, 100, 1000).index(lot)] if seen and not equipment else None
@@ -737,12 +757,17 @@ class Api:
                         "type": state["meta"].get(item_id, (None, None))[0],
                         "equipment": equipment,
                         "rolls": rolls,
+                        "similar": close,
                         "lot": lot,
                         "price": price,
                         "unit": price / lot,
                         "hdv": hdv,
                         "hdv_ts": seen[4] if hdv is not None else None,
-                        "undercut": price - hdv if hdv is not None and hdv < price else 0,
+                        "undercut": price - hdv if hdv is not None and hdv < price
+                        # Une comparaison grossière (exos et overs seulement) ne suffit pas à parler de sous-enchère.
+                        else price - close["price"]
+                        if close is not None and close["confidence"] != similar.ROUGH and close["price"] < price
+                        else 0,
                         "avg": avg * lot if avg else None,
                         "remaining_s": max(0, remaining - (now - captured_at)),
                         "captured_at": captured_at,
@@ -1061,6 +1086,7 @@ class Api:
             fmjournal.freeze_prices(conn, price_of)
             units = fmjournal.purchase_units(conn)
             on_sale = dict(conn.execute("SELECT uid, price FROM my_sales"))
+            ignored = forge.non_stat_effects(conn)
             order = state["priorities"]
 
             def label(item_id: int) -> str:
@@ -1088,6 +1114,15 @@ class Api:
                 else:
                     reference = ws.prices.get(d.item_id)
                     status, sale, sale_ts = "kept", reference.price if reference else None, None
+                # Valeur d'après les annonces similaires : elle remplace le prix du modèle tant que l'objet n'est pas en vente.
+                close, special = None, False
+                if status != "sold" and self.ensure_template(conn, d.item_id):
+                    template = forge.load_template(conn, d.item_id)
+                    mine = classify([(i, v) for i, v in d.after.items() if i not in ignored], template)
+                    special = bool(mine.exo or mine.over)
+                    close = self._similar(conn, d.item_id, mine, template, ignored, own_price=sale if status == "listed" else None)
+                    if status == "kept" and close is not None:
+                        sale = close["price"]
                 rune_cost = d.rune_cost
                 margin = sale * (1 - tax) - base - rune_cost if sale is not None and base is not None else None
                 ids = sorted(set(d.after) | set(d.before or {}), key=lambda i: (order.get(i, 1_000_000), i))
@@ -1105,6 +1140,8 @@ class Api:
                         "real_cost": real[0] if real else None, "real_passes": real[1] if real else 0,
                         "base_cost": base, "base_source": base_source,
                         "status": status, "sale": sale, "sale_ts": sale_ts, "tax": sale * tax if sale is not None else None,
+                        # similar : estimation par les annonces proches ; special : exo ou over, mal estimé par le prix du modèle.
+                        "similar": close, "special": special,
                         "margin": margin,
                         "runes": [
                             {
