@@ -331,6 +331,28 @@ def save_snapshot(conn: sqlite3.Connection, ts: float, prices: dict[int, int]) -
     return snapshot_id
 
 
+# Les relevés de prix moyens sont gardés en entier pendant ce nombre de jours (les calculs regardent
+# 30 jours en arrière au plus) ; au-delà, un seul par jour suffit à tracer l'évolution d'un prix.
+SNAPSHOT_FULL_DAYS = 35
+
+
+def thin_snapshots(conn: sqlite3.Connection, now: float, keep_days: float = SNAPSHOT_FULL_DAYS) -> int:
+    """Au-delà de keep_days jours, ne garde que le dernier relevé de prix moyens de chaque jour (UTC, comme le jeu).
+
+    Renvoie le nombre de relevés supprimés. Un relevé pèse environ 0,3 Mo, et il en arrive une dizaine par jour de jeu.
+    """
+    last_of_day: dict[int, int] = {}
+    old = conn.execute("SELECT id, ts FROM snapshots WHERE ts < ? ORDER BY ts, id", (now - keep_days * 86400,)).fetchall()
+    for snapshot_id, ts in old:
+        last_of_day[int(ts // 86400)] = snapshot_id
+    extra = [(snapshot_id,) for snapshot_id, _ in old if snapshot_id not in last_of_day.values()]
+    if extra:
+        with conn:
+            conn.executemany("DELETE FROM avg_prices WHERE snapshot_id = ?", extra)
+            conn.executemany("DELETE FROM snapshots WHERE id = ?", extra)
+    return len(extra)
+
+
 def save_last_sale(conn: sqlite3.Connection, item_id: int, price: int, sold_at: float, captured_at: float) -> None:
     """Enregistre une vente observée. sold_at est la date de la vente, captured_at celle de l'observation."""
     with conn:

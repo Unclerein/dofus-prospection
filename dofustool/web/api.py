@@ -98,6 +98,8 @@ class Api:
         self._stamp: list | None = None
         self._state: dict | None = None
         self._fetching = threading.Lock()
+        self._ranking_stamp: tuple | None = None
+        self._ranking_cache: dict[tuple, dict] = {}
         self.fetch_effects = base_effects.fetch  # remplaçable dans les tests
 
     def ensure_template(self, conn: sqlite3.Connection, item_id: int) -> bool:
@@ -1199,7 +1201,27 @@ class Api:
     def forge_ranking(
         self, criterion: str, exo: int | None = None, effect: int | None = None, amount: int | None = None
     ) -> dict:
-        """criterion : « saved » (critères de chaque objet), « exo », ou « over » (effect + amount)."""
+        """criterion : « saved » (critères de chaque objet), « exo », ou « over » (effect + amount).
+
+        Le classement relit toutes les annonces de tous les équipements : il est gardé en mémoire tant que
+        ni les données, ni la configuration, ni les critères enregistrés n'ont changé.
+        """
+        conn = self.connect()
+        try:
+            stamp = (
+                *data_stamp(conn, self.config_path),
+                conn.execute("SELECT group_concat(item_id || ':' || config, '|') FROM (SELECT * FROM fm_filters ORDER BY item_id)").fetchone()[0],
+            )
+        finally:
+            conn.close()
+        if stamp != self._ranking_stamp:
+            self._ranking_stamp, self._ranking_cache = stamp, {}
+        cache, key = self._ranking_cache, (criterion, exo, effect, amount)
+        if key not in cache:
+            cache[key] = self._forge_ranking(criterion, exo, effect, amount)
+        return cache[key]
+
+    def _forge_ranking(self, criterion: str, exo: int | None, effect: int | None, amount: int | None) -> dict:
         conn = self.connect()
         try:
             state = self._load(conn)

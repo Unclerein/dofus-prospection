@@ -6,6 +6,7 @@ Usage : python -m dofustool.db.backfill
 """
 import sqlite3
 import sys
+import time
 
 from .. import db
 from ..archive import ARCHIVE_PATH
@@ -206,6 +207,8 @@ def main() -> int:
     archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
     market = db.connect()
     counts = backfill(archive, market)
+    # Le rejeu vient de réenregistrer d'anciens relevés de prix moyens : ne garder qu'un par jour, comme la capture.
+    db.thin_snapshots(market, time.time())
     print("Rejeu de l'archive : " + ", ".join(f"{n} {label}" for label, n in counts.items()))
     archive.close()
     market.close()

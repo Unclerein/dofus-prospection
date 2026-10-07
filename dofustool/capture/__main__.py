@@ -48,8 +48,11 @@ def main() -> int:
         removed = archive.prune(time.time(), {mapping.key for mapping in keymap.values()})
         if removed:
             log.info("Archive allégée : %d anciens messages non décodés supprimés.", removed)
+        thinned = db.thin_snapshots(market, time.time())
+        if thinned:
+            log.info("Anciens relevés de prix moyens : %d supprimés, un par jour est gardé.", thinned)
     except Exception as exc:  # le ménage ne doit jamais empêcher la capture
-        log.warning("Archive non allégée : %s", exc)
+        log.warning("Ménage des anciennes données non fait : %s", exc)
     pipeline = Pipeline(archive, market, keymap, cfg.avg_prices_timeout_s, keymap_path)
     source = LiveSource(iface=args.iface or cfg.iface)
     try:
