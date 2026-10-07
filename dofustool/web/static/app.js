@@ -134,6 +134,26 @@ function hoverListing(itemId, source, price) {
   };
 }
 
+/** Survol d'un de mes lots d'équipement en vente : les jets de mon exemplaire, comme une annonce de l'HDV. */
+function hoverLot(r, key) {
+  if (!r.rolls) return hoverTip(r.item_id);
+  const wanted = `lot-${key}`;
+  return {
+    onmouseenter: (event) => {
+      tipWanted = wanted;
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(async () => {
+        if (!listingData[r.item_id]) listingData[r.item_id] = api(`/api/forge/item/${r.item_id}`).catch(() => { delete listingData[r.item_id]; return null; });
+        const d = await listingData[r.item_id];
+        if (!d || !d.template_known || tipWanted !== wanted) return;
+        showTip(event, [h('div', { class: 'tip-note' }, 'Ton exemplaire en vente'), ...itemTooltip(r.rolls, d)]);
+      }, 180);
+    },
+    onmousemove: (event) => { if (!$tip.hidden && tipWanted === wanted) placeTip(event); },
+    onmouseleave: () => { tipWanted = null; clearTimeout(tipTimer); $tip.hidden = true; },
+  };
+}
+
 function baseTooltip(d) {
   const range = (line) => (line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`);
   const row = (line, cls) => h('div', { class: 'tip-line base ' + cls }, h('span', { class: 'v' }, range(line)), h('span', { class: 'n with-ico' }, statIcon(line.asset), line.name), h('span', { class: 'r' }, ''));
@@ -393,6 +413,14 @@ async function pageIgnored() {
 
 // ---------------------------------------------------------------- page Crafts
 
+const SOLD_TITLE = 'Quantité vendue, lue dans le cours du marché de l\u2019objet. Connue seulement si toi ou un ami du groupe avez ouvert ce cours en jeu.';
+
+/** Quantités vendues sur 7 jours, et sur 30 jours en dessous. */
+function soldCell(r) {
+  if (r['Vendus 7 j'] === null || r['Vendus 7 j'] === undefined) return h('td', { class: 'muted small', title: SOLD_TITLE }, 'non consulté');
+  return h('td', { title: SOLD_TITLE }, h('div', { class: 'soft' }, fmt(r['Vendus 7 j'])), r['Vendus 30 j'] !== null && r['Vendus 30 j'] !== undefined && h('div', { class: 'source' }, `${fmt(r['Vendus 30 j'])} sur 30 j`));
+}
+
 async function pageCrafts() {
   const data = await cached('crafts', '/api/crafts');
   const status = S.status || {};
@@ -412,7 +440,7 @@ async function pageCrafts() {
   rows = sortedBy(rows, ui.sort, {
     name: (r) => r['Objet'], job: (r) => `${r['Métier']} ${String(r['Niveau']).padStart(3, '0')}`,
     sell: (r) => r['Prix de vente'], cost: (r) => r['Coût'], margin: (r) => r['Marge pondérée'], pct: (r) => r['Marge %'],
-    sold: (r) => r['Vendus 7 j'], stock: (r) => r.craftable || null,
+    sold: (r) => r['Vendus 7 j'], sold30: (r) => r['Vendus 30 j'], stock: (r) => r.craftable || null,
   });
   const th = (key, label, options = {}) => sortTh(ui.sort, key, label, { ...options, onchange: () => set({ limit: 100 }) });
   const computable = data.rows.filter((r) => r['Marge'] !== null).length;
@@ -448,7 +476,7 @@ async function pageCrafts() {
       h('td', { class: 'soft' }, fmt(r['Coût'])),
       h('td', { class: 'strong ' + (r['Marge'] === null ? 'muted' : r['Marge'] >= 0 ? 'gain' : 'warn') }, signed(r['Marge'])),
       h('td', { class: 'soft' }, r['Marge %'] === null ? '—' : `${fmt(r['Marge %'])} %`),
-      h('td', { class: r['Vendus 7 j'] === null ? 'muted' : 'soft' }, fmt(r['Vendus 7 j'])),
+      soldCell(r),
       h('td', {}, r.craftable > 0 ? h('span', { class: 'tag good' }, `× ${fmt(r.craftable)}`) : h('span', { class: 'muted' }, '—')),
       h('td', { class: 'l wrap' }, h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag ' + (t.includes('sous-craft') ? 'info' : t.includes('manquant') || t.includes('non échangeable') ? 'bad' : '') }, t)))),
       h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet'])));
@@ -470,7 +498,7 @@ async function pageCrafts() {
         ? h('div', { class: 'empty' }, data.rows.length ? 'Aucune recette ne correspond à ces filtres.' : "Aucune recette : importe les données statiques, puis lance une capture.")
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
           h('thead', {}, h('tr', {}, th('name', 'Objet', { left: true, first: 1 }), th('job', 'Métier', { left: true, first: 1 }), th('sell', 'Prix de vente'), th('cost', 'Coût'),
-            th('margin', 'Marge'), th('pct', 'Marge %'), th('sold', 'Vendus 7 j'), th('stock', 'En stock', { title: 'Nombre faisable avec ton inventaire et ta banque' }), h('th', { class: 'l' }, 'À savoir'), h('th', {}, ''))),
+            th('margin', 'Marge'), th('pct', 'Marge %'), th('sold', 'Vendus 7 j', { title: SOLD_TITLE }), th('stock', 'En stock', { title: 'Nombre faisable avec ton inventaire et ta banque' }), h('th', { class: 'l' }, 'À savoir'), h('th', {}, ''))),
           h('tbody', {}, body))),
       h('div', { class: 'panel-foot' },
         h('span', { class: 'legend' }, h('span', {}, h('span', { class: 'dot on' }), 'prix observé'), h('span', {}, h('span', { class: 'dot' }), 'prix moyen')),
@@ -649,7 +677,7 @@ async function pageSales() {
   const data = await cached('sales', '/api/sales');
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Mes ventes'),
     h('div', { class: 'lead' }, data.latest ? `Relevé ${ago(data.latest, data.now)}` + (data.markets > 1 ? ` · ${data.markets} HDV` : '') : 'Lots que tu as mis en vente')));
-  const ui = S.ui.sales || (S.ui.sales = { tab: 'lots', view: 'all', q: '', kind: '' });
+  const ui = S.ui.sales || (S.ui.sales = { tab: 'lots', view: 'all', q: '', kind: '', family: '' });
   const tabs = segmented('Vue', [['lots', `Lots en vente · ${data.rows.length}`], ['journal', `Journal · ${data.trades.length}`]], ui.tab, (tab) => { ui.tab = tab; refresh(); });
   head.append(tabs);
   if (ui.tab === 'journal') return [head, ...salesJournal(data, ui)];
@@ -668,27 +696,29 @@ async function pageSales() {
 
   const query = norm(ui.q.trim());
   const pool = { all: data.rows, undercut, unknown, soon }[ui.view] || data.rows;
-  const shown = pool.filter((r) => !query || norm(r.name).includes(query));
+  const gear = data.rows.filter((r) => r.equipment).length;
+  const shown = pool.filter((r) => (!ui.family || (ui.family === 'gear') === r.equipment) && (!query || norm(r.name).includes(query)));
   let typing = null;
   const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
     segmented('Lots affichés', [['all', `Tous (${data.rows.length})`], ['undercut', `Sous-enchéris (${undercut.length})`], ['unknown', `Prix HDV non relevé (${unknown.length})`], ['soon', `Expirent bientôt (${soon.length})`]], ui.view, (view) => { ui.view = view; refresh(); }),
+    segmented('Famille', [['', 'Tout'], ['gear', `Équipements (${gear})`], ['other', `Ressources et autres (${data.rows.length - gear})`]], ui.family, (family) => { ui.family = family; refresh(); }),
     h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 's-q' }, 'Objet'),
       h('input', { id: 's-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
         oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));
 
   const state = (r) => {
-    if (r.equipment) return h('span', { class: 'muted' }, 'équipement');
+    if (r.equipment) return r.rolls ? h('span', { class: 'tags', style: 'justify-content: flex-end' }, typeTag(r.rolls), r.rolls.quality !== null && h('span', { class: 'muted small' }, `jets ${r.rolls.quality} %`)) : h('span', { class: 'muted', title: 'Rouvre l\u2019onglet Vendre de cet HDV en jeu pour relever ses jets' }, 'jets non relevés');
     if (r.hdv === null) return h('span', { class: 'muted' }, 'non relevé');
     if (r.undercut > 0) return [h('div', { class: 'warn', style: 'font-weight: 600' }, `−${fmt(r.undercut)}`), h('div', { class: 'source' }, `HDV à ${fmt(r.hdv)} · ${ago(r.hdv_ts, data.now)}`)];
     return [h('div', { class: 'gain', style: 'font-weight: 600' }, 'le moins cher'), h('div', { class: 'source' }, ago(r.hdv_ts, data.now))];
   };
   const table = h('section', { class: 'panel' },
-    h('div', { class: 'panel-head' }, h('h2', {}, `${shown.length} lot${shown.length > 1 ? 's' : ''}`), h('span', { class: 'muted small' }, 'Comparés au prix le plus bas relevé pour la même taille de lot')),
+    h('div', { class: 'panel-head' }, h('h2', {}, `${shown.length} lot${shown.length > 1 ? 's' : ''}`), h('span', { class: 'muted small' }, 'Comparés au prix le plus bas relevé pour la même taille de lot · survole un équipement pour voir ses jets')),
     shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun lot ne correspond.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Lot'), h('th', {}, 'Mon prix'), h('th', {}, 'À l\'unité'), h('th', {}, 'Face à l\'HDV'), h('th', {}, 'Prix moyen du lot'), h('th', {}, 'Expire dans'))),
-        h('tbody', {}, shown.slice(0, 400).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(r.icon, r.name, r.type)),
+        h('tbody', {}, shown.slice(0, 400).map((r, index) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+          h('td', { class: 'l', ...hoverLot(r, index) }, itemCell(r.icon, r.name, r.type)),
           h('td', { class: 'soft' }, `x${r.lot}`),
           h('td', { class: 'strong' }, fmt(r.price)),
           h('td', { class: 'soft' }, r.lot > 1 ? (r.unit < 100 && !Number.isInteger(r.unit) ? r.unit.toFixed(2).replace('.', ',') : fmt(r.unit)) : '—'),
@@ -1199,15 +1229,22 @@ async function forgeRanking() {
   if (ui.type && !typeCounts.has(ui.type)) ui.type = '';
   const other = ui.start === 'base' ? 'Gain sur le craft' : 'Prime sur la base';
   const sort = ui.sort || (ui.sort = { key: 'main', dir: -1 });
-  const rows = sortedBy(data.rows.filter((r) => r['Moins cher selon critère'] !== null && (!ui.type || (r.type || 'Autres') === ui.type)), sort, {
+  const mages = data.mages || {};
+  const known = Object.values(mages).some((level) => level);
+  if (ui.mage && !(ui.mage in mages)) ui.mage = '';
+  // Un mage travaille les objets de son métier jusqu'à son propre niveau.
+  const mine = (r) => !!r.mage && (mages[r.mage] || 0) >= r['Niveau'];
+  const matching = data.rows.filter((r) => r['Moins cher selon critère'] !== null);
+  const rows = sortedBy(matching.filter((r) => (!ui.type || (r.type || 'Autres') === ui.type) && (!ui.mage || r.mage === ui.mage) && (!ui.mine || mine(r))), sort, {
     name: (r) => r['Objet'], base: (r) => r['Moins cher de base'], with: (r) => r['Moins cher selon critère'],
-    main: (r) => r[key], craft: (r) => r['Coût de craft'], other: (r) => r[other],
+    main: (r) => r[key], craft: (r) => r['Coût de craft'], other: (r) => r[other], sold: (r) => r['Vendus 7 j'],
   });
+  const saved = data.rows.filter((r) => r['Correspondent'] !== null).length;
   const top = Math.max(1, ...rows.map((r) => r[key] || 0));
 
   const controls = h('section', { class: 'panel pad filters', 'aria-label': 'Comparaison' },
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Amélioration comparée'),
-      segmented('Amélioration comparée', [['exo', 'Un exo'], ['over', 'Un over'], ['saved', 'Mes critères']], ui.criterion, (criterion) => set({ criterion }))),
+      segmented('Amélioration comparée', [['exo', 'Un exo'], ['over', 'Un over'], ['saved', 'Mes critères par objet']], ui.criterion, (criterion) => set({ criterion }))),
     ui.criterion === 'exo' && h('div', { class: 'field', style: 'flex: 0 1 280px' }, h('label', { for: 'rank-exo' }, 'Exo'),
       h('select', { id: 'rank-exo', class: 'exo-set', onchange: (e) => set({ exo: Number(e.target.value) }) },
         first.exos.map((x) => h('option', { value: x.id, selected: x.id === ui.exo }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
@@ -1220,14 +1257,23 @@ async function forgeRanking() {
       h('select', { id: 'rank-type', class: ui.type ? 'set' : '', onchange: (e) => set({ type: e.target.value }) },
         h('option', { value: '' }, 'Tous les types'),
         [...typeCounts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr')).map(([name, n]) => h('option', { value: name, selected: name === ui.type }, `${name} · ${n}`)))),
+    h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'rank-mage' }, 'Métier de forgemagie'),
+      h('select', { id: 'rank-mage', class: ui.mage ? 'set' : '', onchange: (e) => set({ mage: e.target.value }) },
+        h('option', { value: '' }, 'Tous les métiers'),
+        Object.entries(mages).map(([name, level]) => h('option', { value: name, selected: name === ui.mage }, `${name} · ${matching.filter((r) => r.mage === name).length}` + (level ? ` · niv. ${level}` : ''))))),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Point de départ'),
-      segmented('Point de départ', [['base', 'Acheter de base'], ['craft', 'Fabriquer']], ui.start, (start) => set({ start }))));
+      segmented('Point de départ', [['base', 'Acheter de base'], ['craft', 'Fabriquer']], ui.start, (start) => set({ start }))),
+    h('label', { class: 'check', title: known ? 'Objets de tes métiers de forgemagie, jusqu\u2019à ton niveau dans chacun' : 'Renseigne tes métiers dans Config (ou choisis ton personnage) pour activer ce filtre' },
+      h('input', { type: 'checkbox', checked: !!ui.mine && known, disabled: !known, onchange: (e) => set({ mine: e.target.checked }) }), 'Ce que je peux forgemager'),
+    ui.criterion === 'saved' && h('div', { class: 'muted small', style: 'flex: 1 1 100%' },
+      'Tes critères se règlent objet par objet, dans l\u2019onglet ', h('a', { href: '#/forge', style: 'text-decoration: underline' }, 'Par objet'),
+      ` : un minimum par caractéristique et un exo voulu, dans le panneau de gauche. Ils s\u2019enregistrent tout seuls. ${saved ? `${saved} objet${saved > 1 ? 's en ont' : ' en a'}.` : 'Aucun objet n\u2019en a pour l\u2019instant.'}`));
 
   const body = rows.map((r, index) => {
     const value = r[key];
     return h('tr', { class: 'link', onclick: () => { location.hash = `#/forge/item/${r.item_id}`; } },
       h('td', { class: 'muted' }, index + 1),
-      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
+      h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}niv. ${r['Niveau']}${r.mage ? ' · ' + r.mage : ''} · ${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
       h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Moins cher selon critère'])),
         h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`)),
@@ -1235,18 +1281,19 @@ async function forgeRanking() {
         ? h('span', { class: 'tag' }, ui.start === 'base' ? 'aucun exemplaire de base en vente' : 'coût de craft inconnu')
         : h('div', { class: 'bar-cell' }, h('span', { class: 'bar' }, h('span', { style: `width: ${Math.max(0, Math.round(value / top * 100))}%` })), h('span', { class: 'num', style: 'text-align: right' }, signed(value)))),
       h('td', { class: 'soft' }, fmt(r['Coût de craft'])),
-      h('td', { class: 'gain', style: 'font-weight: 600' }, signed(ui.start === 'base' ? r['Gain sur le craft'] : r['Prime sur la base'])));
+      h('td', { class: 'gain', style: 'font-weight: 600' }, signed(ui.start === 'base' ? r['Gain sur le craft'] : r['Prime sur la base'])),
+      soldCell(r));
   });
 
   return [controls, h('section', { class: 'panel', 'aria-label': 'Classement' },
     rows.length === 0
       ? h('div', { class: 'empty' }, ui.criterion === 'saved' ? "Aucun critère enregistré : règle-les dans l'onglet « Par objet »."
         : ui.criterion === 'over' ? `Aucune annonce connue avec ${lineName} à ${ui.amount} ou plus au-dessus de son jet parfait, parmi les ${data.rows.length} objets qui ont cette ligne de base.`
-        : 'Aucun objet connu ne répond à ce critère.')
-      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 940px' },
+        : matching.length ? 'Aucun objet ne correspond à ces filtres (type, métier, « ce que je peux forgemager »).' : 'Aucun objet connu ne répond à ce critère.')
+      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 1040px' },
         h('thead', {}, h('tr', {}, h('th', {}, '#'), sortTh(sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(sort, 'base', 'De base'), sortTh(sort, 'with', label),
           sortTh(sort, 'main', ui.start === 'base' ? 'Marge sur la base' : 'Marge sur un craft', { left: true }), sortTh(sort, 'craft', 'Coût de craft'),
-          sortTh(sort, 'other', ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'))),
+          sortTh(sort, 'other', ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'), sortTh(sort, 'sold', 'Vendus 7 j', { title: SOLD_TITLE }))),
         h('tbody', {}, body))),
     h('div', { class: 'panel-foot' },
       h('span', {}, ui.criterion === 'over'
@@ -2148,6 +2195,12 @@ function sharePanel(d, data, sync) {
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 2, date: '8 octobre 2026', title: 'Filtres par métier, jets de tes lots, quantités vendues', hash: '#/forge/ranking', go: 'Voir le classement', points: [
+    ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d\u2019après tes métiers et leur niveau.'],
+    ['Mes critères par objet :', 'ils se règlent dans l\u2019onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],
+    ['Mes ventes :', 'un filtre Équipements / Ressources, et les jets de tes équipements en vente au survol (après avoir rouvert l\u2019onglet Vendre en jeu).'],
+    ['Quantités vendues :', 'sur 7 et 30 jours, dans Crafts et dans le classement de forgemagie. « Cours non consulté » : ouvre le cours du marché de l\u2019objet en jeu.'],
+  ] },
   { id: 1, date: '7 octobre 2026', title: 'Journal de forgemagie et ventes hors ligne', hash: '#/forge/journal', go: 'Voir mon journal', points: [
     ['Forgemagie › Mon journal :', 'chaque rune que tu passes en jeu est notée toute seule. Un dossier par objet : runes passées, coût, taux de réussite, jets avant et après.'],
     ['Marge par objet :', 'calculée dès que l’objet forgemagé est mis en vente, définitive quand il est vendu. Le prix de l’objet de base se saisit dans le dossier.'],

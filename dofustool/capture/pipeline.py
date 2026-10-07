@@ -133,7 +133,7 @@ class Pipeline:
 
         mapping = self.keymap.get("my_sale_update")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
-            lot = trades.parse_lot_update(msg.body, mapping)
+            lot = trades.parse_lot_update(msg.body, mapping, self.keymap.get("hdv_listings"))
             if lot is not None:
                 db.save_lot_update(self.market, lot, msg.ts)
             return
@@ -175,7 +175,7 @@ class Pipeline:
 
         mapping = self.keymap.get("my_sales")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
-            listing = sales.parse(msg.body, mapping)
+            listing = sales.parse(msg.body, mapping, self.keymap.get("hdv_listings"))
             if listing is not None and db.save_sales(self.market, listing, msg.ts):
                 log.info("Lots en vente enregistrés : %d.", len(listing.sales))
             return

@@ -16,7 +16,7 @@ import pandas as pd
 
 from .. import config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal
-from ..analysis.forgemagie import MARKERS, Filter, base_lines
+from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
@@ -29,6 +29,9 @@ log = logging.getLogger("dofustool.web")
 # Grandes familles d'objets (items.category_id), pour les filtres de l'interface.
 CATEGORIES = {0: "Équipements", 1: "Consommables", 2: "Ressources", 3: "Objets de quête", 4: "Autres", 5: "Cosmétiques"}
 
+
+# Métier de forgemagie de chaque métier de fabrication (identifiants de la table jobs).
+MAGE_OF = {11: 44, 13: 48, 15: 62, 16: 63, 27: 64, 60: 74}
 
 # Le métier « Base » (recettes sans métier) n'a pas de niveau : il n'est pas proposé dans la configuration.
 BASE_JOB_ID = 1
@@ -702,11 +705,26 @@ class Api:
                 )
             }
             rows = []
-            for item_id, lot, price, remaining, captured_at in conn.execute(
-                "SELECT item_id, lot, price, remaining_s, captured_at FROM my_sales"
+            ignored = forge.non_stat_effects(conn)
+            templates: dict[int, dict | None] = {}
+            for item_id, lot, price, remaining, captured_at, effects in conn.execute(
+                "SELECT item_id, lot, price, remaining_s, captured_at, effects FROM my_sales"
             ):
                 item = ws.items.get(item_id)
                 equipment = ws.prices.is_equipment(item_id)
+                # Jets de mon exemplaire, lus comme une annonce de l'HDV (pour l'infobulle au survol).
+                rolls = None
+                if equipment and effects:
+                    if item_id not in templates:
+                        templates[item_id] = forge.load_template(conn, item_id) if self.ensure_template(conn, item_id) else None
+                    if templates[item_id] is not None:
+                        c = classify([tuple(e) for e in json.loads(effects) if e[0] not in ignored], templates[item_id])
+                        rolls = {
+                            "price": price, "label": c.label, "plain": c.plain,
+                            "quality": round(c.quality * 100) if c.quality is not None else None,
+                            "transcended": c.transcended,
+                            "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
+                        }  # fmt: skip
                 seen = cheapest.get(item_id)
                 # Un équipement se compare mal : chaque exemplaire a ses propres jets.
                 hdv = seen[(1, 10, 100, 1000).index(lot)] if seen and not equipment else None
@@ -718,6 +736,7 @@ class Api:
                         "icon": state["icons"].get(item_id),
                         "type": state["meta"].get(item_id, (None, None))[0],
                         "equipment": equipment,
+                        "rolls": rolls,
                         "lot": lot,
                         "price": price,
                         "unit": price / lot,
@@ -1150,11 +1169,34 @@ class Api:
             over = (effect, max(1, amount or 1)) if effect else None
             frame = forge.ranking(conn, state["ws"], mode, exo, over)
             rows = records(frame) if not frame.empty else []
+            # Métier de forgemagie de chaque objet : celui de son métier de fabrication ; pour un objet
+            # sans recette, celui qui fabrique d'ordinaire ce type d'objet.
+            job_names = dict(conn.execute("SELECT id, name FROM jobs"))
+            craft_job = dict(conn.execute("SELECT result_id, job_id FROM recipes"))
+            by_type: dict[str, dict[int, int]] = {}
+            for type_name, job_id, count in conn.execute(
+                "SELECT i.type_name, r.job_id, COUNT(*) FROM recipes r JOIN items i ON i.id = r.result_id "
+                "WHERE i.category_id = 0 GROUP BY i.type_name, r.job_id"
+            ):
+                if job_id in MAGE_OF:
+                    by_type.setdefault(type_name, {})[job_id] = count
+            usual = {type_name: max(counts, key=counts.get) for type_name, counts in by_type.items()}
+            ws = state["ws"]
             for row in rows:
-                row["icon"] = state["icons"].get(row["item_id"])
-                row["type"] = state["meta"].get(row["item_id"], (None, None))[0]
+                item_id = row["item_id"]
+                row["icon"] = state["icons"].get(item_id)
+                row["type"] = state["meta"].get(item_id, (None, None))[0]
+                maker = craft_job.get(item_id)
+                if maker not in MAGE_OF:
+                    maker = usual.get(row["type"])
+                row["mage"] = job_names.get(MAGE_OF.get(maker))
+                row["Vendus 7 j"] = ws.prices.liquidity(item_id).qty_7d
+                row["Vendus 30 j"] = ws.prices.sold_30d(item_id)
+            mine = state["cfg"].jobs
             return {
                 "rows": rows,
+                # Mes niveaux dans les métiers de forgemagie (absent : métier non renseigné).
+                "mages": {name: mine.get(name) for name in sorted(job_names[j] for j in MAGE_OF.values() if j in job_names)},
                 "exos": [
                     {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
                     for effect_id, count in forge.all_exo_counts(conn).items()

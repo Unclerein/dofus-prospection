@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from ..protocol.wire import LEN, VARINT, WireError, iter_fields
 from . import Mapping
-from .sales import LOT_SIZES, MAX_REMAINING_S, Sale
+from .sales import LOT_SIZES, MAX_REMAINING_S, Sale, read_effect
 
 SOLD_TEXT = 65
 BOUGHT_TEXT = 252
@@ -77,9 +77,13 @@ def parse_text(body: bytes, mapping: Mapping) -> Trade | None:
     return Trade(kind, item_id, quantity, price, ref)
 
 
-def parse_lot_update(body: bytes, mapping: Mapping) -> Sale | None:
-    """Lot que le joueur vient de mettre en vente ou de modifier, ou None si la forme est inattendue."""
+def parse_lot_update(body: bytes, mapping: Mapping, effects: Mapping | None = None) -> Sale | None:
+    """Lot que le joueur vient de mettre en vente ou de modifier, ou None si la forme est inattendue.
+
+    effects : message des annonces HDV, pour lire les jets d'un lot d'équipement (voir messages.sales).
+    """
     f = mapping.fields
+    rolls = []
     uid = item_id = lot = price = None
     remaining = 0
     try:
@@ -87,7 +91,10 @@ def parse_lot_update(body: bytes, mapping: Mapping) -> Sale | None:
             if number == f["ref"] and wire_type == LEN:
                 for r_number, r_type, r_value in iter_fields(value):
                     if r_type != VARINT:
-                        continue  # effets d'un équipement : non lus
+                        effect = read_effect(r_value, effects) if r_type == LEN else None
+                        if effect is not None:
+                            rolls.append(effect)
+                        continue
                     if r_number == f["uid"]:
                         uid = r_value
                     elif r_number == f["item_id"]:
@@ -104,4 +111,4 @@ def parse_lot_update(body: bytes, mapping: Mapping) -> Sale | None:
         return None
     if not uid or not item_id or lot not in LOT_SIZES or not price or remaining > MAX_REMAINING_S:
         return None
-    return Sale(uid, item_id, lot, price, remaining)
+    return Sale(uid, item_id, lot, price, remaining, tuple(rolls))

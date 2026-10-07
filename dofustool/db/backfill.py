@@ -79,7 +79,7 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
         for ts, body in archive.execute(
             "SELECT ts, body FROM messages WHERE key = ? AND direction = 's2c' ORDER BY ts", (mine.key,)
         ):
-            parsed = sales.parse(body, mine)
+            parsed = sales.parse(body, mine, keymap.get("hdv_listings"))
             if parsed is not None:
                 db.save_sales(market, parsed, ts)
                 counts["listes de ventes lues"] += 1

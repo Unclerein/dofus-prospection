@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS my_sales (
     price       INTEGER NOT NULL,
     remaining_s INTEGER NOT NULL,
     captured_at REAL NOT NULL,
+    effects     TEXT,  -- jets d'un lot d'équipement (JSON), s'ils ont été lus
     PRIMARY KEY (market, uid)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS my_sales_meta (
@@ -291,6 +292,9 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
     if columns and "category_id" not in columns:  # renseignée au prochain import des données statiques
         conn.execute("ALTER TABLE items ADD COLUMN category_id INTEGER")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(my_sales)")}
+    if columns and "effects" not in columns:  # renseignés au prochain relevé de l'onglet Vendre
+        conn.execute("ALTER TABLE my_sales ADD COLUMN effects TEXT")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
     if columns and "ref" not in columns:  # renseignée pour les anciens achats au prochain rejeu de l'archive
         conn.execute("ALTER TABLE trades ADD COLUMN ref INTEGER")
@@ -406,6 +410,10 @@ def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at
     return True
 
 
+def _rolls(sale) -> str | None:
+    return json.dumps([list(e) for e in sale.effects]) if sale.effects else None
+
+
 def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
     """Remplace les lots en vente d'un HDV par une liste décodée (messages.sales.SalesList).
 
@@ -433,6 +441,8 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
             for row in conn.execute("SELECT uid, item_id, lot, price FROM my_sales WHERE market = ?", (market,))
             if row[0] not in listed
         ]
+        # Un relevé rejoué sans les jets (clés des annonces HDV pas encore retrouvées) ne les efface pas.
+        kept = dict(conn.execute("SELECT uid, effects FROM my_sales WHERE market = ? AND effects IS NOT NULL", (listing.market,)))
         _attribute_offline(conn, gone, row[0] if row is not None else captured_at, captured_at)
         for market in same:
             conn.execute("DELETE FROM my_sales WHERE market = ?", (market,))
@@ -443,10 +453,14 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
             ((s.price, captured_at, s.uid) for s in listing.sales),
         )
         conn.executemany(
-            "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ((listing.market, s.uid, s.item_id, s.lot, s.price, s.remaining_s, captured_at) for s in listing.sales),
+            "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ((listing.market, s.uid, s.item_id, s.lot, s.price, s.remaining_s, captured_at, _rolls(s)) for s in listing.sales),
         )
         conn.execute("INSERT OR REPLACE INTO my_sales_meta VALUES (?, ?, ?)", (listing.market, captured_at, len(listing.sales)))
+        conn.executemany(
+            "UPDATE my_sales SET effects = ? WHERE market = ? AND uid = ? AND effects IS NULL",
+            ((effects, listing.market, uid) for uid, effects in kept.items()),
+        )
     return True
 
 
@@ -611,8 +625,8 @@ def save_lot_update(conn: sqlite3.Connection, sale, ts: float) -> None:
     with conn:
         conn.execute("DELETE FROM my_sales WHERE uid = ?", (sale.uid,))
         conn.execute(
-            "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (row[0], sale.uid, sale.item_id, sale.lot, sale.price, sale.remaining_s, ts),
+            "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (row[0], sale.uid, sale.item_id, sale.lot, sale.price, sale.remaining_s, ts, _rolls(sale)),
         )
         conn.execute(
             "UPDATE fm_items SET listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ? AND sold_at IS NULL",

@@ -162,3 +162,25 @@ def test_journal_is_served(app_db):  # noqa: F811
     db.save_trade(conn, 4, Trade(SALE, 3, 1, 300), now)
     conn.close()
     assert api.version()["stamp"] != first  # une nouvelle vente rafraîchit l'interface
+
+
+def test_equipment_lots_keep_their_rolls_when_the_effect_fields_are_known():
+    effects = Mapping("hdv", {"effect_id": 10, "effect_value": 5})
+    rolls = ld(2, vi(5, 371) + vi(10, 125)) + ld(2, vi(10, 985) + ld(9, b"Nom-De-Joueur"))  # vitalité, puis « modifié par »
+    lot = trades.parse_lot_update(update(494_120, 18_018, 1, 6_500_000, effects=rolls), UPDATE, effects)
+    assert lot.effects == ((125, 371), (985, None))  # le nom n'est jamais lu
+    assert trades.parse_lot_update(update(494_120, 18_018, 1, 6_500_000, effects=rolls), UPDATE).effects == ()
+    partial = Mapping("hdv", {"effect_id": 0, "effect_value": 0})  # annonces HDV vues sans équipement : champs inconnus
+    assert trades.parse_lot_update(update(494_120, 18_018, 1, 6_500_000, effects=rolls), UPDATE, partial).effects == ()
+    listing = Mapping("lst", {"entries": 2, "ref": 1, "uid": 1, "item_id": 2, "lot": 3, "price": 2, "remaining": 3})
+    entry = ld(2, ld(1, vi(1, 7) + vi(2, 18_018) + ld(9, vi(5, 40) + vi(10, 119)) + vi(3, 1)) + vi(2, 6_500_000) + vi(3, 5_000))
+    assert sales.parse(entry, listing, effects).sales[0].effects == ((119, 40),)
+
+    conn = db.connect(":memory:")
+    db.save_sales(conn, sales.parse(entry, listing, effects), 1_000.0)
+    assert conn.execute("SELECT effects FROM my_sales").fetchone() == ("[[119, 40]]",)
+    db.save_sales(conn, sales.parse(entry, listing), 1_100.0)  # relevé relu sans les jets : ils sont conservés
+    assert conn.execute("SELECT effects, captured_at FROM my_sales").fetchone() == ("[[119, 40]]", 1_100.0)
+    db.save_lot_update(conn, lot, 1_200.0)
+    assert conn.execute("SELECT effects FROM my_sales WHERE uid = 494120").fetchone() == ("[[125, 371], [985, null]]",)
+    conn.close()

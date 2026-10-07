@@ -132,6 +132,16 @@ class PriceBook:
             sold[period] = sold.get(period, 0) + qty
             if period == GRAIN_HOUR:
                 hourly.setdefault(item_id, []).append((price, qty))
+        # Ventes des 30 derniers jours connus : aujourd'hui et les 29 jours d'avant, à la date du relevé du cours.
+        self._sold_30d: dict[int, int] = dict(
+            conn.execute(
+                "SELECT h.item_id, SUM(COALESCE(h.qty_sold, 0)) FROM market_history h "
+                "JOIN (SELECT item_id, MAX(captured_at) AS seen FROM market_history GROUP BY item_id) l "
+                "  ON l.item_id = h.item_id "
+                "WHERE h.period = :daily AND h.bucket_ts >= (CAST(l.seen / :day AS INTEGER) - 29) * :day GROUP BY h.item_id",
+                {"daily": GRAIN_DAY, "day": int(DAY)},
+            )
+        )
         # Cours reconstitué depuis le relevé (analysis.cours) : il prolonge les quantités vendues jusqu'au dernier prix moyen.
         self._rebuilt = cours.liquidity(conn)
         self._median: dict[int, tuple[float, float]] = {
@@ -249,6 +259,13 @@ class PriceBook:
         # Cours consulté mais aucune vente dans la fenêtre : la quantité est 0, pas inconnue.
         sold = self._liquidity.get(item_id, {})
         return Liquidity(sold.get(GRAIN_HOUR, 0), sold.get(GRAIN_DAY, 0))
+
+    def sold_30d(self, item_id: int) -> int | None:
+        """Quantité vendue sur 30 jours, ou None si le cours du marché de l'item n'a jamais été consulté."""
+        if item_id not in self._seen:
+            return None
+        # Les ventes reconstituées depuis le relevé peuvent dépasser ce que le relevé lui-même montrait.
+        return max(self._sold_30d.get(item_id, 0), self.liquidity(item_id).qty_7d or 0)
 
     def rebuilt_at(self, item_id: int) -> float | None:
         """Date du dernier prix moyen pris en compte dans les quantités vendues, si elles sont reconstituées."""
