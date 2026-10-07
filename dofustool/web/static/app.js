@@ -956,7 +956,7 @@ async function forgeJournal(uid) {
       h('thead', {}, h('tr', {}, sortTh(ui.sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(ui.sort, 'last', 'Dernier passage'), sortTh(ui.sort, 'passes', 'Passages'),
         sortTh(ui.sort, 'runes', 'Runes'), sortTh(ui.sort, 'base', 'Objet de base'), sortTh(ui.sort, 'sale', 'Prix de vente'), sortTh(ui.sort, 'margin', 'Marge', { title: 'Prix de vente, moins la taxe de mise en vente, l\'objet de base et les runes' }))),
       h('tbody', {}, rows.map((d) => h('tr', { class: 'link' + (current && current.uid === d.uid ? ' on' : ''), onclick: () => { location.hash = `#/forge/journal/${d.uid}`; } },
-        h('td', { class: 'l' }, itemCell(d.icon, d.name, d.type, d.item_id)),
+        h('td', { class: 'l', ...(d.rolls ? hoverRolls(d.item_id, d.rolls, `fm-${d.uid}`, 'Ton exemplaire, après forgemagie') : hoverTip(d.item_id)) }, itemCell(d.icon, d.name, d.type)),
         h('td', { class: 'soft' }, [h('div', {}, when(d.last_ts)), d.duration_s > 0 && h('div', { class: 'source' }, durationLabel(d.duration_s))]),
         h('td', {}, [h('div', { style: 'font-weight: 600' }, fmt(d.passes)), h('div', { class: 'source', title: 'Succès critiques · succès neutres · échecs' }, `${d.sc} SC · ${d.sn} SN · ${d.ec} EC`)]),
         h('td', {}, [h('div', { class: 'strong' }, fmt(d.rune_cost)), d.unpriced > 0 && h('div', { class: 'source warn' }, `${d.unpriced} sans prix`)]),
@@ -2218,17 +2218,13 @@ function sharePanel(d, data, sync) {
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
-  { id: 3, date: '8 octobre 2026', title: 'Tes équipements estimés d\u2019après leurs jets', hash: '#/forge/journal', go: 'Voir mon journal', points: [
-    ['Annonces similaires :', 'un équipement est comparé aux annonces HDV du même modèle qui ont les mêmes exos, les mêmes overs et des jets au moins aussi bons, à 10 % près.'],
-    ['Forgemagie › Mon journal :', 'la valeur estimée d\u2019un objet pas encore en vente vient de l\u2019annonce similaire la moins chère, avec son niveau de confiance.'],
-    ['Mes ventes :', 'chaque équipement en vente est situé face aux annonces similaires : le moins cher, ou sous-enchéri de combien.'],
-    ['Pour que ça marche :', 'ouvre la fiche de l\u2019objet à l\u2019HDV en jeu. Sans annonce similaire, l\u2019estimation le dit.'],
-  ] },
-  { id: 2, date: '8 octobre 2026', title: 'Filtres par métier, jets de tes lots, quantités vendues', hash: '#/forge/ranking', go: 'Voir le classement', points: [
-    ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d\u2019après tes métiers et leur niveau.'],
-    ['Mes critères par objet :', 'ils se règlent dans l\u2019onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],
-    ['Mes ventes :', 'un filtre Équipements / Ressources, et les jets de tes équipements en vente au survol (après avoir rouvert l\u2019onglet Vendre en jeu).'],
-    ['Quantités vendues :', 'sur 7 et 30 jours, dans Crafts et dans le classement de forgemagie. « Cours non consulté » : ouvre le cours du marché de l\u2019objet en jeu.'],
+  { id: 4, date: '8 octobre 2026', title: 'Métiers de forgemagie, jets de tes objets, estimation par annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
+    ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d’après tes métiers et leur niveau.'],
+    ['Mes critères par objet :', 'ils se règlent dans l’onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],
+    ['Mes ventes :', 'un filtre Équipements / Ressources, et les jets de tes équipements en vente au survol (après avoir rouvert l’onglet Vendre en jeu).'],
+    ['Annonces similaires :', 'tes équipements sont comparés aux annonces HDV du même modèle qui ont les mêmes exos, les mêmes overs et des jets au moins aussi bons, à 10 % près. Mes ventes dit si tu es le moins cher ; le journal de forgemagie s’en sert pour estimer un objet pas encore en vente, avec un niveau de confiance.'],
+    ['Forgemagie › Mon journal :', 'au survol d’un objet, ses jets réels après forgemagie, et plus ceux du modèle.'],
+    ['Quantités vendues :', 'sur 7 et 30 jours, dans Crafts et dans le classement de forgemagie. « Non consulté » : ouvre le cours du marché de l’objet en jeu.'],
   ] },
   { id: 1, date: '7 octobre 2026', title: 'Journal de forgemagie et ventes hors ligne', hash: '#/forge/journal', go: 'Voir mon journal', points: [
     ['Forgemagie › Mon journal :', 'chaque rune que tu passes en jeu est notée toute seule. Un dossier par objet : runes passées, coût, taux de réussite, jets avant et après.'],

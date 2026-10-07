@@ -1115,14 +1115,16 @@ class Api:
                     reference = ws.prices.get(d.item_id)
                     status, sale, sale_ts = "kept", reference.price if reference else None, None
                 # Valeur d'après les annonces similaires : elle remplace le prix du modèle tant que l'objet n'est pas en vente.
-                close, special = None, False
-                if status != "sold" and self.ensure_template(conn, d.item_id):
+                close, special, rolls = None, False, None
+                if self.ensure_template(conn, d.item_id):
                     template = forge.load_template(conn, d.item_id)
                     mine = classify([(i, v) for i, v in d.after.items() if i not in ignored], template)
                     special = bool(mine.exo or mine.over)
-                    close = self._similar(conn, d.item_id, mine, template, ignored, own_price=sale if status == "listed" else None)
-                    if status == "kept" and close is not None:
-                        sale = close["price"]
+                    if status != "sold":
+                        close = self._similar(conn, d.item_id, mine, template, ignored, own_price=sale if status == "listed" else None)
+                        if status == "kept" and close is not None:
+                            sale = close["price"]
+                    rolls = self._rolls(mine, sale)  # l'exemplaire tel qu'il est, pour l'infobulle
                 rune_cost = d.rune_cost
                 margin = sale * (1 - tax) - base - rune_cost if sale is not None and base is not None else None
                 ids = sorted(set(d.after) | set(d.before or {}), key=lambda i: (order.get(i, 1_000_000), i))
@@ -1141,7 +1143,7 @@ class Api:
                         "base_cost": base, "base_source": base_source,
                         "status": status, "sale": sale, "sale_ts": sale_ts, "tax": sale * tax if sale is not None else None,
                         # similar : estimation par les annonces proches ; special : exo ou over, mal estimé par le prix du modèle.
-                        "similar": close, "special": special,
+                        "similar": close, "special": special, "rolls": rolls,
                         "margin": margin,
                         "runes": [
                             {
