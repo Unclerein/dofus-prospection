@@ -713,10 +713,11 @@ function salesJournal(data, ui) {
     return [kpis, waiting, h('div', { class: 'panel empty' }, 'Aucune vente ni achat capté pour l\'instant. Ils s\'ajoutent tout seuls quand le jeu les annonce, capture active.')];
   }
   const query = norm(ui.q.trim());
-  const shown = data.trades.filter((r) => (!ui.kind || r.kind === ui.kind) && (!query || norm(r.name).includes(query)));
+  const shown = data.trades.filter((r) => (!ui.kind || r.kind === ui.kind) && (!ui.fm || r.fm) && (!query || norm(r.name).includes(query)));
   let typing = null;
   const filters = h('section', { class: 'panel pad filters', 'aria-label': 'Filtres' },
     segmented('Mouvements', [['', 'Tout'], ['sale', 'Ventes'], ['purchase', 'Achats']], ui.kind, (kind) => { ui.kind = kind; refresh(); }),
+    h('label', { class: 'check', title: 'Runes achetées ou vendues, et objets que tu as forgemagés' }, h('input', { type: 'checkbox', checked: !!ui.fm, onchange: (e) => { ui.fm = e.target.checked; refresh(); } }), `Forgemagie seulement (${data.trades.filter((r) => r.fm).length})`),
     h('div', { class: 'field', style: 'flex: 0 1 260px' }, h('label', { for: 'j-q' }, 'Objet'),
       h('input', { id: 'j-q', type: 'search', value: ui.q, placeholder: 'Chercher…', autocomplete: 'off',
         oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));

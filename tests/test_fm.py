@@ -248,3 +248,5 @@ def test_journal_is_served(app_db):  # noqa: F811
     assert d["status"] == "sold" and d["sale_ts"] == pytest.approx(now)
     sales = api.sales()
     assert sales["offline_pending"]["amount"] == 0 and sales["trades"][0]["offline"] is False
+    # La vente de l'exemplaire forgemagé est rattachée à la forgemagie ; l'achat de Blé (pas une rune), non.
+    assert [(t["kind"], t["fm"]) for t in sales["trades"]] == [("sale", True), ("purchase", False)]

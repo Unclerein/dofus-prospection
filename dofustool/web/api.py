@@ -733,8 +733,9 @@ class Api:
             meta = conn.execute("SELECT COUNT(*), MIN(captured_at), MAX(captured_at) FROM my_sales_meta").fetchone()
             # Journal : ventes conclues et achats annoncés par le jeu, les plus récents d'abord.
             trades = []
-            for source_id, ts, kind, item_id, quantity, price in conn.execute(
-                "SELECT source_id, ts, kind, item_id, quantity, price FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
+            forged = {row[0] for row in conn.execute("SELECT uid FROM fm_items")}
+            for source_id, ts, kind, item_id, quantity, price, ref in conn.execute(
+                "SELECT source_id, ts, kind, item_id, quantity, price, ref FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
             ):
                 item = ws.items.get(item_id)
                 avg = ws.prices.avg_price(item_id)
@@ -749,6 +750,8 @@ class Api:
                         "price": price,
                         "avg": avg * quantity if avg else None,
                         "offline": source_id < 0,  # vente conclue hors ligne, déduite des lots disparus
+                        # Lié à la forgemagie : une rune, ou un exemplaire que j'ai forgemagé (acheté ou vendu).
+                        "fm": (state["meta"].get(item_id, ("",))[0] or "").startswith("Rune ") or ref in forged,
                     }
                 )
             # Kamas gagnés hors ligne dont les lots n'ont pas (encore) été retrouvés.
