@@ -72,7 +72,8 @@ def unit_price(prices: tuple[int, ...]) -> tuple[float, int] | None:
 class PriceBook:
     """Prix de référence d'un item, par ordre de préférence, tant que l'information est assez récente.
 
-    Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix
+    Ressources et consommables : annonce HDV la moins chère (sauf si le cours du marché montre une
+    vente plus récente que ce relevé : elle prime), puis dernier prix de vente, puis prix
     estimé (s'il est jugé fiable et que `use_estimates` est vrai), puis prix moyen.
     Équipements : annonce HDV la moins chère « jet de base » (ni exo, ni over, ni ligne perdue), puis
     prix médian sur 24 h, puis prix moyen — ou un seul de ces prix, selon `equipment_price`.
@@ -193,7 +194,10 @@ class PriceBook:
             if self.equipment_price == EQUIP_BASE:
                 return None  # pas d'exemplaire de base relevé : pas de prix, plutôt qu'un prix moyen
         elif hdv is not None:
-            return PriceRef(*hdv)
+            sale = self._last_sales.get(item_id)
+            # Une vente plus récente que le relevé de l'HDV dit mieux le prix du moment que l'annonce.
+            if sale is None or sale[1] <= hdv[2]:
+                return PriceRef(*hdv)
         if item_id not in self._equipment:
             sale = self._last_sales.get(item_id)
             if sale is not None:

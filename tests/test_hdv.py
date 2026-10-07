@@ -318,3 +318,20 @@ def test_equipment_price_modes(conn):
     assert modes("base").get(3000) is None and modes("any").get(3000) is None
     # Les ressources ne sont pas concernées par ce réglage.
     assert modes("any").get(289).source == AVG_PRICE and modes("inconnu").equipment_price == "both"
+
+
+def test_a_sale_more_recent_than_the_hdv_reading_wins(conn):
+    save(conn, message(289, listing(289, 1, [12, 110, 1050, 9900])))  # relevé HDV vers NOW - 60 s
+    seen = conn.execute("SELECT MAX(captured_at) FROM hdv_listings WHERE item_id = 289").fetchone()[0]
+    db.save_last_sale(conn, 289, 14, seen - 600, NOW)  # dernière vente du cours, antérieure au relevé HDV
+    ref = book(conn).get(289)
+    assert (ref.source, ref.price) == (HDV, 9.9)
+    db.save_last_sale(conn, 289, 14, seen + 30, NOW)  # cours consulté ensuite : une vente plus récente que l'annonce
+    ref = book(conn).get(289)
+    assert (ref.source, ref.price, ref.ts) == (LAST_SALE, 14, seen + 30)
+    assert book(conn).hdv_ask(289) == (9.9, seen)  # l'annonce reste connue pour les comparaisons
+    # Un équipement garde sa règle propre : une vente isolée ne dit rien d'un exemplaire de base.
+    store(conn, 2469, [(PA, 1, 1)])
+    save(conn, message(2469, listing(2469, 2, [59_000, 0, 0, 0], [(PA, 1)])))
+    db.save_last_sale(conn, 2469, 900_000, NOW, NOW)
+    assert book(conn).get(2469).source == HDV_PLAIN
