@@ -5,12 +5,12 @@ n'a pas exactement la forme attendue est ignoré (il reste dans l'archive brute)
 """
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import db, identify
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, hdv_listings, load_keymap, market_history, sales, storage, trades
+from ..messages import Mapping, avg_prices, characters, fm, hdv_listings, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -33,6 +33,8 @@ class _ConnWatch:
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
     character_id: int | None = None  # personnage choisi sur cette connexion
     scan: identify.Scan | None = None  # ce que la connexion a échangé, pour retrouver les messages
+    fm_rune: int | None = None  # rune posée sur l'atelier de forgemagie, en attente de son résultat
+    fm_objects: dict[int, tuple] = field(default_factory=dict)  # derniers effets connus des objets posés sur l'atelier
 
 
 class Pipeline:
@@ -57,6 +59,7 @@ class Pipeline:
         self._errors: set[str] = set()
         self._next_identify = 0.0
         self._context: identify.Context | None = None
+        self._runes: frozenset[int] | None = None
         self.backup_dir = db.MARKET_PATH.parent / "keymap-backups"
 
     def handle(self, segment: Segment) -> None:
@@ -135,6 +138,41 @@ class Pipeline:
                 db.save_lot_update(self.market, lot, msg.ts)
             return
 
+        mapping = self.keymap.get("fm_object")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            placed = fm.parse_object(msg.body, mapping)
+            if placed is not None:
+                if placed.item_id in self._rune_ids():
+                    watch.fm_rune = placed.item_id
+                else:
+                    watch.fm_objects[placed.uid] = placed.effects
+            return
+
+        mapping = self.keymap.get("fm_result")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            result = fm.parse_result(msg.body, mapping)
+            rune, watch.fm_rune = watch.fm_rune, None
+            # Sans rune posée, c'est le résultat d'une autre fabrication, pas un passage de rune.
+            if result is None or rune is None or result.object.item_id in self._rune_ids():
+                return
+            uid = result.object.uid
+            known = self.market.execute("SELECT 1 FROM fm_items WHERE uid = ?", (uid,)).fetchone()
+            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid)):
+                if known is None:
+                    row = self.market.execute("SELECT name FROM items WHERE id = ?", (result.object.item_id,)).fetchone()
+                    log.info("Forgemagie : premier passage de rune sur %s.", row[0] if row else f"item {result.object.item_id}")
+            watch.fm_objects[uid] = result.object.effects
+            return
+
+        mapping = self.keymap.get("offline_sales")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            total = fm.parse_offline_total(msg.body, mapping)
+            if total is not None and source_id is not None:
+                gained = db.save_offline_total(self.market, source_id, total, msg.ts)
+                if gained:
+                    log.info("Ventes hors ligne : %d kamas depuis la dernière annonce.", gained)
+            return
+
         mapping = self.keymap.get("my_sales")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             listing = sales.parse(msg.body, mapping)
@@ -189,6 +227,11 @@ class Pipeline:
             if watch.alerted:
                 watch.alerted = False
                 log.info("Alerte levée : les prix moyens ont fini par être décodés.")
+
+    def _rune_ids(self) -> frozenset[int]:
+        if self._runes is None:
+            self._runes = frozenset(row[0] for row in self.market.execute(identify.RUNES_SQL))
+        return self._runes
 
     def tick(self, now: float) -> None:
         """À appeler régulièrement : valide l'archive et surveille le décodage."""

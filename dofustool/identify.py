@@ -19,14 +19,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .analysis.jobxp import level_to_xp
-from .messages import Mapping, avg_prices, characters, hdv_listings, market_history, sales, storage, trades
+from .messages import Mapping, avg_prices, characters, fm, hdv_listings, market_history, sales, storage, trades
 from .protocol.tcp import C2S, S2C
-from .protocol.wire import LEN, VARINT, WireError, iter_fields, read_varint
+from .protocol.wire import I32, LEN, VARINT, WireError, iter_fields, read_varint
 
 NAMES = (
     "avg_prices", "inventory", "bank", "character_list", "character_select",
     "job_levels", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update",
+    "fm_object", "fm_result", "offline_sales",
 )  # fmt: skip
+RUNES_SQL = "SELECT id FROM items WHERE type_name LIKE 'Rune %'"
+FM_MAX_BYTES = 1500  # un objet posé sur l'atelier ou un résultat de passage tient dans cette taille
+FM_MIN_SEEN = 3  # nombre de passages de rune qu'il faut avoir vus pour reconnaître les deux clés
+OFFLINE_MIN_TOTAL = 1000  # en dessous, un total de ventes hors ligne ne se distingue pas d'un autre petit nombre
 TEXT_MAX_BYTES = 200  # un message d'information est court
 TEXT_MIN_SEEN = 3  # nombre de messages à paramètres chiffrés qu'il faut avoir vus pour reconnaître la clé
 INVENTORY_WINDOW_S = 90.0  # l'inventaire arrive tout seul juste après le choix du personnage ; la banque, non
@@ -41,6 +46,8 @@ class Context:
     jobs: set[int]
     effects: set[int]
     avg: dict[int, int]
+    runes: set[int] = field(default_factory=set)
+    offline_total: int | None = None  # dernier total de ventes hors ligne annoncé par le jeu
 
     @classmethod
     def load(cls, market: sqlite3.Connection) -> "Context":
@@ -51,6 +58,8 @@ class Context:
             {row[0] for row in market.execute("SELECT id FROM jobs")},
             {row[0] for row in market.execute("SELECT id FROM effects")},
             avg,
+            {row[0] for row in market.execute(RUNES_SQL)},
+            (market.execute("SELECT total FROM offline_sales ORDER BY ts DESC, source_id DESC LIMIT 1").fetchone() or (None,))[0],
         )
 
 
@@ -401,6 +410,76 @@ def match_sale_update(body: bytes, ctx: Context) -> dict[str, int] | None:
     return found[0] if len(found) == 1 else None
 
 
+def fm_shape(body: bytes) -> str | None:
+    """« object » : un objet seul dans son enveloppe ; « result » : un état, et un résultat portant un nombre décimal et un objet."""
+    top = _fields(body)
+    if not top or len(top) > 2:
+        return None
+    if len(top) == 1 and top[0][1] == LEN:
+        inner = _fields(top[0][2])
+        if inner and sum(t == LEN for _, t, _ in inner) == 1 and all(t in (LEN, VARINT) for _, t, _ in inner):
+            return "object"
+        return None
+    kinds = sorted(t for _, t, _ in top)
+    if len(top) == 2 and kinds == [VARINT, LEN]:
+        inner = _fields(next(v for _, t, v in top if t == LEN))
+        if inner and sum(t == I32 for _, t, _ in inner) == 1 and sum(t == LEN for _, t, _ in inner) == 1:
+            return "result"
+    return None
+
+
+def match_forge(placed: bytes, result: bytes, ctx: Context) -> tuple[dict[str, int], dict[str, int]] | None:
+    """Champs de (objet posé sur l'atelier, résultat d'un passage), d'après une rune posée et le résultat qui l'a suivie.
+
+    L'objet a la même forme dans les deux messages : ses numéros de champ se lisent sur l'équipement
+    du résultat, qui porte assez d'effets pour ne laisser aucun doute, puis se vérifient sur la rune.
+    """
+    top = _fields(result)
+    outer = _fields(placed)
+    if not top or not outer:
+        return None
+    status = next(n for n, t, _ in top if t == VARINT)
+    result_field, inner_raw = next((n, v) for n, t, v in top if t == LEN)
+    inner = _fields(inner_raw)
+    changes = [n for n, t, _ in inner if t == VARINT]
+    if len(changes) != 1:
+        return None  # sens de variation du puits absent de cet exemple : attendre un autre passage
+    object_field, object_raw = next((n, v) for n, t, v in inner if t == LEN)
+    obj = _fields(object_raw)
+    if obj is None:
+        return None
+    values = _varints(obj)
+    groups = _repeated(obj)
+    if len(values) != 3 or len(groups) != 1:
+        return None
+    uid = max(values, key=values.get)
+    quantity = [n for n, v in values.items() if n != uid and v == 1]
+    item = [n for n, v in values.items() if n != uid and v in ctx.items and v != 1]
+    if values[uid] < 100_000 or len(quantity) != 1 or len(item) != 1:
+        return None
+    effects_field, raw = next(iter(groups.items()))
+    rows = [_varints(_fields(e) or []) for e in raw]
+    ids = [n for n in _everywhere(rows, 1.0) if all(r[n] in ctx.effects for r in rows)]
+    others = Counter(n for r in rows for n in r if n not in ids)
+    if len(rows) < 3 or len(ids) != 1 or not others:
+        return None
+    shared = {
+        "quantity": quantity[0], "item_id": item[0], "uid": uid, "effects": effects_field,
+        "effect_value": others.most_common(1)[0][0], "effect_id": ids[0],
+    }  # fmt: skip
+    result_fields = {
+        "status": status, "result": result_field, "pool": next(n for n, t, _ in inner if t == I32),
+        "pool_change": changes[0], "object": object_field, **shared,
+    }  # fmt: skip
+    wrap, wrapped = outer[0][0], _fields(outer[0][2])
+    placed_fields = {"wrap": wrap, "object": next(n for n, t, _ in wrapped if t == LEN), **shared}
+    rune = fm.parse_object(placed, Mapping("", placed_fields))
+    after = fm.parse_result(result, Mapping("", result_fields))
+    if rune is None or after is None or rune.item_id not in ctx.runes or after.object.item_id in ctx.runes:
+        return None
+    return placed_fields, result_fields
+
+
 def text_signature(body: bytes) -> tuple[int, int, bool] | None:
     """Forme d'un message d'information : (champ du numéro de texte, champ des paramètres, paramètres tous chiffrés).
 
@@ -434,6 +513,10 @@ class Scan:
     matches: dict[tuple[str, str], dict[str, Found]] = field(default_factory=dict)
     # Messages d'information : par clé, les formes vues parmi les messages courts (None : autre forme).
     texts: dict[tuple[str, str], Counter] = field(default_factory=dict)
+    # Forgemagie : dernier objet posé, puis par couple (clé de l'objet, clé du résultat) le nombre de fois
+    # où l'un a précédé l'autre, et le dernier exemple.
+    fm_last: tuple[tuple[str, str], bytes] | None = None
+    fm_pairs: dict[tuple[str, str], tuple[int, bytes, bytes]] = field(default_factory=dict)
 
     def feed(self, archive: sqlite3.Connection, connection_id: int) -> None:
         rows = archive.execute(
@@ -451,6 +534,14 @@ class Scan:
                 self.dirty.add(slot)
             if direction == S2C and 0 < len(body) <= TEXT_MAX_BYTES:
                 self.texts.setdefault(slot, Counter())[text_signature(body)] += 1
+            if direction == S2C and 0 < len(body) <= FM_MAX_BYTES:
+                shape = fm_shape(body)
+                if shape == "object":
+                    self.fm_last = (slot, body)
+                elif shape == "result" and self.fm_last is not None:
+                    pair = (self.fm_last[0][1], key)
+                    self.fm_pairs[pair] = (self.fm_pairs.get(pair, (0,))[0] + 1, self.fm_last[1], body)
+                    self.fm_last = None
 
 
 def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], dict[str, str]]:
@@ -505,6 +596,22 @@ def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], 
             if any(sig[0] != id_field for sig in seen):
                 continue
             candidates.setdefault("info_text", []).append(Found("info_text", slot[1], {"id": id_field, "params": params_field}))
+
+    # Forgemagie : une rune posée sur l'atelier, puis le résultat du passage, plusieurs fois de suite.
+    if "fm_object" in wanted or "fm_result" in wanted:
+        for (placed_key, result_key), (seen, placed, result) in scan.fm_pairs.items():
+            fields = match_forge(placed, result, ctx) if seen >= FM_MIN_SEEN else None
+            if fields:
+                candidates.setdefault("fm_object", []).append(Found("fm_object", placed_key, fields[0]))
+                candidates.setdefault("fm_result", []).append(Found("fm_result", result_key, fields[1]))
+
+    # Ventes hors ligne : à la connexion, un message fait d'un seul entier, égal au dernier total connu.
+    if "offline_sales" in wanted and ctx.offline_total is not None and ctx.offline_total >= OFFLINE_MIN_TOTAL:
+        for slot, body in scan.best.items():
+            sent = _fields(body) if slot[0] == S2C and len(body) <= 12 else None
+            early = scan.first_ts[slot] - scan.started_at <= INVENTORY_WINDOW_S
+            if sent and early and len(sent) == 1 and sent[0][1] == VARINT and sent[0][2] == ctx.offline_total:
+                candidates.setdefault("offline_sales", []).append(Found("offline_sales", slot[1], {"total": sent[0][0]}))
 
     # Choix du personnage : une requête du client faite d'un seul entier, que la liste reçue juste avant contient.
     if "character_select" in wanted or "character_list" in wanted:

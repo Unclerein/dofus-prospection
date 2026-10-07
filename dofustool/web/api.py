@@ -15,8 +15,8 @@ from pathlib import Path
 import pandas as pd
 
 from .. import config, db
-from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours
-from ..analysis.forgemagie import Filter, base_lines
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal
+from ..analysis.forgemagie import MARKERS, Filter, base_lines
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
@@ -189,7 +189,13 @@ class Api:
     def version(self) -> dict:
         conn = self.connect()
         try:
-            return {"stamp": data_stamp(conn, self.config_path)}
+            # Le journal de forgemagie change à chaque rune : l'interface le recharge au plus une fois par
+            # minute, et ces compteurs restent hors de l'empreinte qui déclenche le recalcul des pages.
+            journal = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM fm_items), (SELECT CAST(MAX(ts) / 60 AS INTEGER) FROM fm_passes), "
+                "(SELECT COUNT(*) FROM offline_sales), (SELECT COUNT(*) FROM fm_items WHERE base_cost IS NOT NULL OR sold_at IS NOT NULL)"
+            ).fetchone()
+            return {"stamp": [*data_stamp(conn, self.config_path), *journal]}
         finally:
             conn.close()
 
@@ -727,8 +733,8 @@ class Api:
             meta = conn.execute("SELECT COUNT(*), MIN(captured_at), MAX(captured_at) FROM my_sales_meta").fetchone()
             # Journal : ventes conclues et achats annoncés par le jeu, les plus récents d'abord.
             trades = []
-            for ts, kind, item_id, quantity, price in conn.execute(
-                "SELECT ts, kind, item_id, quantity, price FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
+            for source_id, ts, kind, item_id, quantity, price in conn.execute(
+                "SELECT source_id, ts, kind, item_id, quantity, price FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
             ):
                 item = ws.items.get(item_id)
                 avg = ws.prices.avg_price(item_id)
@@ -742,8 +748,13 @@ class Api:
                         "quantity": quantity,
                         "price": price,
                         "avg": avg * quantity if avg else None,
+                        "offline": source_id < 0,  # vente conclue hors ligne, déduite des lots disparus
                     }
                 )
+            # Kamas gagnés hors ligne dont les lots n'ont pas (encore) été retrouvés.
+            pending = conn.execute(
+                "SELECT COALESCE(SUM(delta), 0), MIN(ts), MAX(ts) FROM offline_sales WHERE attributed = 0 AND delta > 0"
+            ).fetchone()
             totals = {
                 f"{kind}_{label}": conn.execute(
                     "SELECT COUNT(*), COALESCE(SUM(price), 0) FROM trades WHERE kind = ? AND ts >= ?", (kind, now - days * 86400)
@@ -755,6 +766,7 @@ class Api:
                 {
                     "rows": rows, "markets": meta[0], "oldest": meta[1], "latest": meta[2], "tax": cfg.hdv_tax, "now": now,
                     "trades": trades, "totals": totals,
+                    "offline_pending": {"amount": pending[0], "since": pending[1], "latest": pending[2]},
                     "first_trade": conn.execute("SELECT MIN(ts) FROM trades").fetchone()[0],
                 }
             )  # fmt: skip
@@ -1009,6 +1021,108 @@ class Api:
                     "filter": db.load_fm_filter(conn, item_id),
                 }
             )
+        finally:
+            conn.close()
+
+    def forge_journal(self) -> dict:
+        """Un dossier par exemplaire forgemagé : runes passées, coût, et marge une fois l'objet vendu."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, names, icons = state["ws"], state["effects"], state["icons"]
+            tax = ws.calculator.tax
+
+            def price_of(item_id: int) -> float | None:
+                ref = ws.prices.get(item_id)
+                return ref.price if ref is not None else None
+
+            fmjournal.freeze_prices(conn, price_of)
+            units = fmjournal.purchase_units(conn)
+            on_sale = dict(conn.execute("SELECT uid, price FROM my_sales"))
+            order = state["priorities"]
+
+            def label(item_id: int) -> str:
+                item = ws.items.get(item_id)
+                return item.name if item else f"#{item_id}"
+
+            dossiers = []
+            overall: dict[int, fmjournal.RuneLine] = {}
+            for d in fmjournal.load(conn):
+                real = fmjournal.real_rune_cost(d, units)
+                if d.base_cost is not None:
+                    base, base_source = d.base_cost, "manual"
+                elif (bought := fmjournal.base_purchase(conn, d)) is not None:
+                    base, base_source = bought
+                elif (crafted := forge.craft_cost(ws, d.item_id)) is not None:
+                    base, base_source = crafted, "craft"
+                else:
+                    base, base_source = price_of(d.item_id), "market"
+                    if base is None:
+                        base_source = None
+                if d.sold_price is not None:
+                    status, sale, sale_ts = "sold", d.sold_price, d.sold_at
+                elif d.uid in on_sale:
+                    status, sale, sale_ts = "listed", on_sale[d.uid], d.listed_at
+                else:
+                    reference = ws.prices.get(d.item_id)
+                    status, sale, sale_ts = "kept", reference.price if reference else None, None
+                rune_cost = d.rune_cost
+                margin = sale * (1 - tax) - base - rune_cost if sale is not None and base is not None else None
+                ids = sorted(set(d.after) | set(d.before or {}), key=lambda i: (order.get(i, 1_000_000), i))
+                for line in d.runes.values():
+                    total = overall.setdefault(line.rune_id, fmjournal.RuneLine(line.rune_id))
+                    for attr in ("count", "sc", "sn", "ec", "cost", "priced"):
+                        setattr(total, attr, getattr(total, attr) + getattr(line, attr))
+                dossiers.append(
+                    {
+                        "uid": d.uid, "item_id": d.item_id, "name": label(d.item_id), "icon": icons.get(d.item_id),
+                        "type": state["meta"].get(d.item_id, (None, None))[0],
+                        "first_ts": d.first_ts, "last_ts": d.last_ts, "passes": d.passes, "sc": d.sc, "sn": d.sn, "ec": d.ec,
+                        "duration_s": d.duration_s, "pool": d.pool,
+                        "rune_cost": rune_cost, "unpriced": d.unpriced,
+                        "real_cost": real[0] if real else None, "real_passes": real[1] if real else 0,
+                        "base_cost": base, "base_source": base_source,
+                        "status": status, "sale": sale, "sale_ts": sale_ts, "tax": sale * tax if sale is not None else None,
+                        "margin": margin,
+                        "runes": [
+                            {
+                                "id": line.rune_id, "name": label(line.rune_id), "icon": icons.get(line.rune_id),
+                                "count": line.count, "sc": line.sc, "sn": line.sn, "ec": line.ec, "cost": line.cost,
+                                "unit": line.cost / line.priced if line.priced else None, "bought": units.get(line.rune_id),
+                            }
+                            for line in sorted(d.runes.values(), key=lambda l: -l.cost)
+                        ],
+                        "lines": [
+                            {
+                                "id": i, "name": names.get(i, f"effet {i}"), "asset": state["assets"].get(i),
+                                "before": d.before.get(i, 0) if d.before is not None else None, "after": d.after.get(i, 0),
+                            }
+                            for i in ids
+                            if i not in MARKERS
+                        ],
+                    }
+                )  # fmt: skip
+            return clean(
+                {
+                    "now": time.time(), "tax": tax, "dossiers": dossiers,
+                    "runes": [
+                        {
+                            "id": line.rune_id, "name": label(line.rune_id), "icon": icons.get(line.rune_id),
+                            "count": line.count, "sc": line.sc, "sn": line.sn, "ec": line.ec, "cost": line.cost,
+                            "unit": line.cost / line.priced if line.priced else None, "bought": units.get(line.rune_id),
+                        }
+                        for line in sorted(overall.values(), key=lambda l: -l.cost)
+                    ],
+                }
+            )  # fmt: skip
+        finally:
+            conn.close()
+
+    def set_forge_base_cost(self, uid: int, cost: int | None) -> dict:
+        conn = self.connect()
+        try:
+            db.set_fm_base_cost(conn, uid, cost)
+            return {"uid": uid, "base_cost": cost}
         finally:
             conn.close()
 

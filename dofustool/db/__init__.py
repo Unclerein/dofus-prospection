@@ -224,9 +224,47 @@ CREATE TABLE IF NOT EXISTS trades (
     kind      TEXT NOT NULL,     -- 'sale' ou 'purchase'
     item_id   INTEGER NOT NULL,
     quantity  INTEGER NOT NULL,  -- taille du lot
-    price     INTEGER NOT NULL   -- prix du lot entier
+    price     INTEGER NOT NULL,  -- prix du lot entier
+    ref       INTEGER            -- achat : numéro annoncé par le jeu ; vente : identifiant du lot parti, s'il est connu
 );
 CREATE INDEX IF NOT EXISTS trades_ts ON trades (ts);
+-- Kamas des ventes conclues hors ligne, tels que le jeu les annonce à la connexion (total en attente en banque).
+-- delta : ce qui s'est ajouté depuis l'annonce précédente ; attributed : 1 quand les lots vendus ont été retrouvés.
+CREATE TABLE IF NOT EXISTS offline_sales (
+    source_id  INTEGER PRIMARY KEY,
+    ts         REAL NOT NULL,
+    total      INTEGER NOT NULL,
+    delta      INTEGER NOT NULL,
+    attributed INTEGER NOT NULL DEFAULT 0
+);
+-- Passages de rune en forgemagie. Donnée personnelle, jamais partagée.
+CREATE TABLE IF NOT EXISTS fm_passes (
+    source_id   INTEGER PRIMARY KEY,
+    ts          REAL NOT NULL,
+    uid         INTEGER NOT NULL,  -- identifiant de l'exemplaire travaillé
+    item_id     INTEGER NOT NULL,
+    rune_id     INTEGER NOT NULL,
+    passed      INTEGER NOT NULL,  -- 1 : la rune est passée
+    lost        INTEGER,           -- 1 : d'autres lignes ont baissé ; NULL : état d'avant inconnu
+    pool        REAL,              -- puits après le passage
+    pool_change INTEGER NOT NULL,  -- 0 inchangé, 1 en hausse, 2 en baisse
+    rune_price  REAL               -- prix unitaire de la rune, figé à la première consultation du journal
+);
+CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
+-- Un dossier par exemplaire forgemagé : ses jets avant et après, et ce qu'il est devenu.
+CREATE TABLE IF NOT EXISTS fm_items (
+    uid          INTEGER PRIMARY KEY,
+    item_id      INTEGER NOT NULL,
+    first_ts     REAL NOT NULL,
+    last_ts      REAL NOT NULL,
+    before       TEXT,     -- effets avant le premier passage (JSON), s'ils ont été vus
+    after        TEXT NOT NULL,
+    base_cost    INTEGER,  -- prix de l'objet de base saisi à la main
+    listed_price INTEGER,
+    listed_at    REAL,
+    sold_price   INTEGER,
+    sold_at      REAL
+);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -253,6 +291,9 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
     if columns and "category_id" not in columns:  # renseignée au prochain import des données statiques
         conn.execute("ALTER TABLE items ADD COLUMN category_id INTEGER")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+    if columns and "ref" not in columns:  # renseignée pour les anciens achats au prochain rejeu de l'archive
+        conn.execute("ALTER TABLE trades ADD COLUMN ref INTEGER")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -385,10 +426,22 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
                 f"SELECT DISTINCT market FROM my_sales WHERE market != ? AND item_id IN ({marks})", (listing.market, *ids)
             )
         ]
+        listed = {s.uid for s in listing.sales}
+        gone = [
+            row
+            for market in (listing.market, *same)
+            for row in conn.execute("SELECT uid, item_id, lot, price FROM my_sales WHERE market = ?", (market,))
+            if row[0] not in listed
+        ]
+        _attribute_offline(conn, gone, row[0] if row is not None else captured_at, captured_at)
         for market in same:
             conn.execute("DELETE FROM my_sales WHERE market = ?", (market,))
             conn.execute("DELETE FROM my_sales_meta WHERE market = ?", (market,))
         conn.execute("DELETE FROM my_sales WHERE market = ?", (listing.market,))
+        conn.executemany(
+            "UPDATE fm_items SET listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ? AND sold_at IS NULL",
+            ((s.price, captured_at, s.uid) for s in listing.sales),
+        )
         conn.executemany(
             "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
             ((listing.market, s.uid, s.item_id, s.lot, s.price, s.remaining_s, captured_at) for s in listing.sales),
@@ -405,10 +458,13 @@ def save_trade(conn: sqlite3.Connection, source_id: int, trade, ts: float) -> bo
     """
     with conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO trades VALUES (?, ?, ?, ?, ?, ?)",
-            (source_id, ts, trade.kind, trade.item_id, trade.quantity, trade.price),
+            "INSERT OR IGNORE INTO trades VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (source_id, ts, trade.kind, trade.item_id, trade.quantity, trade.price, trade.ref or None),
         )
         if not cur.rowcount:
+            # Achat enregistré avant que son numéro ne soit lu : le rejeu de l'archive le complète.
+            if trade.ref:
+                conn.execute("UPDATE trades SET ref = ? WHERE source_id = ? AND ref IS NULL", (trade.ref, source_id))
             return False
         if trade.kind == "sale":
             # Parmi mes lots identiques relevés avant cette vente, un seul part : le plus proche de l'expiration.
@@ -419,7 +475,130 @@ def save_trade(conn: sqlite3.Connection, source_id: int, trade, ts: float) -> bo
             ).fetchone()
             if lot is not None:
                 conn.execute("DELETE FROM my_sales WHERE market = ? AND uid = ?", lot)
+                conn.execute("UPDATE trades SET ref = ? WHERE source_id = ?", (lot[1], source_id))
+                _mark_fm_sold(conn, lot[1], trade.price, ts)
     return True
+
+
+def _mark_fm_sold(conn: sqlite3.Connection, uid: int, price: int, ts: float) -> None:
+    conn.execute("UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE uid = ? AND sold_at IS NULL", (price, ts, uid))
+
+
+# Au-delà, trop de combinaisons de lots donnent la même somme pour en retenir une (et une mise à jour
+# du jeu renumérote tous les lots d'un coup : ils semblent alors tous partis).
+MAX_OFFLINE_LOTS = 16
+
+
+def _subset(lots: list[tuple], amount: int) -> list[tuple] | None:
+    """Les lots (uid, objet, taille, prix) dont les prix font exactement ce montant, si une seule réponse existe.
+
+    Deux lots identiques sont interchangeables : ils ne font pas deux réponses.
+    """
+    if not lots or len(lots) > MAX_OFFLINE_LOTS:
+        return None
+    found: dict[tuple, list[tuple]] = {}
+    for mask in range(1, 1 << len(lots)):
+        picked = [lot for bit, lot in enumerate(lots) if mask >> bit & 1]
+        if sum(lot[3] for lot in picked) == amount:
+            found.setdefault(tuple(sorted(lot[1:] for lot in picked)), picked)
+            if len(found) > 1:
+                return None
+    return next(iter(found.values()), None)
+
+
+def _attribute_offline(conn: sqlite3.Connection, gone: list[tuple], since: float, ts: float) -> None:
+    """Rapproche les lots disparus d'un relevé de mes ventes des kamas gagnés hors ligne.
+
+    N'inscrit une vente que si les prix des lots font le montant au kama près, d'une seule façon :
+    un lot retiré à la main ou expiré ne doit pas passer pour une vente.
+    """
+    # Une vente conclue entre deux relevés a été annoncée à une connexion située entre les deux.
+    pending = conn.execute(
+        "SELECT source_id, ts, delta FROM offline_sales WHERE attributed = 0 AND delta > 0 AND ts > ? AND ts <= ? ORDER BY ts",
+        (since, ts),
+    ).fetchall()
+    if not pending or not gone:
+        return
+    # D'abord annonce par annonce, pour dater chaque vente de la bonne connexion ; sinon le tout d'un bloc.
+    plan, left = [], list(gone)
+    for source_id, at, delta in pending:
+        picked = _subset(left, delta)
+        if picked is not None:
+            plan.append(([source_id], at, picked))
+            left = [lot for lot in left if lot not in picked]
+    if len(plan) < len(pending):
+        done = {source_id for sources, _, _ in plan for source_id in sources}
+        rest = [row for row in pending if row[0] not in done]
+        picked = _subset(left, sum(delta for _, _, delta in rest))
+        if picked is not None:
+            plan.append(([row[0] for row in rest], rest[-1][1], picked))
+    for sources, at, picked in plan:
+        source_id = sources[-1]
+        for rank, (uid, item_id, lot, price) in enumerate(picked):
+            # Numéro négatif : une vente déduite, qu'aucun message du jeu n'annonce.
+            conn.execute(
+                "INSERT OR IGNORE INTO trades VALUES (?, ?, 'sale', ?, ?, ?, ?)",
+                (-(source_id * 100 + rank), at, item_id, lot, price, uid),
+            )
+            _mark_fm_sold(conn, uid, price, at)
+        marks = ",".join("?" * len(sources))
+        conn.execute(f"UPDATE offline_sales SET attributed = 1 WHERE source_id IN ({marks})", sources)
+
+
+def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts: float) -> int:
+    """Enregistre le total des ventes hors ligne annoncé par le jeu. Renvoie ce qui s'y est ajouté (0 si déjà connu).
+
+    Le total ne fait que monter jusqu'à ce que le joueur retire des kamas de sa banque : il repart alors de zéro.
+    """
+    previous = conn.execute(
+        "SELECT total FROM offline_sales WHERE ts <= ? AND source_id != ? ORDER BY ts DESC, source_id DESC LIMIT 1", (ts, source_id)
+    ).fetchone()
+    if previous is None:
+        delta = 0  # première annonce connue : on ne sait pas ce qui s'y est ajouté, elle sert de point de départ
+    else:
+        delta = total - previous[0] if total >= previous[0] else total
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO offline_sales VALUES (?, ?, ?, ?, ?)", (source_id, ts, total, delta, int(delta == 0))
+        )
+    return delta if cur.rowcount else 0
+
+
+def save_fm_pass(conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before) -> bool:
+    """Enregistre un passage de rune (messages.fm.Result). before : effets de l'objet juste avant, s'ils sont connus.
+
+    Renvoie False s'il était déjà connu.
+    """
+    obj = result.object
+    after = {effect_id: value for effect_id, value in obj.effects if value is not None}
+    lost = None
+    if before is not None:
+        lost = int(any(value > after.get(effect_id, 0) for effect_id, value in before if value is not None and value > 0))
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (source_id, ts, obj.uid, obj.item_id, rune_id, int(result.passed), lost, result.pool, result.pool_change),
+        )
+        if not cur.rowcount:
+            return False
+        conn.execute(
+            "INSERT INTO fm_items (uid, item_id, first_ts, last_ts, before, after) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (uid) DO UPDATE SET "
+            " before = CASE WHEN excluded.first_ts < first_ts THEN excluded.before ELSE before END, "
+            " after = CASE WHEN excluded.last_ts >= last_ts THEN excluded.after ELSE after END, "
+            " first_ts = MIN(first_ts, excluded.first_ts), last_ts = MAX(last_ts, excluded.last_ts)",
+            (
+                obj.uid, obj.item_id, ts, ts,
+                json.dumps([list(e) for e in before]) if before is not None else None,
+                json.dumps([list(e) for e in obj.effects]),
+            ),
+        )  # fmt: skip
+    return True
+
+
+def set_fm_base_cost(conn: sqlite3.Connection, uid: int, cost: int | None) -> None:
+    with conn:
+        conn.execute("UPDATE fm_items SET base_cost = ? WHERE uid = ?", (cost, uid))
 
 
 def save_lot_update(conn: sqlite3.Connection, sale, ts: float) -> None:
@@ -434,6 +613,10 @@ def save_lot_update(conn: sqlite3.Connection, sale, ts: float) -> None:
         conn.execute(
             "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?)",
             (row[0], sale.uid, sale.item_id, sale.lot, sale.price, sale.remaining_s, ts),
+        )
+        conn.execute(
+            "UPDATE fm_items SET listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ? AND sold_at IS NULL",
+            (sale.price, ts, sale.uid),
         )
 
 

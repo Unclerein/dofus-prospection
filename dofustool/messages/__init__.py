@@ -16,7 +16,30 @@ def runtime_keymap_path() -> Path:
     if not RUNTIME_KEYMAP_PATH.exists():
         RUNTIME_KEYMAP_PATH.parent.mkdir(parents=True, exist_ok=True)
         RUNTIME_KEYMAP_PATH.write_bytes(KEYMAP_PATH.read_bytes())
+    else:
+        _add_new_messages(RUNTIME_KEYMAP_PATH)
     return RUNTIME_KEYMAP_PATH
+
+
+def _add_new_messages(path: Path) -> None:
+    """Ajoute à la table de ce PC les messages qu'une mise à jour du code vient d'apprendre à décoder.
+
+    Seulement si les deux tables décrivent le même build du jeu (mêmes prix moyens) : sinon les clés
+    livrées sont celles d'un autre build, et la capture retrouvera ces messages par leur structure.
+    """
+    try:
+        shipped = json.loads(KEYMAP_PATH.read_text(encoding="utf-8"))
+        local = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    missing = [name for name in shipped if name not in local]
+    if not missing or local.get("avg_prices") != shipped.get("avg_prices"):
+        return
+    for name in missing:
+        local[name] = shipped[name]
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(local, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    temp.replace(path)
 
 
 def load_runtime_keymap() -> dict[str, "Mapping"]:

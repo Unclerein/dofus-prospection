@@ -1,6 +1,7 @@
 """Identification automatique des messages après une mise à jour du jeu. Données synthétiques uniquement."""
 import json
 import logging
+import struct
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -23,7 +24,9 @@ from .test_protocol import REQUEST, any_, framed, ld, varint, vi
 ITEMS = set(range(1000, 4000))
 JOBS = {2, 11, 13, 15, 16, 24, 26, 27, 28, 36, 41, 44, 48, 60, 62, 63, 64, 65, 74, 79}
 EFFECTS = {111, 112, 115, 119, 123, 124, 125, 138, 174, 176}
-CTX = identify.Context(ITEMS, JOBS, EFFECTS, {i: 500 for i in ITEMS})
+RUNES = set(range(3900, 3950))
+OFFLINE_TOTAL = 150_000
+CTX = identify.Context(ITEMS, JOBS, EFFECTS, {i: 500 for i in ITEMS}, RUNES, OFFLINE_TOTAL)
 N = avg_prices.MIN_ENTRIES + 100
 T0 = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
 CHOSEN = 52_000_000_001
@@ -40,6 +43,9 @@ BUILDS = [
         "my_sales": {"entries": 2, "ref": 1, "uid": 1, "item_id": 2, "lot": 3, "price": 2, "remaining": 3},
         "info_text": {"id": 2, "params": 4},
         "my_sale_update": {"price": 1, "ref": 2, "remaining": 3, "item_id": 1, "uid": 3, "lot": 4},
+        "fm_object": {"wrap": 3, "object": 1, "quantity": 3, "item_id": 4, "uid": 5, "effects": 7, "effect_value": 5, "effect_id": 10},
+        "fm_result": {"status": 1, "result": 2, "pool": 2, "pool_change": 3, "object": 4, "quantity": 3, "item_id": 4, "uid": 5, "effects": 7, "effect_value": 5, "effect_id": 10},
+        "offline_sales": {"total": 1},
     },
     {
         "avg_prices": {"entries": 3, "item_id": 1, "price": 2},
@@ -51,6 +57,9 @@ BUILDS = [
         "my_sales": {"entries": 4, "ref": 3, "uid": 2, "item_id": 3, "lot": 1, "price": 5, "remaining": 1},
         "info_text": {"id": 1, "params": 3},
         "my_sale_update": {"price": 2, "ref": 1, "remaining": 4, "item_id": 2, "uid": 1, "lot": 3},
+        "fm_object": {"wrap": 2, "object": 4, "quantity": 1, "item_id": 2, "uid": 6, "effects": 3, "effect_value": 2, "effect_id": 1},
+        "fm_result": {"status": 3, "result": 1, "pool": 5, "pool_change": 1, "object": 2, "quantity": 1, "item_id": 2, "uid": 6, "effects": 3, "effect_value": 2, "effect_id": 1},
+        "offline_sales": {"total": 4},
     },
 ]
 
@@ -141,6 +150,23 @@ def sale_update_body(f, uid=6_100_000, item=1500, lot=10, price=4_900, equipment
     return vi(f["price"], price) + ld(f["ref"], ref) + vi(f["remaining"], 2_419_200)
 
 
+def fm_item(f, item, uid, effects, quantity=1) -> bytes:
+    out = vi(f["quantity"], quantity) + vi(f["item_id"], item) + vi(f["uid"], uid)
+    return out + b"".join(ld(f["effects"], vi(f["effect_value"], value) + vi(f["effect_id"], effect_id)) for effect_id, value in effects)
+
+
+def fm_object_body(f, item=3907, uid=2_500_001, effects=((115, 1),)) -> bytes:
+    """Objet posé sur l'atelier : une rune par défaut."""
+    return ld(f["wrap"], ld(f["object"], fm_item(f, item, uid, effects)) + vi(free(f)[0], 63))
+
+
+def fm_result_body(f, passed=True, pool=12.5, change=1, item=1500, uid=3_400_001, effects=((125, 366), (119, 40), (112, 5), (115, 3))) -> bytes:
+    """Résultat d'un passage : état, puits (non transmis s'il est vide), sens de variation, objet après le passage."""
+    reliquat = varint(f["pool"] << 3 | 5) + struct.pack("<f", pool) if pool else b""
+    inner = reliquat + vi(f["pool_change"], change) + ld(f["object"], fm_item(f, item, uid, effects))
+    return vi(f["status"], 2 if passed else 1) + ld(f["result"], inner)
+
+
 BODIES = {
     "avg_prices": avg_body, "inventory": storage_body, "job_levels": jobs_body, "character_list": characters_body,
     "market_history": market_body, "my_sales": sales_body,
@@ -203,6 +229,11 @@ def archive_with(build, keys, bank_after=600.0, with_equipment=True) -> tuple[Ar
         text_body(text, 36, "Un-Nom"), text_body(text, 193, 2026, 10, 7, 18, 56), text_body(text, 21, 1, 23_726),
     )):
         add(1910.0 + at, S2C, "info_text", body)
+    # À la connexion, les kamas des ventes hors ligne ; plus tard, trois passages de rune sur un équipement.
+    add(1003.2, S2C, "offline_sales", vi(build["offline_sales"]["total"], OFFLINE_TOTAL))
+    for step in range(3):
+        add(1920.0 + step, S2C, "fm_object", fm_object_body(build["fm_object"]))
+        add(1920.5 + step, S2C, "fm_result", fm_result_body(build["fm_result"], pool=10.0 + step))
     # Du bruit : d'autres requêtes d'un seul entier, et des messages sans rapport.
     archive.add(conn, Message(0, 1950.0, C2S, "zz1", vi(1, 207_619_076), 1, 4))
     archive.add(conn, Message(0, 1951.0, S2C, "zz2", vi(1, 5) + ld(2, b"bonjour"), 2, None))
@@ -223,6 +254,36 @@ def test_identify_a_whole_connection(build):
     assert found["inventory"].fields == found["bank"].fields == build["inventory"]
     assert found["character_select"].fields == {"id": 1}
     assert found["hdv_listings"].fields == build["hdv_listings"] and not found["hdv_listings"].partial
+    assert found["fm_object"].fields == build["fm_object"] and found["fm_result"].fields == build["fm_result"]
+    assert found["offline_sales"].fields == build["offline_sales"]
+
+
+def test_forge_messages_need_several_passes_and_a_known_total():
+    build = BUILDS[0]
+    archive = Archive(":memory:")
+    conn = archive.open_connection(1000.0, 40000, "192.0.2.1", "test")
+    add = lambda ts, key, body: archive.add(conn, Message(0, ts, S2C, key, body, 2, None))  # noqa: E731
+    add(1003.0, "tot", vi(1, OFFLINE_TOTAL))
+    add(1003.1, "oth", vi(1, 185))  # un autre message d'un seul entier
+    # Un équipement posé puis modifié a la même forme qu'une rune posée : seul ce qui précède un résultat compte.
+    equipment = fm_object_body(build["fm_object"], item=1500, uid=3_400_001, effects=((125, 366), (119, 40)))
+    for step in range(2):
+        add(1100.0 + step, "obj", fm_object_body(build["fm_object"]))
+        add(1100.4 + step, "res", fm_result_body(build["fm_result"]))
+        add(1100.6 + step, "mod", equipment)
+    scan = identify.Scan(1000.0)
+    scan.feed(archive.db, conn)
+    wanted = ("fm_object", "fm_result", "offline_sales")
+    found, problems = identify.identify(scan, CTX, wanted)
+    assert set(found) == {"offline_sales"} and found["offline_sales"].key == "tot" and problems == {}
+    assert identify.identify(scan, identify.Context(ITEMS, JOBS, EFFECTS, {}, RUNES, None), wanted)[0] == {}  # total inconnu
+    add(1102.0, "obj", fm_object_body(build["fm_object"]))
+    add(1102.4, "res", fm_result_body(build["fm_result"], passed=False, change=0))
+    scan.feed(archive.db, conn)
+    found, _ = identify.identify(scan, CTX, wanted)
+    assert (found["fm_object"].key, found["fm_result"].key) == ("obj", "res")
+    # Sans les runes en base (données statiques absentes), rien n'est retenu.
+    assert "fm_object" not in identify.identify(scan, identify.Context(ITEMS, JOBS, EFFECTS, {}), wanted)[0]
 
 
 def test_identify_is_incremental_and_reports_ambiguity():
@@ -318,7 +379,9 @@ def test_pipeline_recovers_alone_from_a_game_update(tmp_path, caplog):
     assert len(db.character_jobs(market, CHOSEN)) == len(JOBS)
     raw = identify.read_keymap(path)
     assert raw["avg_prices"]["key"] == KEYS["avg_prices"] and raw["job_levels"]["fields"] == build["job_levels"]
-    assert identify.pending(raw) == {"bank", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update"}  # pas encore vus sur ce build
+    assert identify.pending(raw) == {
+        "bank", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update", "fm_object", "fm_result", "offline_sales",
+    }  # pas encore vus sur ce build
 
     # Plus tard le joueur ouvre l'onglet Vendre : le message est retrouvé et décodé à la vérification suivante.
     seq += len(ping)

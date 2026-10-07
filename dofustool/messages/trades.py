@@ -15,7 +15,7 @@ désormais : prix, temps restant, et la référence (objet, identifiant du lot, 
 
 Donnée personnelle : elle reste dans la base locale, et aucune fixture réelle n'est commitée.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..protocol.wire import LEN, VARINT, WireError, iter_fields
 from . import Mapping
@@ -33,6 +33,8 @@ class Trade:
     item_id: int
     quantity: int  # taille du lot
     price: int  # prix du lot entier
+    # Achat : numéro annoncé par le jeu, qui devient l'identifiant de l'objet reçu s'il ne rejoint pas une pile.
+    ref: int = field(default=0, compare=False)
 
 
 def read_text(body: bytes, mapping: Mapping) -> tuple[int, list[int | None]] | None:
@@ -61,17 +63,18 @@ def parse_text(body: bytes, mapping: Mapping) -> Trade | None:
     ident, params = text
     if ident == SOLD_TEXT:
         price, item_id, again, quantity = params
+        ref = 0
         if item_id != again:
             return None
         kind = SALE
     elif ident == BOUGHT_TEXT:
-        item_id, _, quantity, price = params
+        item_id, ref, quantity, price = params
         kind = PURCHASE
     else:
         return None
     if item_id <= 0 or quantity not in LOT_SIZES or price <= 0:
         return None
-    return Trade(kind, item_id, quantity, price)
+    return Trade(kind, item_id, quantity, price, ref)
 
 
 def parse_lot_update(body: bytes, mapping: Mapping) -> Sale | None:

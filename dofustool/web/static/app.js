@@ -706,8 +706,11 @@ function salesJournal(data, ui) {
     kpi('Vendu sur 7 j', fmt(t.sale_7d[1]), `${t.sale_7d[0]} lot${t.sale_7d[0] > 1 ? 's' : ''}`),
     kpi('Acheté sur 24 h', fmt(t.purchase_24h[1]), `${t.purchase_24h[0]} lot${t.purchase_24h[0] > 1 ? 's' : ''}`),
     kpi('Acheté sur 7 j', fmt(t.purchase_7d[1]), `${t.purchase_7d[0]} lot${t.purchase_7d[0] > 1 ? 's' : ''}`));
+  const waiting = data.offline_pending && data.offline_pending.amount > 0
+    ? h('div', { class: 'banner' }, `${fmt(data.offline_pending.amount)} kamas gagnés hors ligne (annoncés le ${when(data.offline_pending.latest)}) ne sont pas encore détaillés. Ouvre l'onglet Vendre de tes HDV en jeu : les lots partis seront retrouvés.`)
+    : null;
   if (!data.trades.length) {
-    return [kpis, h('div', { class: 'panel empty' }, 'Aucune vente ni achat capté pour l\'instant. Ils s\'ajoutent tout seuls quand le jeu les annonce, capture active.')];
+    return [kpis, waiting, h('div', { class: 'panel empty' }, 'Aucune vente ni achat capté pour l\'instant. Ils s\'ajoutent tout seuls quand le jeu les annonce, capture active.')];
   }
   const query = norm(ui.q.trim());
   const shown = data.trades.filter((r) => (!ui.kind || r.kind === ui.kind) && (!query || norm(r.name).includes(query)));
@@ -720,19 +723,19 @@ function salesJournal(data, ui) {
   const unit = (r) => r.price / r.quantity;
   const table = h('section', { class: 'panel' },
     h('div', { class: 'panel-head' }, h('h2', {}, `${shown.length} mouvement${shown.length > 1 ? 's' : ''}`),
-      h('span', { class: 'muted small' }, `Depuis le ${when(data.first_trade, false)} · en jeu seulement`)),
+      h('span', { class: 'muted small' }, `Depuis le ${when(data.first_trade, false)} · en jeu et hors ligne`)),
     shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun mouvement ne correspond.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Quand'), h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, ''), h('th', {}, 'Lot'), h('th', {}, 'Prix du lot'), h('th', {}, 'À l\'unité'), h('th', {}, 'Prix moyen du lot'))),
         h('tbody', {}, shown.slice(0, 300).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
           h('td', { class: 'l soft' }, when(r.ts)),
           h('td', { class: 'l' }, itemCell(r.icon, r.name, null, r.item_id)),
-          h('td', { class: 'l' }, h('span', { class: 'tag ' + (r.kind === 'sale' ? 'good' : 'info') }, r.kind === 'sale' ? 'vente' : 'achat')),
+          h('td', { class: 'l' }, h('span', { class: 'tag ' + (r.kind === 'sale' ? 'good' : 'info'), title: r.offline ? 'Vente conclue pendant ton absence : déduite du lot disparu et des kamas annoncés à la connexion. Heure = celle de la connexion.' : null }, r.kind === 'sale' ? (r.offline ? 'vente hors ligne' : 'vente') : 'achat')),
           h('td', { class: 'soft' }, `x${r.quantity}`),
           h('td', { class: 'strong ' + (r.kind === 'sale' ? 'gain' : '') }, `${r.kind === 'sale' ? '+' : '−'}${fmt(r.price)}`),
           h('td', { class: 'soft' }, r.quantity > 1 ? (unit(r) < 100 && !Number.isInteger(unit(r)) ? unit(r).toFixed(2).replace('.', ',') : fmt(unit(r))) : '—'),
           h('td', { class: 'soft' }, fmt(r.avg))))))));
-  return [kpis, filters, table];
+  return [kpis, waiting, filters, table];
 }
 
 // ---------------------------------------------------------------- page Métiers
@@ -831,12 +834,15 @@ async function pageJobs() {
 async function pageForge(r) {
   const options = (await cached('forgeOptions', '/api/forge/options')).items;
   const ranking = r.sub === 'ranking';
+  const journal = r.sub === 'journal';
   const tabs = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vue' },
-    h('a', { href: '#/forge', role: 'tab', 'aria-selected': String(!ranking) }, 'Par objet'),
-    h('a', { href: '#/forge/ranking', role: 'tab', 'aria-selected': String(ranking) }, 'Classement général'));
+    h('a', { href: '#/forge', role: 'tab', 'aria-selected': String(!ranking && !journal) }, 'Par objet'),
+    h('a', { href: '#/forge/ranking', role: 'tab', 'aria-selected': String(ranking) }, 'Classement général'),
+    h('a', { href: '#/forge/journal', role: 'tab', 'aria-selected': String(journal) }, 'Mon journal'));
   const head = h('header', { class: 'head' },
     h('div', {}, h('h1', {}, 'Forgemagie')),
     tabs);
+  if (journal) return [head, ...(await forgeJournal(r.id))];
   if (!options.length) {
     return [head, h('div', { class: 'panel empty' }, "Aucune annonce d'équipement connue. Ouvre la fiche d'achat d'un équipement à l'HDV pendant une capture.")];
   }
@@ -844,6 +850,117 @@ async function pageForge(r) {
   const id = r.sub === 'item' && r.id ? r.id : (S.ui.forgeItem && options.some((o) => o.id === S.ui.forgeItem) ? S.ui.forgeItem : options[0].id);
   S.ui.forgeItem = id;
   return [head, ...(await forgeItem(id, options))];
+}
+
+// ---------------------------------------------------------------- journal de forgemagie
+
+const durationLabel = (seconds) => (seconds < 90 ? `${Math.round(seconds)} s` : seconds < 5400 ? `${Math.round(seconds / 60)} min` : `${(seconds / 3600).toFixed(1).replace('.', ',')} h`);
+const unitLabel = (price) => (price === null || price === undefined ? '—' : price < 100 && !Number.isInteger(price) ? price.toFixed(1).replace('.', ',') : fmt(price));
+const BASE_SOURCES = { manual: 'saisi à la main', purchase: 'prix de ton achat', model: 'ton dernier achat de ce modèle', craft: 'coût de craft du jour', market: 'prix du marché' };
+
+/** Répartition des passages : succès critiques, succès neutres, échecs. */
+function outcomeCell(row) {
+  const passed = row.sc + row.sn;
+  return [h('div', { style: 'font-weight: 500' }, `${pct(row.count ? passed / row.count : 0)} passées`),
+    h('div', { class: 'source', title: 'Succès critiques · succès neutres · échecs' }, `${row.sc} SC · ${row.sn} SN · ${row.ec} EC`)];
+}
+
+function runeTable(runes, title, note) {
+  return h('section', { class: 'panel', 'aria-label': title },
+    h('div', { class: 'panel-head' }, h('h2', {}, title), note && h('span', { class: 'muted small' }, note)),
+    h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 760px' },
+      h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Rune'), h('th', {}, 'Passages'), h('th', {}, 'Résultat'), h('th', { title: 'Prix du marché retenu pour chaque rune passée' }, 'Prix unitaire'), h('th', {}, 'Coût'), h('th', { title: 'Prix moyen de tes achats de cette rune, pondéré par les quantités' }, "Mon prix d'achat"))),
+      h('tbody', {}, runes.map((rune) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${rune.id}`; } },
+        h('td', { class: 'l' }, itemCell(rune.icon, rune.name, null, rune.id)),
+        h('td', { style: 'font-weight: 600' }, fmt(rune.count)),
+        h('td', {}, outcomeCell(rune)),
+        h('td', { class: 'soft' }, unitLabel(rune.unit)),
+        h('td', { class: 'strong' }, fmt(rune.cost)),
+        h('td', { class: 'soft' }, unitLabel(rune.bought))))))));
+}
+
+async function forgeJournal(uid) {
+  const data = await cached('forgeJournal', '/api/forge/journal');
+  if (!data.dossiers.length) {
+    return [h('div', { class: 'panel empty' }, 'Aucun passage de rune capté pour l\'instant. Forgemage un objet, capture active : son dossier apparaîtra ici, avec chaque rune passée et son coût.')];
+  }
+  const ui = S.ui.fmJournal || (S.ui.fmJournal = { sort: { key: 'last', dir: -1 } });
+  const sold = data.dossiers.filter((d) => d.status === 'sold');
+  const passes = data.dossiers.reduce((sum, d) => sum + d.passes, 0);
+  const runeCost = data.dossiers.reduce((sum, d) => sum + d.rune_cost, 0);
+  const realized = sold.reduce((sum, d) => sum + (d.margin || 0), 0);
+  const time = data.dossiers.reduce((sum, d) => sum + d.duration_s, 0);
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Objets forgemagés', fmt(data.dossiers.length), `${sold.length} vendu${sold.length > 1 ? 's' : ''}`),
+    kpi('Runes passées', fmt(passes), time ? `en ${durationLabel(time)}` : null),
+    kpi('Coût des runes', fmt(runeCost), 'au prix du marché'),
+    kpi('Marge réalisée', sold.length ? signed(realized) : '—', sold.length ? 'sur les objets vendus' : 'aucun objet vendu pour l\'instant', sold.length ? (realized >= 0 ? 'gain' : 'warn') : ''));
+
+  const statusTag = (d) => (d.status === 'sold' ? h('span', { class: 'tag good' }, 'vendu')
+    : d.status === 'listed' ? h('span', { class: 'tag info' }, 'en vente') : h('span', { class: 'tag', title: 'Ni vendu ni en vente : prix de référence du modèle, selon le réglage des équipements' }, 'estimé'));
+  const rows = sortedBy(data.dossiers, ui.sort, {
+    name: (d) => d.name, last: (d) => d.last_ts, passes: (d) => d.passes, runes: (d) => d.rune_cost, base: (d) => d.base_cost, sale: (d) => d.sale, margin: (d) => d.margin,
+  });
+  const current = data.dossiers.find((d) => d.uid === uid) || null;
+  const table = h('section', { class: 'panel', 'aria-label': 'Dossiers' },
+    h('div', { class: 'panel-head' }, h('h2', {}, `${rows.length} objet${rows.length > 1 ? 's' : ''}`), h('span', { class: 'muted small' }, 'Clique un objet pour le détail de ses runes')),
+    h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
+      h('thead', {}, h('tr', {}, sortTh(ui.sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(ui.sort, 'last', 'Dernier passage'), sortTh(ui.sort, 'passes', 'Passages'),
+        sortTh(ui.sort, 'runes', 'Runes'), sortTh(ui.sort, 'base', 'Objet de base'), sortTh(ui.sort, 'sale', 'Prix de vente'), sortTh(ui.sort, 'margin', 'Marge', { title: 'Prix de vente, moins la taxe de mise en vente, l\'objet de base et les runes' }))),
+      h('tbody', {}, rows.map((d) => h('tr', { class: 'link' + (current && current.uid === d.uid ? ' on' : ''), onclick: () => { location.hash = `#/forge/journal/${d.uid}`; } },
+        h('td', { class: 'l' }, itemCell(d.icon, d.name, d.type, d.item_id)),
+        h('td', { class: 'soft' }, [h('div', {}, when(d.last_ts)), d.duration_s > 0 && h('div', { class: 'source' }, durationLabel(d.duration_s))]),
+        h('td', {}, [h('div', { style: 'font-weight: 600' }, fmt(d.passes)), h('div', { class: 'source', title: 'Succès critiques · succès neutres · échecs' }, `${d.sc} SC · ${d.sn} SN · ${d.ec} EC`)]),
+        h('td', {}, [h('div', { class: 'strong' }, fmt(d.rune_cost)), d.unpriced > 0 && h('div', { class: 'source warn' }, `${d.unpriced} sans prix`)]),
+        h('td', {}, d.base_cost === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, fmt(d.base_cost)), h('div', { class: 'source' }, BASE_SOURCES[d.base_source] || '')]),
+        h('td', {}, [h('div', { class: 'soft' }, fmt(d.sale)), h('div', {}, statusTag(d))]),
+        h('td', { class: 'strong ' + (d.margin === null ? '' : d.margin >= 0 ? 'gain' : 'warn') }, d.margin === null ? '—' : [signed(d.margin), d.status !== 'sold' && h('div', { class: 'source' }, d.status === 'listed' ? 'si vendu à ce prix' : 'estimée')])))))));
+
+  const out = [kpis, table];
+  if (current) out.push(...forgeDossier(current, data));
+  out.push(runeTable(data.runes, 'Toutes mes runes', `${fmt(passes)} passages · ton taux de réussite réel par rune`));
+  return out;
+}
+
+function forgeDossier(d, data) {
+  let draft = d.base_source === 'manual' ? d.base_cost : null;
+  const save = async (cost) => {
+    try {
+      await api('/api/forge/journal/base', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid: d.uid, cost }) });
+      delete S.cache.forgeJournal;
+      refresh();
+    } catch (error) { notify(`Prix non enregistré : ${error.message}`); }
+  };
+  const real = d.real_cost !== null && d.real_passes === d.passes ? d.real_cost : null;
+  const money = (label, value, hint, cls) => h('div', { class: 'kpi' }, h('div', { class: 'label' }, label), h('div', { class: 'value ' + (cls || '') }, value), hint && h('div', { class: 'hint' }, hint));
+  const summary = h('section', { class: 'panel pad', 'aria-label': 'Bilan' },
+    h('div', { class: 'panel-head', style: 'padding: 0 0 12px' }, h('h2', {}, d.name),
+      h('span', { class: 'muted small' }, `du ${when(d.first_ts)} au ${when(d.last_ts)} · ${fmt(d.passes)} passages` + (d.duration_s ? ` en ${durationLabel(d.duration_s)}` : '') + (d.pool !== null ? ` · puits ${String(Math.round(d.pool * 10) / 10).replace('.', ',')}` : ''))),
+    h('div', { class: 'kpis' },
+      money('Objet de base', fmt(d.base_cost), BASE_SOURCES[d.base_source] || 'prix inconnu'),
+      money('Runes', fmt(d.rune_cost), real !== null ? `${fmt(real)} à ton prix d'achat` : d.real_cost !== null ? `${d.real_passes} passages sur ${d.passes} couverts par tes achats` : 'au prix du marché'),
+      money(d.status === 'sold' ? 'Vendu' : d.status === 'listed' ? 'En vente à' : 'Valeur estimée', fmt(d.sale), d.sale !== null ? `taxe de mise en vente ${fmt(d.tax)}` + (d.status === 'sold' && d.sale_ts ? ` · ${when(d.sale_ts)}` : '') : 'aucun prix de référence'),
+      money(d.status === 'sold' ? 'Marge' : 'Marge estimée', d.margin === null ? '—' : signed(d.margin), d.margin !== null && d.duration_s > 600 ? `${signed(d.margin / (d.duration_s / 3600))} par heure de forgemagie` : null, d.margin === null ? '' : d.margin >= 0 ? 'gain' : 'warn')),
+    h('div', { class: 'filters', style: 'margin-top: 14px; align-items: flex-end' },
+      h('div', { class: 'field', style: 'flex: 0 1 220px' }, h('label', { for: 'fm-base' }, "Prix payé pour l'objet de base"),
+        h('input', { id: 'fm-base', type: 'number', min: 0, step: 1, value: draft === null ? '' : draft, placeholder: d.base_cost === null ? 'inconnu' : fmt(d.base_cost), class: draft === null ? '' : 'set',
+          oninput: (e) => { draft = e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value) || 0)); } })),
+      h('button', { class: 'btn', onclick: () => save(draft) }, 'Enregistrer'),
+      d.base_source === 'manual' && h('button', { class: 'btn quiet', onclick: () => save(null) }, 'Revenir au prix calculé')));
+
+  const changed = d.lines.filter((l) => l.before === null || l.before !== l.after);
+  const delta = (l) => (l.before === null ? null : l.after - l.before);
+  const lines = h('section', { class: 'panel', 'aria-label': 'Jets' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Jets'), h('span', { class: 'muted small' }, d.lines.some((l) => l.before !== null) ? `${changed.length} ligne${changed.length > 1 ? 's' : ''} modifiée${changed.length > 1 ? 's' : ''}` : "état d'avant non capté")),
+    h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 420px' },
+      h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Caractéristique'), h('th', {}, 'Avant'), h('th', {}, 'Après'), h('th', {}, 'Écart'))),
+      h('tbody', {}, d.lines.map((l) => h('tr', {},
+        h('td', { class: 'l' }, statIcon(l.asset), ' ', l.name),
+        h('td', { class: 'soft' }, l.before === null ? '—' : fmt(l.before)),
+        h('td', { style: 'font-weight: 600' }, fmt(l.after)),
+        h('td', { class: delta(l) > 0 ? 'gain' : delta(l) < 0 ? 'warn' : 'muted' }, delta(l) === null || delta(l) === 0 ? '—' : signed(delta(l)))))))));
+
+  return [summary, h('div', { class: 'split' }, h('div', { style: 'flex: 2 1 520px; min-width: 0' }, runeTable(d.runes, 'Runes passées sur cet objet', null)), h('div', { style: 'flex: 1 1 320px; min-width: 0' }, lines))];
 }
 
 function matches(listing, f) {
@@ -1713,6 +1830,12 @@ async function startTour() {
         point('Mes critères :', 'ceux que tu as enregistrés objet par objet.'),
         point('Point de départ :', 'acheter l\'objet de base, ou le fabriquer.')),
       h('p', { class: 'muted small' }, 'Les marges sont avant runes. « 1 seule annonce » signale un prix fragile : un seul vendeur le demande.')] },
+    { target: 'forge', hash: '#/forge/journal', title: 'Forgemagie : ton journal', body: () => [
+      h('p', {}, 'Chaque rune que tu passes en jeu est notée toute seule, capture active. Un dossier par objet travaillé.'),
+      h('ul', { class: 'tour-points' },
+        point('Runes :', 'combien de chaque, leur coût au prix du marché, et ton taux de réussite réel.'),
+        point('Objet de base :', 'ton prix d\'achat s\'il a été capté, sinon le coût de craft. Tu peux le saisir.'),
+        point('Marge :', 'calculée dès que l\'objet est en vente, définitive quand il est vendu, même hors ligne.'))] },
     tab('trends', 'Tendances', 'Les objets vendus nettement sous ou au-dessus de leur prix habituel.'),
     tab('status', 'État', 'La capture tourne-t-elle, que vaut le prix estimé, où en est le partage avec tes amis.'),
     { title: 'C\'est parti', body: () => [

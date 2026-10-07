@@ -153,6 +153,20 @@ taille du lot, prix du lot). Ces numéros de texte ne changent pas d'un build à
 lot créé ou modifié : prix en 1, temps restant en 3, référence en 2 (objet en 1, lot en 3, taille en 4).
 Les deux sont retrouvés automatiquement, comme les autres.
 
+Forgemagie (build du 6 octobre 2026) : `kch` annonce un objet posé sur l'atelier (enveloppe en 3, objet
+en 1 : quantité en 3, modèle en 4, identifiant de l'exemplaire en 5, effets en 7 répété avec valeur en 5
+et identifiant en 10). Il arrive à chaque passage pour la rune, et une fois pour l'équipement. `kco`
+donne le résultat : état en 1 (2 = rune passée, 1 = échec), puis en 2 le puits (décimal en 2, absent
+s'il est vide), son sens de variation en 3 (0 inchangé, 1 en hausse, 2 en baisse) et l'objet après le
+passage en 4. Les deux sont retrouvés automatiquement au troisième passage de rune : la clé de l'objet
+posé est celle qui précède chaque résultat, d'autres messages ayant la même forme.
+
+Ventes hors ligne : `ita` arrive à la connexion avec, en champ 1, les kamas des ventes conclues pendant
+l'absence (vide = zéro ; remis à zéro quand on retire des kamas de la banque). Un entier seul ne se
+reconnaît pas à sa forme : la clé n'est retrouvée que si le total annoncé est égal au dernier total
+connu et vaut au moins 1 000. Sinon, la chercher à la main : un message serveur d'un seul entier, reçu
+avec l'inventaire, dont la valeur monte du prix des lots partis d'une connexion à l'autre.
+
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
 ### 3. Mettre à jour `keymap.json`

@@ -144,6 +144,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                 if match := re.fullmatch(r"/api/forge/item/(\d+)", path):
                     payload = api.forge_item(int(match[1]))
                     return self._json(payload) if payload else self._not_found()
+                if path == "/api/forge/journal":
+                    return self._json(api.forge_journal())
                 if path == "/api/forge/ranking":
                     return self._json(
                         api.forge_ranking(
@@ -204,6 +206,15 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if not isinstance(payload, dict):
                         raise ValueError("objet JSON attendu")
                     return self._json(api.save_forge_filter(int(match[1]), payload))
+                if path == "/api/forge/journal/base":
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    cost = payload.get("cost") if isinstance(payload, dict) else None
+                    if not isinstance(payload, dict) or not isinstance(payload.get("uid"), int):
+                        raise ValueError("uid attendu")
+                    if cost is not None and (not isinstance(cost, int) or isinstance(cost, bool) or not 0 <= cost <= 10**12):
+                        raise ValueError("prix invalide")
+                    return self._json(api.set_forge_base_cost(payload["uid"], cost))
                 if path == "/api/fight/harebourg":
                     length = min(int(self.headers.get("Content-Length") or 0), 16384)
                     payload = json.loads(self.rfile.read(length) or b"{}")

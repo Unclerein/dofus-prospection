@@ -107,5 +107,40 @@
       "uid": 3,
       "lot": 4
     }
+  },
+  "fm_object": {
+    "key": "kch",
+    "fields": {
+      "wrap": 3,
+      "object": 1,
+      "quantity": 3,
+      "item_id": 4,
+      "uid": 5,
+      "effects": 7,
+      "effect_value": 5,
+      "effect_id": 10
+    }
+  },
+  "fm_result": {
+    "key": "kco",
+    "fields": {
+      "status": 1,
+      "result": 2,
+      "pool": 2,
+      "pool_change": 3,
+      "object": 4,
+      "quantity": 3,
+      "item_id": 4,
+      "uid": 5,
+      "effects": 7,
+      "effect_value": 5,
+      "effect_id": 10
+    }
+  },
+  "offline_sales": {
+    "key": "ita",
+    "fields": {
+      "total": 1
+    }
   }
 }
