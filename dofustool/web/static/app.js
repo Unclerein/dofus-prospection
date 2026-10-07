@@ -87,7 +87,48 @@ function statIcon(asset) {
 }
 
 const itemCell = (iconId, name, sub, itemId) =>
-  h('div', { class: 'item-cell' }, tile(iconId, false, itemId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
+  h('div', { class: 'item-cell', ...(itemId ? hoverTip(itemId) : {}) }, tile(iconId, false, itemId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
+
+// Infobulle d'un objet au survol : ses caractéristiques de base, comme en jeu, et ses prix connus.
+const tipData = {};
+let tipWanted = null, tipTimer = null;
+
+function hoverTip(itemId) {
+  return {
+    onmouseenter: (event) => {
+      tipWanted = itemId;
+      clearTimeout(tipTimer);
+      // Petit délai : parcourir une liste ne déclenche pas une infobulle par ligne.
+      tipTimer = setTimeout(async () => {
+        if (!tipData[itemId]) tipData[itemId] = api(`/api/item/${itemId}/tip`).catch(() => { delete tipData[itemId]; return null; });
+        const data = await tipData[itemId];
+        if (data && tipWanted === itemId) showTip(event, baseTooltip(data));
+      }, 180);
+    },
+    onmousemove: (event) => { if (!$tip.hidden && tipWanted === itemId) placeTip(event); },
+    onmouseleave: () => { tipWanted = null; clearTimeout(tipTimer); $tip.hidden = true; },
+  };
+}
+
+function baseTooltip(d) {
+  const range = (line) => (line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`);
+  const row = (line, cls) => h('div', { class: 'tip-line base ' + cls }, h('span', { class: 'v' }, range(line)), h('span', { class: 'n with-ico' }, statIcon(line.asset), line.name), h('span', { class: 'r' }, ''));
+  const stats = [...d.fixed.map((line) => row(line, 'fixed')), ...d.lines.map((line) => row(line, line.max <= 0 ? 'malus' : ''))];
+  const price = (label, value, note) => (value === null || value === undefined ? null
+    : h('div', { class: 'tip-price' }, h('span', { class: 'muted' }, label), h('b', {}, fmt(value)), h('span', { class: 'muted small' }, note || '')));
+  const prices = [
+    price('Prix moyen', d.avg),
+    d.hdv && price(d.equipment ? 'HDV jet de base' : 'HDV', d.hdv.price, [lotLabel(d.hdv.lot), ago(d.hdv.ts, d.now)].filter(Boolean).join(' · ')),
+    d.hdv_any && (!d.hdv || d.hdv_any.price < d.hdv.price) && price('HDV le moins cher', d.hdv_any.price, 'exo ou over compris'),
+    d.ref && d.ref.source === 'prix estimé' && price('Prix estimé', d.ref.price),
+    price('Coût de craft', d.craft_cost),
+  ].filter(Boolean);
+  return [
+    h('div', { class: 'tip-head' }, tile(d.icon, false, d.id), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, [d.type, `niv. ${d.level}`].filter(Boolean).join(' · ')))),
+    d.equipment && h('div', { class: 'tip-lines' }, stats.length ? stats : h('div', { class: 'muted' }, d.template_known ? 'Aucune caractéristique.' : 'Caractéristiques de base pas encore récupérées.')),
+    prices.length ? h('div', { class: 'tip-prices' }, prices) : null,
+  ];
+}
 
 function kpi(label, value, hint, cls) {
   return h('div', { class: 'kpi' }, h('div', { class: 'label' }, label), h('div', { class: 'value ' + (cls || '') }, value), hint && h('div', { class: 'hint' }, hint));
@@ -128,7 +169,7 @@ function sortedBy(rows, sort, getters) {
 /** Libellé court de la source d'un prix, avec la taille du lot HDV d'où vient le prix unitaire. */
 function shortSource(source, lot) {
   if (!source) return 'inconnu';
-  if (source.startsWith('HDV')) return [source.includes('sans exo') ? 'HDV de base' : 'HDV', lotLabel(lot)].filter(Boolean).join(' ');
+  if (source.startsWith('HDV')) return [source.includes('sans exo') ? 'HDV de base' : source.includes('compris') ? 'HDV exo compris' : 'HDV', lotLabel(lot)].filter(Boolean).join(' ');
   if (source.startsWith('dernier')) return 'dernière vente';
   if (source.startsWith('prix médian')) return 'médiane 24 h';
   if (source === 'prix estimé') return 'estimé';
@@ -392,8 +433,8 @@ async function pageCrafts() {
   return [
     h('header', { class: 'head' },
       h('div', {}, h('h1', {}, 'Crafts'), h('div', { class: 'lead' }, `${fmt(computable)} recettes · taxe ${Math.round((status.hdv_tax || 0) * 100)} % · clique un en-tête pour trier`)),
-      h('div', { class: 'field' }, h('span', { class: 'label', title: 'Jet de base : annonce HDV sans exo ni over, avec deux lignes perdues au plus' }, 'Prix de vente des équipements'),
-        segmented('Prix de vente des équipements', [['both', 'Jet de base, sinon prix moyen'], ['base', 'Jet de base'], ['avg', 'Prix moyen']], status.equipment_price || 'both', async (mode) => {
+      h('div', { class: 'field' }, h('span', { class: 'label', title: 'Jet de base : annonce HDV sans exo, ni over, ni ligne perdue. Le moins cher : exo, over et transcendance admis, deux lignes perdues au plus.' }, 'Prix de vente des équipements'),
+        segmented('Prix de vente des équipements', [['both', 'Jet de base, sinon prix moyen'], ['base', 'Jet de base'], ['any', 'Le moins cher, exo et over compris'], ['avg', 'Prix moyen']], status.equipment_price || 'both', async (mode) => {
           try {
             await api('/api/equipment-price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
           } catch (error) { return notify(`Non enregistré. ${error.message}`); }

@@ -474,3 +474,8 @@ table.dense .th-sort .stat-ico { margin-right: 0; }
 .tour-points { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--soft); line-height: 1.45; }
 .tour-points strong { color: var(--text); font-weight: 600; }
 .tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+/* Infobulle d'un objet de base : fourchette de chaque caractéristique, puis prix connus. */
+.tip-line.base { grid-template-columns: 78px minmax(0, 1fr) auto; }
+.tip-prices { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-strong); }
+.tip-prices .tip-price { grid-template-columns: 120px auto minmax(0, 1fr); }

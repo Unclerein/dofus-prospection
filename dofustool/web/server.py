@@ -133,6 +133,9 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.stock_crafts())
                 if path == "/api/items":
                     return self._json(api.items())
+                if match := re.fullmatch(r"/api/item/(\d+)/tip", path):
+                    payload = api.item_tip(int(match[1]))
+                    return self._json(payload) if payload else self._not_found()
                 if match := re.fullmatch(r"/api/item/(\d+)", path):
                     payload = api.item(int(match[1]))
                     return self._json(payload) if payload else self._not_found()

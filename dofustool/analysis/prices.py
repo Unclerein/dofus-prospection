@@ -9,16 +9,20 @@ from .forgemagie import MARKERS, classify
 
 HDV = "HDV, annonce la moins chère"
 HDV_PLAIN = "HDV, moins cher sans exo ni over"
+HDV_ANY = "HDV, moins cher exo et over compris"
 LAST_SALE = "dernier prix de vente"
 MEDIAN_24H = "prix médian sur 24 h"
 ESTIMATED = "prix estimé"
 AVG_PRICE = "prix moyen"
 
 EQUIPMENT = 0  # items.category_id
-# Prix de vente retenu pour un équipement : annonce « jet de base » si elle existe sinon prix moyen,
-# annonce « jet de base » seulement, ou prix moyen seulement.
-EQUIP_BOTH, EQUIP_BASE, EQUIP_AVG = "both", "base", "avg"
-EQUIP_MODES = (EQUIP_BOTH, EQUIP_BASE, EQUIP_AVG)
+# Prix de vente retenu pour un équipement :
+#   both : annonce « jet de base » si elle existe, sinon prix moyen ;
+#   base : annonce « jet de base » seulement (ni exo, ni over, ni ligne perdue) ;
+#   any  : annonce la moins chère, exo, over et transcendance compris, deux lignes perdues au plus ;
+#   avg  : prix moyen du jeu seulement.
+EQUIP_BOTH, EQUIP_BASE, EQUIP_ANY, EQUIP_AVG = "both", "base", "any", "avg"
+EQUIP_MODES = (EQUIP_BOTH, EQUIP_BASE, EQUIP_ANY, EQUIP_AVG)
 LOT_SIZES = (1, 10, 100, 1000)
 
 
@@ -69,8 +73,8 @@ class PriceBook:
 
     Ressources et consommables : annonce HDV la moins chère, puis dernier prix de vente, puis prix
     estimé (s'il est jugé fiable et que `use_estimates` est vrai), puis prix moyen.
-    Équipements : annonce HDV la moins chère « jet de base » (ni exo ni over, deux lignes perdues au
-    plus), puis prix médian sur 24 h, puis prix moyen — ou seulement l'un des deux, selon `equipment_price`.
+    Équipements : annonce HDV la moins chère « jet de base » (ni exo, ni over, ni ligne perdue), puis
+    prix médian sur 24 h, puis prix moyen — ou un seul de ces prix, selon `equipment_price`.
     Le prix d'un équipement dépend de ses jets et de sa forgemagie : une vente isolée ou une
     annonce exotique ne dit rien du prix d'un exemplaire tout juste fabriqué.
 
@@ -141,6 +145,7 @@ class PriceBook:
             if effect_id not in non_stats:
                 templates.setdefault(item_id, {})[effect_id] = (low, high)
         self._hdv: dict[int, tuple[float, str, float, int]] = {}
+        self._hdv_any: dict[int, tuple[float, str, float, int]] = {}  # équipements : toutes forgemagies
         for item_id, p1, p10, p100, p1000, effects, captured_at in conn.execute(
             "SELECT item_id, p1, p10, p100, p1000, effects, captured_at FROM hdv_current WHERE captured_at >= ?",
             (oldest,),
@@ -152,7 +157,12 @@ class PriceBook:
             if item_id in self._equipment:
                 template = templates.get(item_id)
                 listed = [tuple(e) for e in json.loads(effects) if e[0] not in non_stats]
-                if template is None or not classify(listed, template).base_like:
+                if template is None:
+                    continue
+                kind = classify(listed, template)
+                if kind.sellable and (item_id not in self._hdv_any or price < self._hdv_any[item_id][0]):
+                    self._hdv_any[item_id] = (price, HDV_ANY, captured_at, lot)
+                if not kind.plain:
                     continue
                 source = HDV_PLAIN
             else:
@@ -166,6 +176,9 @@ class PriceBook:
     def get(self, item_id: int) -> PriceRef | None:
         hdv = self._hdv.get(item_id)
         if item_id in self._equipment:
+            if self.equipment_price == EQUIP_ANY:
+                cheapest = self._hdv_any.get(item_id)
+                return PriceRef(*cheapest) if cheapest is not None else None
             if self.equipment_price != EQUIP_AVG:
                 median = self._median.get(item_id)
                 if median is not None and median[0] is not None:
@@ -206,6 +219,10 @@ class PriceBook:
     def hdv_price(self, item_id: int) -> tuple[float, str, float, int] | None:
         """(prix unitaire, nature, date du relevé, taille du lot) de l'annonce HDV retenue pour l'item, quel que soit son type."""
         return self._hdv.get(item_id)
+
+    def hdv_any(self, item_id: int) -> tuple[float, str, float, int] | None:
+        """Annonce la moins chère d'un équipement, toutes forgemagies confondues (deux lignes perdues au plus)."""
+        return self._hdv_any.get(item_id)
 
     def avg_price(self, item_id: int) -> int | None:
         """Prix moyen du jeu dans le dernier relevé."""

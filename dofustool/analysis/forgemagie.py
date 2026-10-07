@@ -19,7 +19,8 @@ MARKERS = frozenset({MODIFIED_BY, CRAFTED_BY, NO_MORE_FM})
 Template = dict[int, tuple[int, int]]
 
 
-BASE_MAX_MISSING = 2
+# Au-delà de ce nombre de lignes perdues, un exemplaire n'est plus comparable à l'objet d'origine.
+MAX_MISSING_LINES = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,12 +39,9 @@ class Classification:
         return not self.exo and not self.over and not self.missing
 
     @property
-    def base_like(self) -> bool:
-        """« Jet de base » au sens du marché : ni exo ni over, et au plus deux lignes perdues.
-
-        C'est l'exemplaire dont le prix se compare à celui d'un craft tout juste sorti.
-        """
-        return not self.exo and not self.over and len(self.missing) <= BASE_MAX_MISSING
+    def sellable(self) -> bool:
+        """Encore le même objet aux yeux d'un acheteur : exo, over ou transcendance admis, deux lignes perdues au plus."""
+        return len(self.missing) <= MAX_MISSING_LINES
 
     @property
     def perfect(self) -> bool:

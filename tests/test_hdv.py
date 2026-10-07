@@ -290,29 +290,31 @@ def test_real_keymap_reads_a_resource_and_refuses_unknown_submessages():
     assert hdv_listings.parse(ld(f["entries"], entry + ld(unknown, vi(1, 125))) + vi(f["item_id"], 289), mapping) is None
 
 
-def test_equipment_base_price_allows_two_missing_lines_and_follows_the_chosen_mode(conn):
+def test_equipment_price_modes(conn):
     template = {PA: (1, 1), VITA: (10, 20), CHANCE: (10, 20)}
-    assert classify([(PA, 1)], template).base_like and not classify([(PA, 1)], template).plain  # deux lignes perdues
-    assert not classify([], template).base_like  # trois lignes perdues : ce n'est plus un jet de base
-    assert not classify([(PA, 2), (VITA, 15), (CHANCE, 12)], template).base_like  # over
-    assert not classify([(PA, 1), (VITA, 15), (CHANCE, 12), (MODIFIED + 1, 5)], template).base_like  # exo
+    assert classify([(PA, 1)], template).sellable and not classify([(PA, 1)], template).plain  # deux lignes perdues
+    assert not classify([], template).sellable  # trois lignes perdues : ce n'est plus le même objet
+    assert classify([(PA, 2), (VITA, 15), (CHANCE, 12)], template).sellable  # un over reste vendable
 
     store(conn, 2469, [(PA, 1, 1), (VITA, 10, 20), (CHANCE, 10, 20)])
     save(
         conn,
         message(
             2469,
-            listing(2469, 1, [20_000, 0, 0, 0], []),  # trois lignes perdues : ignoré
-            listing(2469, 2, [50_000, 0, 0, 0], [(PA, 1)]),  # deux lignes perdues : retenu
-            listing(2469, 3, [70_000, 0, 0, 0], [(PA, 1), (VITA, 15), (CHANCE, 12)]),
+            listing(2469, 1, [20_000, 0, 0, 0], []),  # trois lignes perdues : jamais retenu
+            listing(2469, 2, [50_000, 0, 0, 0], [(PA, 1)]),  # deux lignes perdues : « le moins cher », pas un jet de base
+            listing(2469, 3, [60_000, 0, 0, 0], [(PA, 2), (VITA, 15), (CHANCE, 12)]),  # over
+            listing(2469, 4, [70_000, 0, 0, 0], [(PA, 1), (VITA, 15), (CHANCE, 12)]),  # jet de base
         ),
     )
     modes = lambda mode: PriceBook(conn, NOW, 24, equipment_price=mode)  # noqa: E731
-    assert (modes("both").get(2469).price, modes("both").get(2469).source) == (50_000, HDV_PLAIN)
-    assert (modes("base").get(2469).price, modes("base").get(2469).source) == (50_000, HDV_PLAIN)
+    assert (modes("both").get(2469).price, modes("both").get(2469).source) == (70_000, HDV_PLAIN)
+    assert (modes("base").get(2469).price, modes("base").get(2469).source) == (70_000, HDV_PLAIN)
+    assert (modes("any").get(2469).price, modes("any").get(2469).source) == (50_000, "HDV, moins cher exo et over compris")
     assert (modes("avg").get(2469).price, modes("avg").get(2469).source) == (394_000, AVG_PRICE)
-    # Un équipement jamais relevé à l'HDV : prix moyen, sauf si l'on ne veut que des jets de base.
+    assert modes("both").hdv_any(2469)[0] == 50_000 and modes("both").hdv_price(2469)[0] == 70_000
+    # Un équipement jamais relevé à l'HDV : prix moyen, sauf si l'on ne veut que des annonces.
     assert modes("both").get(3000).source == AVG_PRICE and modes("avg").get(3000).price == 50_000
-    assert modes("base").get(3000) is None
+    assert modes("base").get(3000) is None and modes("any").get(3000) is None
     # Les ressources ne sont pas concernées par ce réglage.
-    assert modes("base").get(289).source == AVG_PRICE and modes("inconnu").equipment_price == "both"
+    assert modes("any").get(289).source == AVG_PRICE and modes("inconnu").equipment_price == "both"

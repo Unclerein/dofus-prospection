@@ -408,7 +408,7 @@ class Api:
         """Change le prix de vente retenu pour les équipements (réglage de config.toml)."""
         import dataclasses
 
-        if mode not in ("both", "base", "avg"):
+        if mode not in ("both", "base", "any", "avg"):
             raise ValueError("mode inconnu")
         config.save(dataclasses.replace(config.load(self.config_path), equipment_price=mode), self.config_path)
         return {"equipment_price": mode}
@@ -417,6 +417,52 @@ class Api:
         """Valide les valeurs saisies et réécrit config.toml. ValueError si l'une est invalide."""
         config.save(config.from_values(values), self.config_path)
         return self.config()
+
+    def item_tip(self, item_id: int) -> dict | None:
+        """De quoi afficher l'infobulle d'un objet : ses caractéristiques de base et ses prix connus."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, names = state["ws"], state["effects"]
+            item = ws.items.get(item_id)
+            if item is None:
+                return None
+            equipment = ws.prices.is_equipment(item_id)
+            lines, fixed, known = [], [], True
+            if equipment:
+                known = self.ensure_template(conn, item_id)
+                rank = lambda effect_id: (state["priorities"].get(effect_id, 1_000_000), effect_id)  # noqa: E731
+                line = lambda effect_id, bounds: {  # noqa: E731
+                    "name": names.get(effect_id, f"effet {effect_id}"), "asset": state["assets"].get(effect_id),
+                    "min": bounds[0], "max": bounds[1],
+                }
+                template = forge.load_template(conn, item_id) or {}
+                lines = [line(e, template[e]) for e in sorted(template, key=rank)]
+                fixed_lines = forge.load_fixed_lines(conn, item_id)
+                fixed = [line(e, fixed_lines[e]) for e in sorted(fixed_lines, key=rank)]
+            ref = ws.prices.get(item_id) if item.exchangeable else None
+            base, cheapest = ws.prices.hdv_price(item_id), ws.prices.hdv_any(item_id)
+            return clean(
+                {
+                    "id": item_id,
+                    "name": item.name,
+                    "level": item.level,
+                    "type": state["meta"].get(item_id, (None, None))[0],
+                    "icon": state["icons"].get(item_id),
+                    "equipment": equipment,
+                    "template_known": known,
+                    "lines": lines,
+                    "fixed": fixed,
+                    "avg": ws.prices.avg_price(item_id),
+                    "ref": {"price": ref.price, "source": ref.source, "lot": ref.lot, "ts": ref.ts} if ref else None,
+                    "hdv": {"price": base[0], "lot": base[3], "ts": base[2]} if base else None,
+                    "hdv_any": {"price": cheapest[0], "ts": cheapest[2]} if cheapest else None,
+                    "craft_cost": forge.craft_cost(ws, item_id),
+                    "now": ws.now,
+                }
+            )
+        finally:
+            conn.close()
 
     # --- métiers -------------------------------------------------------------
 
