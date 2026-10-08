@@ -588,3 +588,6 @@ tr.reveal td { animation: row-reveal 0.28s ease both; }
 /* « input. » : la règle générale des champs impose toute la largeur. */
 input.days-input { width: 54px; flex: none; text-align: center; padding: 0 4px; }
 input.qty-input { width: 92px; flex: none; }
+/* Atelier : intertitre d'un groupe de ressources du même type. */
+tr.group-row td { background: var(--raised); padding-top: 10px; padding-bottom: 10px; border-top: 1px solid var(--line-strong); }
+.group-name { font-weight: 600; letter-spacing: 0.02em; }

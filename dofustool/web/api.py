@@ -736,7 +736,10 @@ class Api:
 
             def named(item_id: int) -> dict:
                 item = ws.items.get(item_id)
-                return {"item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": icons.get(item_id)}
+                return {
+                    "item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": icons.get(item_id),
+                    "type": state["meta"].get(item_id, (None, None))[0],
+                }  # fmt: skip
 
             plans = []
             for list_id, name, created_at in conn.execute("SELECT id, name, created_at FROM workshop_lists ORDER BY created_at DESC, id DESC").fetchall():

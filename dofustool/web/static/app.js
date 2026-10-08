@@ -517,6 +517,10 @@ async function pageWorkshop(r) {
       h('input', { id: 'w-name', type: 'text', value: l.name, maxlength: 80, onchange: (e) => { if (e.target.value.trim()) run({ action: 'rename', list: l.id, name: e.target.value }); } })),
     h('div', { class: 'field', style: 'flex: 1 1 320px' }, h('span', { class: 'label' }, 'Ajouter un objectif'),
       itemPicker(catalogue.items, { id: 'w-add', placeholder: 'Chercher un objet à obtenir…', onpick: (itemId) => run({ action: 'add', list: l.id, item_id: itemId, quantity: 1 }) })),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Regrouper'),
+      segmented('Regrouper', [['', 'Sans'], ['type', 'Par type']], ui.group || '', (group) => { ui.group = group; refresh(); })),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Trier par'),
+      segmented('Trier par', [['recipe', 'Recette'], ['cost', 'Coût'], ['missing', 'Manque'], ['name', 'Nom']], ui.sort || 'recipe', (sort) => { ui.sort = sort; refresh(); })),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!ui.hideDone, onchange: (e) => { ui.hideDone = e.target.checked; refresh(); } }), 'Masquer ce que j\u2019ai déjà'));
 
   const way = (g) => (!g.craftable ? h('span', { class: 'muted', title: 'Cet objet ne se fabrique pas' }, 'achat')
@@ -566,7 +570,23 @@ async function pageWorkshop(r) {
       h('td', { class: made ? 'soft' : 'strong', title: made ? 'Somme de ce que sa recette réclame' : x.repeat ? 'Déjà comptée plus haut dans la liste' : null }, x.repeat ? h('span', { class: 'muted' }, 'déjà comptée') : fmt(x.cost)));
     return [row, ...rowsOf(x.children, depth + 1, fresh || ui.justOpened === x.item_id)];
   });
-  const shown = rowsOf(l.tree, 0, false);
+  // Ordre du premier niveau : celui des recettes (stable quand on déplie), ou celui choisi. Une recette dépliée suit son ingrédient.
+  const missing = (x) => (x.kind === 'made' ? x.to_make : x.to_buy);
+  const order = { cost: (a, b) => (b.cost || 0) - (a.cost || 0), missing: (a, b) => missing(b) - missing(a), name: (a, b) => a.name.localeCompare(b.name, 'fr') }[ui.sort];
+  const sorted = (nodes) => (order ? nodes.slice().sort(order) : nodes);
+  let shown;
+  if (ui.group === 'type') {
+    const groups = new Map();
+    for (const x of l.tree) { const key = x.type || 'Autres'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(x); }
+    shown = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr')).flatMap(([type, nodes]) => {
+      const rows = rowsOf(sorted(nodes), 0, false);
+      if (!rows.length) return [];
+      const left = nodes.filter((x) => !done(x)).length;
+      return [h('tr', { class: 'group-row' }, h('td', { class: 'l', colspan: 5 }, h('span', { class: 'group-name' }, type),
+        h('span', { class: 'muted small' }, ` · ${plural(nodes.length, 'ressource', 'ressources')}` + (left ? ` · ${left} à compléter` : ' · complet'))),
+        h('td', { class: 'strong' }, fmt(nodes.reduce((sum, x) => sum + (x.cost || 0), 0)))), ...rows];
+    });
+  } else shown = rowsOf(sorted(l.tree), 0, false);
   ui.justOpened = null; // l'apparition ne se rejoue pas aux rafraîchissements suivants
   const lines = h('section', { class: 'panel', 'aria-label': 'À réunir' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'À réunir'), h('span', { class: 'muted small' }, 'La flèche déplie la recette d\u2019un ingrédient : tu le fabriques au lieu de l\u2019acheter')),
