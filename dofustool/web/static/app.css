@@ -551,3 +551,13 @@ a.kpi:hover { background: var(--raised); }
 .trade-item .tile { width: 26px; height: 26px; border-radius: 6px; }
 .trade-item .tile img { width: 22px; height: 22px; }
 @media (max-width: 900px) { .trade { grid-template-columns: 1fr; } }
+
+/* Atelier : les listes à gauche, la liste ouverte à droite. */
+.workshop { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.workshop-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.workshop-lists .list-row.on { background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); }
+.qty-input { width: 92px; text-align: right; }
+.add-to-list { max-width: 220px; }
+@media (max-width: 1100px) { .workshop { grid-template-columns: 1fr; } }
+/* Dans un champ (colonne), la base de 340 px du sélecteur deviendrait une hauteur. */
+.field > .picker { flex: none; width: 100%; }

@@ -252,6 +252,7 @@ const NAV = [
   ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3', 'Gagner des kamas'],
   ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6', 'Mon compte'],
   ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1', 'Mon compte'],
+  ['workshop', 'Atelier', 'M3 4.500h12M3 9h12M3 13.500h7M13 12l1.500 1.500 3-3', 'Mon compte'],
   ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500', 'Outils'],
   ['fight', 'Combat', 'M9 2.5l6.5 6.5L9 15.5 2.5 9zM9 6.5v5M6.5 9h5', 'Outils'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300', 'Outils'],
@@ -302,7 +303,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { today: pageToday, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
+  const pages = { today: pageToday, workshop: pageWorkshop, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -385,12 +386,21 @@ async function almanaxPanel() {
     return h('section', { class: 'panel', 'aria-label': 'Almanax' }, head, h('div', { class: 'empty' }, 'Almanax indisponible : DofusDB ne répond pas. ',
       h('button', { class: 'btn', onclick: () => { delete S.cache[`almanax-${ui.day || 'today'}`]; refresh(); } }, 'Réessayer')));
   }
+  const days = S.ui.almanaxDays || 7;
+  const shopping = h('div', { class: 'list-row' }, h('span', { class: 'muted' }, 'Préparer les offrandes des'),
+    h('input', { type: 'number', min: 1, max: 31, value: days, class: 'qty-input', 'aria-label': 'Nombre de jours', onchange: (e) => { S.ui.almanaxDays = Math.max(1, Math.min(31, Math.floor(Number(e.target.value) || 7))); } }),
+    h('span', { class: 'muted' }, 'prochains jours'),
+    h('button', { class: 'btn end', onclick: async () => {
+      const done = await workshopAct({ action: 'almanax', days: S.ui.almanaxDays || 7 });
+      if (done) { if (done.missing_days) notify(`${done.missing_days} jour(s) indisponible(s) sur DofusDB : la liste est incomplète.`); location.hash = `#/workshop/${done.list}`; }
+    } }, 'Créer la liste de courses'));
   return h('section', { class: 'panel', 'aria-label': 'Almanax' }, head,
     h('div', { class: 'list-row', style: 'display: block' }, h('div', { style: 'font-weight: 600; font-size: 16px' }, d.name || 'Bonus du jour'), h('div', { class: 'muted', style: 'margin-top: 2px' }, d.desc)),
     d.items.map((it) => listRow({ href: `#/item/${it.item_id}` },
       itemCell(it.icon, it.name, `offrande · × ${fmt(it.quantity)}` + (it.unit !== null ? ` · ${unitLabel(it.unit)} l'unité` : ''), it.item_id),
       h('div', { class: 'end' }, h('div', { class: 'strong' }, it.cost === null ? h('span', { class: 'muted' }, 'prix inconnu') : fmt(it.cost)),
-        it.owned !== null && h('div', {}, haveTag(it.owned, it.quantity))))));
+        it.owned !== null && h('div', {}, haveTag(it.owned, it.quantity))))),
+    shopping);
 }
 
 async function pageToday() {
@@ -452,6 +462,99 @@ async function pageToday() {
   const quality = hints.length ? h('details', { class: 'panel pad quiet-panel' }, h('summary', {}, `Pour de meilleures données · ${hints.length}`), h('ul', { class: 'tour-points', style: 'margin-top: 10px' }, hints)) : null;
 
   return [head, todoPanel, h('div', { class: 'today-grid' }, almanax, h('div', { class: 'today-stack' }, recent)), h('div', { class: 'today-grid' }, crafts, signals), quality];
+}
+
+// ---------------------------------------------------------------- page Atelier
+
+/** Modifie les listes de l'atelier, puis redessine. Renvoie la réponse du serveur, ou null en cas d'échec. */
+async function workshopAct(payload) {
+  try {
+    const done = await api('/api/workshop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    delete S.cache.workshop;
+    return done;
+  } catch (error) { notify(`Atelier : ${error.message}`); return null; }
+}
+
+async function pageWorkshop(r) {
+  const [data, catalogue] = await Promise.all([cached('workshop', '/api/workshop'), cached('items', '/api/items')]);
+  const ui = S.ui.workshop || (S.ui.workshop = { name: '', confirm: null });
+  const current = data.lists.find((l) => l.id === r.id) || data.lists[0] || null;
+  const run = async (payload, then) => { const done = await workshopAct(payload); if (done) { if (then) then(done); refresh(); } };
+  const create = () => { const name = ui.name.trim(); if (name) { ui.name = ''; run({ action: 'create', name }, (done) => { location.hash = `#/workshop/${done.list}`; }); } };
+
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Atelier'),
+    h('div', { class: 'lead' }, 'Des listes d\u2019objets à obtenir, et ce qu\u2019il te reste à réunir pour chacune')));
+  const side = h('section', { class: 'panel workshop-lists', 'aria-label': 'Listes' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Mes listes')),
+    data.lists.map((l) => h('a', { class: 'list-row link' + (current && l.id === current.id ? ' on' : ''), href: `#/workshop/${l.id}` },
+      h('div', {}, h('div', { style: 'font-weight: 600' }, l.name), h('div', { class: 'source' }, plural(l.goals.length, 'objectif', 'objectifs'))),
+      h('span', { class: 'end ' + (l.cost_remaining ? '' : 'gain') }, l.lines.length ? (l.cost_remaining ? fmt(l.cost_remaining) : 'complet') : ''))),
+    h('div', { class: 'list-row' },
+      h('input', { id: 'w-new', type: 'text', value: ui.name, placeholder: 'Nouvelle liste…', maxlength: 80, style: 'flex: 1; min-width: 0', 'aria-label': 'Nom de la nouvelle liste',
+        oninput: (e) => { ui.name = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') create(); } }),
+      h('button', { class: 'btn', onclick: create }, 'Créer')));
+
+  if (!current) {
+    return [head, h('div', { class: 'workshop' }, side, h('div', { class: 'panel empty' },
+      'Aucune liste pour l\u2019instant. Crée-en une à gauche, ou pars d\u2019une liste toute faite : les offrandes de l\u2019almanax depuis la page Aujourd\u2019hui, ou un plan de métier depuis la page Métiers.'))];
+  }
+
+  const l = current;
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Reste à acheter', l.lines.length ? fmt(l.cost_remaining) : '—', l.lines.length ? (l.cost_remaining ? 'une fois ton stock déduit' : 'tu as déjà tout') : 'ajoute un objectif', l.lines.length && !l.cost_remaining ? 'gain' : ''),
+    kpi('Coût total', fmt(l.cost_total), 'sans compter ton stock'),
+    kpi('À réunir', plural(l.lines.length, 'ressource', 'ressources'), l.unpriced ? `${l.unpriced} sans prix` : null),
+    kpi('Objectifs', fmt(l.goals.length), data.stock_known ? null : 'stock inconnu : rien n\u2019est déduit'));
+
+  const title = h('section', { class: 'panel pad filters', 'aria-label': 'Liste' },
+    h('div', { class: 'field', style: 'flex: 1 1 260px' }, h('label', { for: 'w-name' }, 'Nom de la liste'),
+      h('input', { id: 'w-name', type: 'text', value: l.name, maxlength: 80, onchange: (e) => { if (e.target.value.trim()) run({ action: 'rename', list: l.id, name: e.target.value }); } })),
+    h('div', { class: 'field', style: 'flex: 1 1 320px' }, h('span', { class: 'label' }, 'Ajouter un objectif'),
+      itemPicker(catalogue.items, { id: 'w-add', placeholder: 'Chercher un objet à obtenir…', onpick: (itemId) => run({ action: 'add', list: l.id, item_id: itemId, quantity: 1 }) })),
+    ui.confirm === l.id
+      ? [h('button', { class: 'btn', onclick: () => { ui.confirm = null; run({ action: 'delete', list: l.id }, () => { location.hash = '#/workshop'; }); } }, 'Confirmer la suppression'),
+        h('button', { class: 'btn quiet', onclick: () => { ui.confirm = null; refresh(); } }, 'Annuler')]
+      : h('button', { class: 'btn quiet', onclick: () => { ui.confirm = l.id; refresh(); } }, 'Supprimer la liste'));
+
+  const way = (g) => (!g.craftable ? h('span', { class: 'muted', title: 'Cet objet ne se fabrique pas' }, 'achat')
+    : segmented('Obtention', [[null, 'Le moins cher'], ['buy', 'Acheter'], ['craft', 'Fabriquer']], g.choice, (mode) => run({ action: 'goal', goal: g.id, mode })));
+  const goals = h('section', { class: 'panel', 'aria-label': 'Objectifs' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Objectifs'), h('span', { class: 'muted small' }, 'Ce que tu veux obtenir')),
+    l.goals.length === 0 ? h('div', { class: 'empty' }, 'Liste vide : ajoute un objet avec la recherche ci-dessus.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', { class: 'l' }, 'Obtention'), h('th', {}, 'Tout acheter'), h('th', { title: 'En achetant chaque ingrédient de la recette' }, 'Fabriquer'), h('th', {}, 'En stock'), h('th', {}, ''))),
+        h('tbody', {}, l.goals.map((g) => h('tr', {},
+          h('td', { class: 'l' }, itemCell(g.icon, g.name, [g.note, g.mode === 'craft' ? (g.to_make < g.quantity ? `${fmt(g.to_make)} à fabriquer, le reste en stock` : 'à fabriquer') : 'à acheter'].filter(Boolean).join(' · '), g.item_id)),
+          h('td', {}, h('input', { type: 'number', min: 1, max: 1000000, value: g.quantity, class: 'qty-input', 'aria-label': `Quantité de ${g.name}`,
+            onchange: (e) => { const q = Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))); run({ action: 'goal', goal: g.id, quantity: q }); } })),
+          h('td', { class: 'l' }, way(g)),
+          h('td', { class: g.mode === 'buy' ? 'strong' : 'soft' }, fmt(g.buy_cost)),
+          h('td', { class: g.mode === 'craft' ? 'strong' : 'soft' }, g.craftable ? fmt(g.craft_cost) : h('span', { class: 'muted' }, '—')),
+          h('td', {}, g.owned ? haveTag(g.owned, g.quantity) : h('span', { class: 'muted' }, '0')),
+          h('td', { class: 'act' }, h('button', { class: 'btn quiet', onclick: () => run({ action: 'remove', goal: g.id }) }, 'Retirer'))))))));
+
+  const opened = l.opened.length ? h('div', { class: 'tags', style: 'align-items: center' }, h('span', { class: 'muted small' }, 'Ingrédients ouverts :'),
+    l.opened.map((o) => h('span', { class: 'chip on', title: `${fmt(o.need)} nécessaires, ${fmt(o.to_make)} à fabriquer une fois ton stock déduit` }, `${o.name} × ${fmt(o.to_make)}`,
+      h('button', { class: 'chip-x', 'aria-label': `Refermer ${o.name}`, title: 'Refermer : le racheter tout fait', onclick: () => run({ action: 'open', list: l.id, item_id: o.item_id, opened: false }) }, '×')))) : null;
+
+  const where = (o) => [o.inventory && `inventaire ${fmt(o.inventory)}`, o.bank && `banque ${fmt(o.bank)}`, o.havre && `havre-sac ${fmt(o.havre)}`].filter(Boolean).join(' · ');
+  const lines = h('section', { class: 'panel', 'aria-label': 'À réunir' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'À réunir'), h('span', { class: 'muted small' }, 'Ouvre un ingrédient pour le remplacer par sa propre recette')),
+    l.lines.length === 0 ? h('div', { class: 'empty' }, l.goals.length ? 'Rien à réunir : tu possèdes déjà tout ce qu\u2019il faut.' : 'Rien à réunir pour l\u2019instant.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'), h('th', {}, ''))),
+        h('tbody', {}, l.lines.map((x) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${x.item_id}`; } },
+          h('td', { class: 'l' }, itemCell(x.icon, x.name, where(x.owned) || null, x.item_id)),
+          h('td', {}, h('div', { style: 'font-weight: 600' }, fmt(x.need)),
+            x.shared.length ? h('div', { class: 'source ' + (x.missing_all ? 'warn' : ''), title: x.shared.map((o) => `${o.name} : ${fmt(o.need)}`).join('\n') }, `${fmt(x.need_all)} toutes listes`) : null),
+          h('td', {}, haveTag(x.owned.total, x.need)),
+          h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_buy ? fmt(x.to_buy) : h('span', { class: 'gain' }, '0')),
+            x.shared.length && x.missing_all > x.to_buy ? h('div', { class: 'source warn', title: 'Ce qu\u2019il manque pour satisfaire toutes tes listes à la fois' }, `${fmt(x.missing_all)} au total`) : null),
+          h('td', {}, x.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, unitLabel(x.price)), h('div', { class: 'source', title: lotTitle(x.lot, x.price) }, h('span', { class: 'dot ' + dotClass(x.source) }), shortSource(x.source, x.lot))]),
+          h('td', { class: 'strong' }, fmt(x.cost)),
+          h('td', { class: 'act' }, x.craftable && h('button', { class: 'btn', title: 'Remplacer cet ingrédient par ceux de sa recette', onclick: (event) => { event.stopPropagation(); run({ action: 'open', list: l.id, item_id: x.item_id, opened: true }); } }, 'Ouvrir'))))))));
+
+  return [head, h('div', { class: 'workshop' }, side, h('div', { class: 'workshop-main' }, kpis, title, goals, opened, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés
@@ -1030,7 +1133,11 @@ async function pageJobs() {
 
   const total = plan.shopping.reduce((sum, row) => sum + (row.cost || 0), 0);
   const shopping = h('section', { class: 'panel', 'aria-label': 'Liste de courses' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ingrédients · ${fmt(total)} à acheter`)),
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ingrédients · ${fmt(total)} à acheter`),
+      plan.steps.length > 0 && h('button', { class: 'btn', title: 'Crée une liste de l\u2019atelier avec les objets à fabriquer de ce plan', onclick: async () => {
+        const done = await workshopAct({ action: 'plan', name: `${job.name} ${plan.start_level} → ${plan.end_level}`, goals: plan.steps.map((step) => [step.item_id, step.crafts]) });
+        if (done) location.hash = `#/workshop/${done.list}`;
+      } }, 'Envoyer vers l\u2019atelier')),
     plan.shopping.length === 0 ? h('div', { class: 'empty' }, 'Rien à acheter.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
@@ -1631,7 +1738,7 @@ const norm = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toL
  * Barre de recherche d'objet. items : [id, nom, niveau, icône, précision facultative].
  * browse : la liste est courte, on la montre entière dès que le champ a le focus.
  */
-function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un objet…', href = (itemId) => `#/item/${itemId}`, browse = false } = {}) {
+function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un objet…', href = (itemId) => `#/item/${itemId}`, browse = false, onpick = null } = {}) {
   const list = h('ul', { hidden: true, role: 'listbox' });
   const input = h('input', { id, type: 'search', placeholder, autocomplete: 'off', 'aria-label': placeholder });
   const show = () => {
@@ -1639,7 +1746,7 @@ function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un obje
     if (q.length < 2 && !browse) { list.hidden = true; return; }
     const found = [];
     for (const it of items) { if (norm(it[1]).includes(q) || (it[4] && norm(it[4]).includes(q))) { found.push(it); if (found.length >= (browse ? 60 : 12)) break; } }
-    list.replaceChildren(...found.map((it) => h('li', {}, h('button', { onmousedown: (e) => e.preventDefault(), onclick: () => { list.hidden = true; input.value = ''; location.hash = href(it[0]); } },
+    list.replaceChildren(...found.map((it) => h('li', {}, h('button', { onmousedown: (e) => e.preventDefault(), onclick: () => { list.hidden = true; input.value = ''; if (onpick) onpick(it[0]); else location.hash = href(it[0]); } },
       tile(it[3], false, it[0]), h('span', {}, it[1], h('span', { class: 'muted' }, ` · niv. ${it[2]}${it[4] ? ' · ' + it[4] : ''}`))))));
     list.hidden = found.length === 0;
   };
@@ -1655,6 +1762,7 @@ function itemPicker(items, { id = 'item-search', placeholder = 'Chercher un obje
 
 async function pageItem(r) {
   const items = (await cached('items', '/api/items')).items;
+  const workshopLists = (await cached('workshop', '/api/workshop')).lists;
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Fiche objet')), itemPicker(items));
   const id = r.id || S.ui.item;
   if (!id) return [head, h('div', { class: 'panel empty' }, items.length ? 'Cherche un objet.' : "Aucun objet connu : importe les données statiques et lance une capture.")];
@@ -1669,6 +1777,15 @@ async function pageItem(r) {
           ? [h('span', { class: 'tag good' }, `Tu en as ${fmt(d.owned.inventory + d.owned.bank + (d.owned.havre || 0))}`), h('span', { class: 'tag' }, `inventaire ${fmt(d.owned.inventory)}`), h('span', { class: 'tag' }, `banque ${fmt(d.owned.bank)}`), d.owned.havre > 0 && h('span', { class: 'tag' }, `havre-sac ${fmt(d.owned.havre)}`)]
           : h('span', { class: 'tag' }, "Tu n'en as pas"))),
     d.equipment && d.hdv && h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Voir en forgemagie'),
+    h('select', { class: 'add-to-list', 'aria-label': 'Ajouter à une liste de l\u2019atelier', onchange: async (e) => {
+      const value = e.target.value;
+      e.target.value = '';
+      if (!value) return;
+      let target = Number(value);
+      if (value === 'new') { const made = await workshopAct({ action: 'create', name: d.name }); if (!made) return; target = made.list; }
+      const done = await workshopAct({ action: 'add', list: target, item_id: id, quantity: 1 });
+      if (done) { notify(`${d.name} ajouté à la liste.`); refresh(); }
+    } }, h('option', { value: '' }, 'Ajouter à une liste…'), workshopLists.map((w) => h('option', { value: w.id }, w.name)), h('option', { value: 'new' }, '+ Nouvelle liste')),
     h('button', { class: 'btn ' + (d.ignored ? '' : 'quiet'), onclick: () => setIgnored(id, d.name, !d.ignored) }, d.ignored ? 'Ne plus ignorer' : 'Ignorer cet objet'));
 
   const ignoredNote = d.ignored ? h('div', { class: 'note' }, 'Cet objet est ignoré : il n\'apparaît plus dans Crafts, Tendances et les recettes de Mon stock.')
@@ -2406,6 +2523,7 @@ const DESTINATIONS = [
   ['#/stock', 'Mon stock › Crafts faisables', 'recettes ingredients manquants'],
   ['#/stock/items', 'Mon stock › Inventaire et banque', 'possede objets valeur'],
   ['#/sales', 'Mes ventes', 'lots hdv vendre sous-encheri'],
+  ['#/workshop', 'Atelier', 'liste de courses ingredients objectifs stuff almanax'],
   ['#/jobs', 'Métiers', 'xp niveau monter paysan'],
   ['#/forge', 'Forgemagie › Par objet', 'fm exo over jets criteres annonces'],
   ['#/forge/ranking', 'Forgemagie › Classement général', 'fm exo over metier rentable'],
@@ -2484,6 +2602,12 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 9, date: '8 octobre 2026', title: 'Atelier : tes listes de courses', hash: '#/workshop', go: 'Ouvrir l\u2019atelier', points: [
+    ['Des listes d\u2019objectifs :', 'un stuff, les offrandes de la semaine, un plan de métier. Chaque liste dit ce qu\u2019il faut réunir, ce que tu as déjà (inventaire, banque, havre-sac) et ce qu\u2019il reste à acheter.'],
+    ['Acheter ou fabriquer :', 'le moins cher est proposé pour chaque objectif. « Ouvrir » un ingrédient le remplace par sa propre recette.'],
+    ['Ressources partagées :', 'quand plusieurs listes veulent la même ressource, la ligne donne aussi le besoin total.'],
+    ['Listes toutes faites :', 'un bouton sur Aujourd\u2019hui pour les offrandes de l\u2019almanax, « Envoyer vers l\u2019atelier » sur Métiers, « Ajouter à une liste » sur la Fiche objet.'],
+  ] },
   { id: 8, date: '8 octobre 2026', title: 'Stock en direct, havre-sac, échanges et fabrications', hash: '#/stock/items', go: 'Voir mon stock', points: [
     ['Stock en direct :', 'achats, crafts, échanges et runes consommées mettent Mon stock à jour dans les secondes qui suivent, sans rouvrir un coffre.'],
     ['Trois coffres :', 'inventaire, banque et havre-sac sont suivis séparément. Ouvre un HDV ou un atelier avec les boutons banque et havre-sac cochés pour tout relever d\u2019un coup.'],

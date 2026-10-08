@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import config, db
-from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
 from ..analysis.stock import Stock, stock_crafts
@@ -719,6 +719,188 @@ class Api:
                 raise ValueError("type d'objet inconnu")
             db.set_type_ignored(conn, type_name, ignored, time.time())
             return {"type": type_name, "ignored": ignored, "count": len(db.ignored_types(conn))}
+        finally:
+            conn.close()
+
+    # --- atelier ---------------------------------------------------------------
+
+    def workshop(self) -> dict:
+        """Les listes de l'atelier, avec pour chacune ce qu'il faut réunir, ce qui est possédé et ce qui reste à acheter."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, stock, icons = state["ws"], state["stock"], state["icons"]
+            recipes = ws.calculator.recipes
+            price = ws.calculator._buy_price
+            owned = lambda item_id: stock.get(item_id).total  # noqa: E731
+
+            def named(item_id: int) -> dict:
+                item = ws.items.get(item_id)
+                return {"item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": icons.get(item_id)}
+
+            plans = []
+            for list_id, name, created_at in conn.execute("SELECT id, name, created_at FROM workshop_lists ORDER BY created_at DESC, id DESC").fetchall():
+                goals = [
+                    workshop.Goal(*row)
+                    for row in conn.execute("SELECT id, item_id, quantity, mode, note FROM workshop_goals WHERE list_id = ? ORDER BY id", (list_id,))
+                ]
+                opened = {row[0] for row in conn.execute("SELECT item_id FROM workshop_opened WHERE list_id = ?", (list_id,))}
+                plans.append((list_id, name, created_at, workshop.plan(goals, opened, recipes, price, owned)))
+            # Besoin de chaque ressource toutes listes confondues, pour signaler celles que plusieurs listes se disputent.
+            everywhere: dict[int, list[tuple[int, str, int]]] = {}
+            for list_id, name, _, found in plans:
+                for item_id, quantity in found.lines.items():
+                    everywhere.setdefault(item_id, []).append((list_id, name, quantity))
+
+            lists = []
+            for list_id, name, created_at, found in plans:
+                lines, total, remaining, unpriced = [], 0.0, 0.0, 0
+                for item_id, quantity in found.lines.items():
+                    have = stock.get(item_id)
+                    unit = price(item_id)
+                    ref = ws.prices.get(item_id) if unit is not None else None
+                    to_buy = max(0, quantity - have.total)
+                    others = everywhere[item_id]
+                    need_all = sum(q for _, _, q in others)
+                    recipe = recipes.get(item_id)
+                    if unit is None:
+                        unpriced += 1
+                    else:
+                        total += unit * quantity
+                        remaining += unit * to_buy
+                    lines.append(
+                        {
+                            **named(item_id), "need": quantity,
+                            "owned": {"inventory": have.inventory, "bank": have.bank, "havre": have.havre, "total": have.total},
+                            "to_buy": to_buy, "price": unit, "source": ref.source if ref else None, "lot": ref.lot if ref else None,
+                            "cost": unit * to_buy if unit is not None else None,
+                            "craftable": recipe is not None and bool(recipe.ingredients),
+                            # Disputée : d'autres listes en veulent aussi, et le stock ne couvre pas tout.
+                            "need_all": need_all, "missing_all": max(0, need_all - have.total),
+                            "shared": [{"list": other, "name": label, "need": q} for other, label, q in others] if len(others) > 1 else [],
+                        }
+                    )  # fmt: skip
+                lines.sort(key=lambda row: (-(row["cost"] or 0), row["name"]))
+                lists.append(
+                    {
+                        "id": list_id, "name": name, "created_at": created_at,
+                        "goals": [
+                            {
+                                **named(g.goal.item_id), "id": g.goal.id, "quantity": g.goal.quantity, "choice": g.goal.mode, "mode": g.mode,
+                                "note": g.goal.note, "craftable": g.craftable, "buy_cost": g.buy_cost, "craft_cost": g.craft_cost,
+                                "owned": g.owned, "to_make": g.to_make,
+                            }
+                            for g in found.goals
+                        ],
+                        "lines": lines,
+                        "opened": [{**named(item_id), "need": need, "to_make": to_make} for item_id, (need, to_make) in found.opened.items()],
+                        "cost_total": total, "cost_remaining": remaining, "unpriced": unpriced,
+                    }
+                )  # fmt: skip
+            return clean({"lists": lists, "stock_known": stock.known, "now": time.time()})
+        finally:
+            conn.close()
+
+    def workshop_action(self, payload: dict) -> dict:
+        """Modifie les listes de l'atelier. Lève ValueError si la demande est mal formée."""
+
+        def number(name: str, low: int = 1, high: int = 10**9) -> int:
+            value = payload.get(name)
+            if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+                raise ValueError(f"{name} attendu")
+            return value
+
+        def text(name: str, limit: int = 80) -> str:
+            value = payload.get(name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} attendu")
+            return " ".join(value.split())[:limit]
+
+        action = payload.get("action")
+        conn = self.connect()
+        try:
+            now = time.time()
+            known = lambda item_id: conn.execute("SELECT 1 FROM items WHERE id = ?", (item_id,)).fetchone() is not None  # noqa: E731
+            if action == "create":
+                return {"list": db.workshop_create(conn, text("name"), [], now)}
+            if action == "plan":
+                # Liste toute faite : [[objet, quantité], …], chaque objectif à fabriquer (plan de métier).
+                goals = payload.get("goals")
+                if not isinstance(goals, list) or not 0 < len(goals) <= 200:
+                    raise ValueError("goals attendu")
+                rows = []
+                for entry in goals:
+                    if not (isinstance(entry, list) and len(entry) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in entry)):
+                        raise ValueError("objectif mal formé")
+                    if not known(entry[0]) or not 0 < entry[1] <= 10**6:
+                        raise ValueError("objectif inconnu")
+                    rows.append((entry[0], entry[1], workshop.CRAFT, ""))
+                return {"list": db.workshop_create(conn, text("name"), rows, now)}
+            if action == "almanax":
+                days = number("days", 1, 31)
+                start = date.today()
+                rows, missing = [], 0
+                for offset in range(days):
+                    day = start + timedelta(days=offset)
+                    found = almanax_source.cached(conn, day)
+                    if found is None:
+                        try:
+                            found = self.fetch_almanax(day)
+                            if found["name"] or found["items"]:
+                                almanax_source.store(conn, day, found)
+                        except Exception as exc:  # DofusDB injoignable : ce jour manquera à la liste
+                            log.warning("Almanax du %s non récupéré : %s", day.isoformat(), exc)
+                            missing += 1
+                            continue
+                    for item_id, quantity, _ in found["items"]:
+                        rows.append((item_id, quantity, None, f"{day.day:02d}/{day.month:02d}"))
+                if not rows:
+                    raise ValueError("almanax indisponible")
+                end = start + timedelta(days=days - 1)
+                name = f"Almanax du {start.day:02d}/{start.month:02d} au {end.day:02d}/{end.month:02d}"
+                return {"list": db.workshop_create(conn, name, rows, now), "missing_days": missing}
+            if action in ("rename", "delete", "add", "open"):
+                list_id = number("list")
+                if conn.execute("SELECT 1 FROM workshop_lists WHERE id = ?", (list_id,)).fetchone() is None:
+                    raise ValueError("liste inconnue")
+                with conn:
+                    if action == "rename":
+                        conn.execute("UPDATE workshop_lists SET name = ? WHERE id = ?", (text("name"), list_id))
+                    elif action == "delete":
+                        db.workshop_delete(conn, list_id)
+                    elif action == "add":
+                        item_id = number("item_id")
+                        if not known(item_id):
+                            raise ValueError("objet inconnu")
+                        conn.execute(
+                            "INSERT INTO workshop_goals (list_id, item_id, quantity, mode, note) VALUES (?, ?, ?, NULL, '')",
+                            (list_id, item_id, number("quantity", 1, 10**6) if "quantity" in payload else 1),
+                        )
+                    else:
+                        item_id = number("item_id")
+                        if payload.get("opened"):
+                            conn.execute("INSERT OR IGNORE INTO workshop_opened VALUES (?, ?)", (list_id, item_id))
+                        else:
+                            conn.execute("DELETE FROM workshop_opened WHERE list_id = ? AND item_id = ?", (list_id, item_id))
+                return {"list": list_id}
+            if action in ("goal", "remove"):
+                goal_id = number("goal")
+                row = conn.execute("SELECT list_id FROM workshop_goals WHERE id = ?", (goal_id,)).fetchone()
+                if row is None:
+                    raise ValueError("objectif inconnu")
+                with conn:
+                    if action == "remove":
+                        conn.execute("DELETE FROM workshop_goals WHERE id = ?", (goal_id,))
+                    else:
+                        if "quantity" in payload:
+                            conn.execute("UPDATE workshop_goals SET quantity = ? WHERE id = ?", (number("quantity", 1, 10**6), goal_id))
+                        if "mode" in payload:
+                            mode = payload["mode"]
+                            if mode not in (None, workshop.BUY, workshop.CRAFT):
+                                raise ValueError("mode attendu")
+                            conn.execute("UPDATE workshop_goals SET mode = ? WHERE id = ?", (mode, goal_id))
+                return {"list": row[0]}
+            raise ValueError("action inconnue")
         finally:
             conn.close()
 

@@ -302,6 +302,26 @@ CREATE TABLE IF NOT EXISTS crafts (
     uid       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS crafts_ts ON crafts (ts);
+-- Atelier : listes d'objectifs du joueur. Donnée personnelle, propre à ce PC.
+CREATE TABLE IF NOT EXISTS workshop_lists (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workshop_goals (
+    id       INTEGER PRIMARY KEY,
+    list_id  INTEGER NOT NULL REFERENCES workshop_lists(id),
+    item_id  INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    mode     TEXT,               -- 'buy', 'craft', ou NULL : le moins cher des deux
+    note     TEXT NOT NULL DEFAULT ''
+);
+-- Ingrédients « ouverts » d'une liste : remplacés par leurs propres ingrédients.
+CREATE TABLE IF NOT EXISTS workshop_opened (
+    list_id INTEGER NOT NULL REFERENCES workshop_lists(id),
+    item_id INTEGER NOT NULL,
+    PRIMARY KEY (list_id, item_id)
+) WITHOUT ROWID;
 -- Almanax d'un jour (bonus et offrande), tel que DofusDB le donne : gardé pour ne l'interroger qu'une fois.
 CREATE TABLE IF NOT EXISTS almanax (
     day        TEXT PRIMARY KEY,  -- AAAA-MM-JJ
@@ -682,6 +702,24 @@ def return_unsold(conn: sqlite3.Connection, count: int, ts: float) -> list[tuple
         if rows and bank_known:
             _stamp_holdings(conn, BANK, ts)
     return [(item_id, lot, price) for _, _, item_id, lot, price in rows]
+
+
+def workshop_create(conn: sqlite3.Connection, name: str, goals, now: float) -> int:
+    """Crée une liste de l'atelier. goals : [(objet, quantité, mode ou None, note)]. Renvoie son numéro."""
+    with conn:
+        list_id = conn.execute("INSERT INTO workshop_lists (name, created_at) VALUES (?, ?)", (name, now)).lastrowid
+        conn.executemany(
+            "INSERT INTO workshop_goals (list_id, item_id, quantity, mode, note) VALUES (?, ?, ?, ?, ?)",
+            [(list_id, item_id, quantity, mode, note) for item_id, quantity, mode, note in goals],
+        )
+    return list_id
+
+
+def workshop_delete(conn: sqlite3.Connection, list_id: int) -> None:
+    with conn:
+        for table in ("workshop_goals", "workshop_opened"):
+            conn.execute(f"DELETE FROM {table} WHERE list_id = ?", (list_id,))
+        conn.execute("DELETE FROM workshop_lists WHERE id = ?", (list_id,))
 
 
 def save_exchange(conn: sqlite3.Connection, source_id: int, ts: float, exchange) -> bool:

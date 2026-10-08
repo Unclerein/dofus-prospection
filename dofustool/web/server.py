@@ -125,6 +125,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     )
                 if path == "/api/ignored":
                     return self._json(api.ignored())
+                if path == "/api/workshop":
+                    return self._json(api.workshop())
                 if path == "/api/today":
                     try:
                         since = float(query["since"]) if "since" in query else None
@@ -223,6 +225,12 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if cost is not None and (not isinstance(cost, int) or isinstance(cost, bool) or not 0 <= cost <= 10**12):
                         raise ValueError("prix invalide")
                     return self._json(api.set_forge_base_cost(payload["uid"], cost))
+                if path == "/api/workshop":
+                    length = min(int(self.headers.get("Content-Length") or 0), 65536)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("objet JSON attendu")
+                    return self._json(api.workshop_action(payload))
                 if path == "/api/fight/harebourg":
                     length = min(int(self.headers.get("Content-Length") or 0), 16384)
                     payload = json.loads(self.rfile.read(length) or b"{}")
