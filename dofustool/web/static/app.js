@@ -2214,10 +2214,96 @@ function sharePanel(d, data, sync) {
       hosting));
 }
 
+// ---------------------------------------------------------------- recherche globale
+
+// Pages et onglets atteignables par leur nom, avec quelques mots pour les retrouver autrement.
+const DESTINATIONS = [
+  ['#/crafts', 'Crafts', 'recettes marge fabriquer rentable'],
+  ['#/stock', 'Mon stock › Crafts faisables', 'recettes ingredients manquants'],
+  ['#/stock/items', 'Mon stock › Inventaire et banque', 'possede objets valeur'],
+  ['#/sales', 'Mes ventes', 'lots hdv vendre sous-encheri'],
+  ['#/jobs', 'Métiers', 'xp niveau monter paysan'],
+  ['#/forge', 'Forgemagie › Par objet', 'fm exo over jets criteres annonces'],
+  ['#/forge/ranking', 'Forgemagie › Classement général', 'fm exo over metier rentable'],
+  ['#/forge/journal', 'Forgemagie › Mon journal', 'fm runes passages cout marge puits'],
+  ['#/trends', 'Tendances', 'prix hausse baisse signal'],
+  ['#/fight', 'Combat', 'harebourg'],
+  ['#/item', 'Fiche objet', 'cours du marche prix historique'],
+  ['#/ignored', 'Ignorés', 'masquer objets types'],
+  ['#/status', 'État', 'capture partage hub alerte'],
+  ['#/config', 'Config', 'reglages personnage metiers taxe partage'],
+  ['#/welcome', 'Aide', 'visite guidee nouveautes tutoriel'],
+];
+let $palette = null;
+
+/** Fenêtre de recherche : une page ou un objet, d'où qu'on soit. Flèches pour choisir, Entrée pour y aller. */
+async function openSearch() {
+  if ($palette) return;
+  let items = [];
+  let results = [];
+  let active = 0;
+  const input = h('input', { type: 'search', placeholder: 'Chercher un objet ou une page…', autocomplete: 'off', 'aria-label': 'Recherche globale' });
+  const list = h('ul', { role: 'listbox' });
+  const close = () => { if ($palette) { $palette.remove(); $palette = null; document.removeEventListener('keydown', onKey, true); } };
+  const go = (hash) => { close(); if (location.hash === hash) render(); else location.hash = hash; };
+  const icon = (page) => {
+    const entry = NAV.find(([name]) => name === page);
+    return h('span', { class: 'page-ico' }, entry && svg('svg', { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: entry[2] })));
+  };
+  const draw = () => {
+    const q = norm(input.value.trim());
+    const pages = DESTINATIONS.filter(([, label, words]) => !q || norm(label).includes(q) || words.includes(q)).slice(0, q ? 5 : DESTINATIONS.length);
+    const found = [];
+    if (q.length >= 2) {
+      // D'abord les noms qui commencent par la recherche, puis ceux qui la contiennent.
+      for (const pass of [(n) => n.startsWith(q), (n) => !n.startsWith(q) && n.includes(q)]) {
+        for (const it of items) { if (found.length >= 12) break; if (pass(it[it.length - 1])) found.push(it); }
+      }
+    }
+    results = [
+      ...pages.map(([hash, label]) => ({ hash, node: [icon(hash.split('/')[1]), h('span', {}, label), h('span', { class: 'kind' }, 'page')] })),
+      ...found.map((it) => ({ hash: `#/item/${it[0]}`, node: [tile(it[3], false, it[0]), h('span', {}, it[1], h('span', { class: 'muted' }, ` · niv. ${it[2]}`)), h('span', { class: 'kind' }, 'fiche objet')] })),
+    ];
+    active = Math.min(active, Math.max(0, results.length - 1));
+    list.replaceChildren(...(results.length ? results.map((r, index) => h('li', {}, h('button', { class: index === active ? 'on' : '', role: 'option', 'aria-selected': String(index === active), onmousedown: (e) => e.preventDefault(), onclick: () => go(r.hash) }, r.node)))
+      : [h('li', { class: 'muted', style: 'padding: 14px 12px' }, 'Aucun objet ni page ne correspond.')]));
+    const on = list.querySelector('.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close(); }
+    else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); active = (active + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % Math.max(1, results.length); draw(); }
+    else if (event.key === 'Enter') { event.preventDefault(); if (results[active]) go(results[active].hash); }
+  };
+  input.addEventListener('input', () => { active = 0; draw(); });
+  $palette = h('div', { class: 'palette-veil', onclick: (event) => { if (event.target === $palette) close(); } },
+    h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Recherche globale' }, input, list,
+      h('div', { class: 'palette-foot' }, h('span', {}, h('kbd', {}, '↑'), ' ', h('kbd', {}, '↓'), ' choisir'), h('span', {}, h('kbd', {}, 'Entrée'), ' ouvrir'), h('span', {}, h('kbd', {}, 'Échap'), ' fermer'))));
+  document.addEventListener('keydown', onKey, true);
+  document.body.append($palette);
+  input.focus();
+  draw();
+  try {
+    items = (await cached('items', '/api/items')).items.map((it) => [...it, norm(it[1])]);
+    if ($palette) draw();
+  } catch (error) { /* les pages restent proposées */ }
+}
+
+document.addEventListener('keydown', (event) => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '');
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openSearch(); }
+  else if (event.key === '/' && !typing && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); openSearch(); }
+});
+document.getElementById('search-open').addEventListener('click', () => openSearch());
+
 // ---------------------------------------------------------------- nouveautés
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 5, date: '8 octobre 2026', title: 'Recherche globale', points: [
+    ['Ctrl+K, ou la touche / :', 'une fenêtre de recherche s\u2019ouvre d\u2019où que tu sois. Tape le nom d\u2019un objet pour ouvrir sa fiche, ou celui d\u2019une page ou d\u2019un onglet pour y aller.'],
+    ['Aussi dans le menu :', 'le bouton « Rechercher », en haut à gauche.'],
+  ] },
   { id: 4, date: '8 octobre 2026', title: 'Métiers de forgemagie, jets de tes objets, estimation par annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d’après tes métiers et leur niveau.'],
     ['Mes critères par objet :', 'ils se règlent dans l’onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],

@@ -51,6 +51,30 @@ h1, h2 { margin: 0; }
 .nav a:hover { color: var(--text); }
 .nav a[aria-current="page"] { background: var(--raised); color: var(--text); font-weight: 600; }
 .nav a[aria-current="page"] svg { stroke: var(--accent); }
+/* Recherche globale : le bouton du menu, puis la fenêtre. */
+.search-open {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; margin-bottom: 8px; padding: 0 12px; width: 100%;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); text-align: left;
+}
+.search-open:hover { color: var(--text); border-color: var(--line-strong); }
+.search-open span { flex: 1; }
+.search-open kbd, .palette kbd { font: inherit; font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--muted); }
+.palette-veil { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; background: rgba(6, 10, 12, 0.74); }
+.palette {
+  width: min(600px, 100%); max-height: 70vh; display: flex; flex-direction: column; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); overflow: hidden;
+}
+.palette input { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 16px 18px; font-size: 16px; width: 100%; }
+.palette input:focus { outline: none; }
+.palette ul { margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
+.palette li button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 4px 10px;
+  border: 0; border-radius: 8px; background: transparent; text-align: left;
+}
+.palette li button.on, .palette li button:hover { background: #26333A; }
+.palette li .kind { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.palette .page-ico { width: 32px; height: 32px; display: grid; place-items: center; color: var(--accent); flex: none; }
+.palette-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .capture {
   margin-top: auto; padding: 14px 12px; border-radius: 10px; background: var(--surface);
   border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px;
