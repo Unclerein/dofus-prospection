@@ -21,7 +21,9 @@ _BRACES = re.compile(r"\{\{[^{}]*\}\}")
 
 def plain(text: str) -> str:
     """Texte du jeu sans balises ni renvois : seul le libellé d'un renvoi est gardé."""
-    return " ".join(_BRACES.sub("", _LINKS.sub(r"", _TAGS.sub("", text))).split())
+    return " ".join(_BRACES.sub("", _LINKS.sub(r"\1", _TAGS.sub("", text))).split())
+
+
 MAX_ITEMS = 10
 
 
