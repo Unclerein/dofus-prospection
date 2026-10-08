@@ -388,7 +388,7 @@ async function almanaxPanel() {
   }
   const days = S.ui.almanaxDays || 7;
   const shopping = h('div', { class: 'list-row' }, h('span', { class: 'muted' }, 'Préparer les offrandes des'),
-    h('input', { type: 'number', min: 1, max: 31, value: days, class: 'qty-input', 'aria-label': 'Nombre de jours', onchange: (e) => { S.ui.almanaxDays = Math.max(1, Math.min(31, Math.floor(Number(e.target.value) || 7))); } }),
+    h('input', { type: 'number', min: 1, max: 31, value: days, class: 'days-input', 'aria-label': 'Nombre de jours', onchange: (e) => { S.ui.almanaxDays = Math.max(1, Math.min(31, Math.floor(Number(e.target.value) || 7))); } }),
     h('span', { class: 'muted' }, 'prochains jours'),
     h('button', { class: 'btn end', onclick: async () => {
       const done = await workshopAct({ action: 'almanax', days: S.ui.almanaxDays || 7 });
@@ -436,8 +436,10 @@ async function pageToday() {
       h('div', { class: 'hint' }, r.sold.count ? mini(`${plural(r.sold.count, 'lot', 'lots')}` + (r.sold.offline ? `, dont ${r.sold.offline} hors ligne · surtout ` : ' · surtout '), r.sold.top) : 'aucune vente')),
     h('a', { class: 'kpi', href: '#/sales', onclick: () => { filter('all')(); S.ui.sales.tab = 'journal'; S.ui.sales.kind = 'purchase'; } }, h('div', { class: 'label' }, 'Acheté'), h('div', { class: 'value' }, r.bought.amount ? `−${fmt(r.bought.amount)}` : '—'),
       h('div', { class: 'hint' }, r.bought.count ? mini(`${plural(r.bought.count, 'lot', 'lots')} · surtout `, r.bought.top) : 'aucun achat')),
-    h('a', { class: 'kpi', href: '#/forge/journal' }, h('div', { class: 'label' }, 'Forgemagie'), h('div', { class: 'value' }, r.forged.passes ? plural(r.forged.passes, 'rune', 'runes') : '—'),
-      h('div', { class: 'hint' }, r.forged.passes ? mini(`${fmt(r.forged.cost)} kamas sur ${plural(r.forged.objects, 'objet', 'objets')} · dernier `, r.forged.top) : 'aucune rune passée')));
+    h('div', { class: 'kpi' }, h('div', { class: 'label' }, 'Derniers objets forgemagés'),
+      r.forged.items.length ? r.forged.items.map((it) => h('a', { class: 'mini-item', href: `#/forge/journal/${it.uid}`, title: `Dernier passage ${when(it.ts)}`, ...hoverTip(it.item_id) }, tile(it.icon, false), h('span', { style: 'font-weight: 600' }, it.name), h('span', { class: 'muted small' }, ago(it.ts, d.now))))
+        : h('div', { class: 'value' }, '—'),
+      h('div', { class: 'hint' }, r.forged.passes ? `${plural(r.forged.passes, 'rune', 'runes')} et ${fmt(r.forged.cost)} kamas depuis ta dernière visite` : r.forged.items.length ? 'aucune rune depuis ta dernière visite' : 'aucun objet forgemagé pour l\u2019instant')));
 
   // Pistes : ce que le stock permet de fabriquer, et ce qui s'écarte de sa moyenne.
   // Le bouton « ignorer » vit dans une ligne cliquable : il ne doit pas ouvrir la fiche de l'objet.
@@ -487,8 +489,10 @@ async function pageWorkshop(r) {
   const side = h('section', { class: 'panel workshop-lists', 'aria-label': 'Listes' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Mes listes')),
     data.lists.map((l) => h('a', { class: 'list-row link' + (current && l.id === current.id ? ' on' : ''), href: `#/workshop/${l.id}` },
-      h('div', {}, h('div', { style: 'font-weight: 600' }, l.name), h('div', { class: 'source' }, plural(l.goals.length, 'objectif', 'objectifs'))),
-      h('span', { class: 'end ' + (l.cost_remaining ? '' : 'gain') }, l.lines.length ? (l.cost_remaining ? fmt(l.cost_remaining) : 'complet') : ''))),
+      h('div', { style: 'min-width: 0' }, h('div', { style: 'font-weight: 600' }, l.name), h('div', { class: 'source' }, plural(l.goals.length, 'objectif', 'objectifs') + (l.lines.length ? ` · ${l.cost_remaining ? fmt(l.cost_remaining) + ' à acheter' : 'complet'}` : ''))),
+      ui.confirm === l.id
+        ? h('button', { class: 'btn end', onclick: (event) => { event.preventDefault(); ui.confirm = null; run({ action: 'delete', list: l.id }, () => { if (current && current.id === l.id) location.hash = '#/workshop'; }); } }, 'Supprimer ?')
+        : h('button', { class: 'icon-btn end', title: `Supprimer ${l.name}`, 'aria-label': `Supprimer ${l.name}`, onclick: (event) => { event.preventDefault(); ui.confirm = l.id; refresh(); } }, '×'))),
     h('div', { class: 'list-row' },
       h('input', { id: 'w-new', type: 'text', value: ui.name, placeholder: 'Nouvelle liste…', maxlength: 80, style: 'flex: 1; min-width: 0', 'aria-label': 'Nom de la nouvelle liste',
         oninput: (e) => { ui.name = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') create(); } }),
@@ -511,10 +515,7 @@ async function pageWorkshop(r) {
       h('input', { id: 'w-name', type: 'text', value: l.name, maxlength: 80, onchange: (e) => { if (e.target.value.trim()) run({ action: 'rename', list: l.id, name: e.target.value }); } })),
     h('div', { class: 'field', style: 'flex: 1 1 320px' }, h('span', { class: 'label' }, 'Ajouter un objectif'),
       itemPicker(catalogue.items, { id: 'w-add', placeholder: 'Chercher un objet à obtenir…', onpick: (itemId) => run({ action: 'add', list: l.id, item_id: itemId, quantity: 1 }) })),
-    ui.confirm === l.id
-      ? [h('button', { class: 'btn', onclick: () => { ui.confirm = null; run({ action: 'delete', list: l.id }, () => { location.hash = '#/workshop'; }); } }, 'Confirmer la suppression'),
-        h('button', { class: 'btn quiet', onclick: () => { ui.confirm = null; refresh(); } }, 'Annuler')]
-      : h('button', { class: 'btn quiet', onclick: () => { ui.confirm = l.id; refresh(); } }, 'Supprimer la liste'));
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!ui.hideDone, onchange: (e) => { ui.hideDone = e.target.checked; refresh(); } }), 'Masquer ce que j\u2019ai déjà'));
 
   const way = (g) => (!g.craftable ? h('span', { class: 'muted', title: 'Cet objet ne se fabrique pas' }, 'achat')
     : segmented('Obtention', [[null, 'Le moins cher'], ['buy', 'Acheter'], ['craft', 'Fabriquer']], g.choice, (mode) => run({ action: 'goal', goal: g.id, mode })));
@@ -533,28 +534,42 @@ async function pageWorkshop(r) {
           h('td', {}, g.owned ? haveTag(g.owned, g.quantity) : h('span', { class: 'muted' }, '0')),
           h('td', { class: 'act' }, h('button', { class: 'btn quiet', onclick: () => run({ action: 'remove', goal: g.id }) }, 'Retirer'))))))));
 
-  const opened = l.opened.length ? h('div', { class: 'tags', style: 'align-items: center' }, h('span', { class: 'muted small' }, 'Ingrédients ouverts :'),
-    l.opened.map((o) => h('span', { class: 'chip on', title: `${fmt(o.need)} nécessaires, ${fmt(o.to_make)} à fabriquer une fois ton stock déduit` }, `${o.name} × ${fmt(o.to_make)}`,
-      h('button', { class: 'chip-x', 'aria-label': `Refermer ${o.name}`, title: 'Refermer : le racheter tout fait', onclick: () => run({ action: 'open', list: l.id, item_id: o.item_id, opened: false }) }, '×')))) : null;
-
   const where = (o) => [o.inventory && `inventaire ${fmt(o.inventory)}`, o.bank && `banque ${fmt(o.bank)}`, o.havre && `havre-sac ${fmt(o.havre)}`].filter(Boolean).join(' · ');
+  // Une ressource est « faite » quand il n'en reste rien à acheter ; un ingrédient fabriqué, quand rien n'est à fabriquer
+  // et que tout ce qu'il réclame est fait.
+  const done = (x) => (x.kind === 'made' ? x.to_make === 0 || x.children.every(done) : x.to_buy === 0);
+  const toggle = (x, open) => (event) => { event.stopPropagation(); run({ action: 'open', list: l.id, item_id: x.item_id, opened: open }); };
+  const arrow = (x) => (x.kind === 'made'
+    ? h('button', { class: 'fold', 'aria-expanded': 'true', title: 'Replier : l\u2019acheter tout fait', 'aria-label': `Replier ${x.name}`, onclick: toggle(x, false) }, '▾')
+    : x.craftable ? h('button', { class: 'fold', 'aria-expanded': 'false', title: 'Déplier sa recette : le fabriquer au lieu de l\u2019acheter', 'aria-label': `Déplier la recette de ${x.name}`, onclick: toggle(x, true) }, '▸')
+      : h('span', { class: 'fold none', 'aria-hidden': 'true' }));
+  const rowsOf = (nodes, depth) => nodes.filter((x) => !ui.hideDone || !done(x)).flatMap((x) => {
+    const made = x.kind === 'made';
+    const part = depth > 0 && x.share !== x.need ? h('div', { class: 'source', title: 'Besoin de cette ressource pour toute la liste' }, `${fmt(x.need)} pour la liste`) : null;
+    const row = h('tr', { class: 'link' + (made ? ' made' : '') + (done(x) ? ' done' : ''), onclick: () => { location.hash = `#/item/${x.item_id}`; } },
+      h('td', { class: 'l' }, h('div', { class: 'tree-cell', style: `padding-left: ${depth * 26}px` }, arrow(x),
+        itemCell(x.icon, x.name, made ? 'à fabriquer · recette ci-dessous' : (where(x.owned) || null), x.item_id))),
+      h('td', {}, h('div', { style: 'font-weight: 600' }, fmt(depth > 0 ? x.share : x.need)), part,
+        !made && x.shared.length ? h('div', { class: 'source ' + (x.missing_all ? 'warn' : ''), title: x.shared.map((o) => `${o.name} : ${fmt(o.need)}`).join('\n') }, `${fmt(x.need_all)} toutes listes`) : null),
+      h('td', {}, haveTag(x.owned.total, x.need)),
+      made ? h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_make ? `${fmt(x.to_make)} à fabriquer` : h('span', { class: 'gain' }, 'déjà en stock')))
+        : h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_buy ? fmt(x.to_buy) : h('span', { class: 'gain' }, '0')),
+          x.shared.length && x.missing_all > x.to_buy ? h('div', { class: 'source warn', title: 'Ce qu\u2019il manque pour satisfaire toutes tes listes à la fois' }, `${fmt(x.missing_all)} au total`) : null),
+      made ? h('td', { class: 'muted' }, '—')
+        : h('td', {}, x.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, unitLabel(x.price)), h('div', { class: 'source', title: lotTitle(x.lot, x.price) }, h('span', { class: 'dot ' + dotClass(x.source) }), shortSource(x.source, x.lot))]),
+      h('td', { class: made ? 'soft' : 'strong', title: made ? 'Somme de ce que sa recette réclame' : x.repeat ? 'Déjà comptée plus haut dans la liste' : null }, x.repeat ? h('span', { class: 'muted' }, 'déjà comptée') : fmt(x.cost)));
+    return [row, ...rowsOf(x.children, depth + 1)];
+  });
+  const shown = rowsOf(l.tree, 0);
   const lines = h('section', { class: 'panel', 'aria-label': 'À réunir' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'À réunir'), h('span', { class: 'muted small' }, 'Ouvre un ingrédient pour le remplacer par sa propre recette')),
-    l.lines.length === 0 ? h('div', { class: 'empty' }, l.goals.length ? 'Rien à réunir : tu possèdes déjà tout ce qu\u2019il faut.' : 'Rien à réunir pour l\u2019instant.')
-      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'), h('th', {}, ''))),
-        h('tbody', {}, l.lines.map((x) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${x.item_id}`; } },
-          h('td', { class: 'l' }, itemCell(x.icon, x.name, where(x.owned) || null, x.item_id)),
-          h('td', {}, h('div', { style: 'font-weight: 600' }, fmt(x.need)),
-            x.shared.length ? h('div', { class: 'source ' + (x.missing_all ? 'warn' : ''), title: x.shared.map((o) => `${o.name} : ${fmt(o.need)}`).join('\n') }, `${fmt(x.need_all)} toutes listes`) : null),
-          h('td', {}, haveTag(x.owned.total, x.need)),
-          h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_buy ? fmt(x.to_buy) : h('span', { class: 'gain' }, '0')),
-            x.shared.length && x.missing_all > x.to_buy ? h('div', { class: 'source warn', title: 'Ce qu\u2019il manque pour satisfaire toutes tes listes à la fois' }, `${fmt(x.missing_all)} au total`) : null),
-          h('td', {}, x.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, unitLabel(x.price)), h('div', { class: 'source', title: lotTitle(x.lot, x.price) }, h('span', { class: 'dot ' + dotClass(x.source) }), shortSource(x.source, x.lot))]),
-          h('td', { class: 'strong' }, fmt(x.cost)),
-          h('td', { class: 'act' }, x.craftable && h('button', { class: 'btn', title: 'Remplacer cet ingrédient par ceux de sa recette', onclick: (event) => { event.stopPropagation(); run({ action: 'open', list: l.id, item_id: x.item_id, opened: true }); } }, 'Ouvrir'))))))));
+    h('div', { class: 'panel-head' }, h('h2', {}, 'À réunir'), h('span', { class: 'muted small' }, 'La flèche déplie la recette d\u2019un ingrédient : tu le fabriques au lieu de l\u2019acheter')),
+    l.tree.length === 0 ? h('div', { class: 'empty' }, l.goals.length ? 'Rien à réunir : tu possèdes déjà tout ce qu\u2019il faut.' : 'Rien à réunir pour l\u2019instant.')
+      : shown.length === 0 ? h('div', { class: 'empty' }, 'Tout est déjà en stock. Décoche « Masquer ce que j\u2019ai déjà » pour revoir la liste.')
+        : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
+          h('tbody', {}, shown))));
 
-  return [head, h('div', { class: 'workshop' }, side, h('div', { class: 'workshop-main' }, kpis, title, goals, opened, lines))];
+  return [head, h('div', { class: 'workshop' }, side, h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés

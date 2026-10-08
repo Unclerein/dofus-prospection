@@ -561,3 +561,12 @@ a.kpi:hover { background: var(--raised); }
 @media (max-width: 1100px) { .workshop { grid-template-columns: 1fr; } }
 /* Dans un champ (colonne), la base de 340 px du sélecteur deviendrait une hauteur. */
 .field > .picker { flex: none; width: 100%; }
+
+/* Atelier : arbre des sous-recettes, replié ou déplié par une flèche. */
+.tree-cell { display: flex; align-items: center; gap: 6px; }
+.fold { flex: none; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; }
+button.fold:hover { background: var(--raised); color: var(--text); }
+.fold.none { display: inline-block; }
+tr.made td { background: color-mix(in srgb, var(--raised) 60%, transparent); }
+tr.done .item-cell .name { color: var(--muted); }
+.days-input { width: 58px; text-align: center; padding-left: 6px; padding-right: 6px; }

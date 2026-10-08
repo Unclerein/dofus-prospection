@@ -76,6 +76,13 @@ def test_workshop_lists_are_stored_and_served(app_db):  # noqa: F811
     (shown,) = api.workshop()["lists"]
     assert {line["name"]: line["need"] for line in shown["lines"]} == {"Blé": 36, "Eau": 6}
     assert [(o["name"], o["need"], o["to_make"]) for o in shown["opened"]] == [("Farine", 18, 18)]
+    # L'arbre garde la farine, à fabriquer, avec son blé rangé dessous ; l'eau reste au premier niveau.
+    flour, water = shown["tree"]
+    assert (flour["name"], flour["kind"], flour["to_make"], [(c["name"], c["share"], c["kind"]) for c in flour["children"]]) == (
+        "Farine", "made", 18, [("Blé", 36, "leaf")],
+    )  # fmt: skip
+    assert (water["name"], water["kind"], water["share"], water["children"]) == ("Eau", "leaf", 6, [])
+    assert flour["cost"] == flour["children"][0]["cost"] and not flour["children"][0]["repeat"]
     api.workshop_action({"action": "open", "list": first, "item_id": 2, "opened": False})
 
     # Une seconde liste veut la même farine : les deux lignes le signalent, avec le besoin total.

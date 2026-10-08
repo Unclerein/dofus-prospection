@@ -42,6 +42,9 @@ class Plan:
     goals: list[GoalPlan] = field(default_factory=list)
     lines: dict[int, int] = field(default_factory=dict)  # objet à réunir -> quantité
     opened: dict[int, tuple[int, int]] = field(default_factory=dict)  # ingrédient ouvert -> (besoin, à fabriquer)
+    # D'où vient le besoin de chaque objet (ligne ou ingrédient ouvert) : {ingrédient ouvert qui le demande: quantité},
+    # la clé 0 désignant les objectifs eux-mêmes. Sert à ranger chaque ressource sous la recette qui la réclame.
+    sources: dict[int, dict[int, int]] = field(default_factory=dict)
 
 
 def first_level_cost(recipe: Recipe, price: Callable[[int], float | None]) -> float | None:
@@ -72,16 +75,18 @@ def plan(
         used[item_id] = used.get(item_id, 0) + taken
         return wanted - taken
 
-    def need(item_id: int, quantity: int, path: tuple[int, ...]) -> None:
+    def need(item_id: int, quantity: int, path: tuple[int, ...], parent: int = 0) -> None:
         recipe = recipes.get(item_id)
         if quantity <= 0:
             return
+        wanted = out.sources.setdefault(item_id, {})
+        wanted[parent] = wanted.get(parent, 0) + quantity
         if item_id in opened and recipe is not None and recipe.ingredients and item_id not in path and len(path) < MAX_DEPTH:
             to_make = take(item_id, quantity)
             before = out.opened.get(item_id, (0, 0))
             out.opened[item_id] = (before[0] + quantity, before[1] + to_make)
             for ingredient_id, per in recipe.ingredients:
-                need(ingredient_id, per * to_make, (*path, item_id))
+                need(ingredient_id, per * to_make, (*path, item_id), item_id)
         else:
             out.lines[item_id] = out.lines.get(item_id, 0) + quantity
 
@@ -107,5 +112,7 @@ def plan(
                 need(ingredient_id, per * to_make, (goal.item_id,))
         else:
             out.lines[goal.item_id] = out.lines.get(goal.item_id, 0) + goal.quantity
+            wanted = out.sources.setdefault(goal.item_id, {})
+            wanted[0] = wanted.get(0, 0) + goal.quantity
         out.goals.append(GoalPlan(goal, mode, craftable, buy_cost, craft_cost, owned(goal.item_id), to_make))
     return out

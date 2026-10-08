@@ -80,7 +80,7 @@ def test_today_gathers_what_needs_attention_and_what_happened(app_db):  # noqa: 
     recent = data["recent"]
     assert (recent["sold"]["count"], recent["sold"]["amount"], recent["sold"]["offline"], recent["sold"]["top"]["name"]) == (1, 2_500, 0, "Pain")
     assert (recent["bought"]["count"], recent["bought"]["amount"], recent["bought"]["top"]["name"]) == (1, 900, "Blé")
-    assert recent["forged"] == {"passes": 0, "cost": 0, "objects": 0, "top": None}
+    assert recent["forged"] == {"passes": 0, "cost": 0, "objects": 0, "top": None, "items": []}
     assert data["quality"]["unpriced_lots"] == 1 and data["quality"]["sales_known"]
     # Sans date de dernière visite : les dernières 24 heures. Une date trop ancienne est ramenée à 30 jours.
     assert Api(app_db).today()["recent"]["sold"]["count"] == 1
