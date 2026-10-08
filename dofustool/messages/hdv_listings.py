@@ -69,6 +69,8 @@ def parse(body: bytes, mapping: Mapping) -> HdvListings | None:
                     elif sub_number == f["uid"] and sub_type == VARINT:
                         uid = sub_value
                     elif sub_number == f["prices"]:
+                        if sub_type not in (VARINT, LEN):
+                            return None  # prix en entier fixe : forme inconnue
                         prices += _prices(sub_type, sub_value)
                     elif sub_type == LEN:
                         # Sous-message inconnu : sans doute des effets dont le champ a changé de numéro.

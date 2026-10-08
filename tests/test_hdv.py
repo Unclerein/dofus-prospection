@@ -70,6 +70,8 @@ def test_parse_equipment_keeps_numbers_and_drops_text():
         message(289, ld(2, vi(2, 289) + ld(6, packed([4, 0, 0, 0])))),  # sans identifiant d'annonce
         message(289, listing(289, 1, [4, 0, 0, 0])) + ld(9, b"x"),  # champ de premier niveau inattendu
         message(289, listing(289, 1, [4, 0, 0, 0]))[:-3],  # tronqué
+        message(289, ld(2, vi(2, 289) + vi(5, 1) + varint(6 << 3 | 5) + bytes(4))),  # prix en entier fixe 32 bits
+        message(289, ld(2, vi(2, 289) + vi(5, 1) + varint(6 << 3 | 1) + bytes(8))),  # prix en entier fixe 64 bits
     ],
 )
 def test_parse_rejects_unexpected_shapes(body):
