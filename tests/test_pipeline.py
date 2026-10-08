@@ -80,13 +80,12 @@ def test_waits_for_hourly_avg_prices_then_alerts(pipeline, caplog):
     traffic(1065.0, 1)
     pipeline.tick(1070.0)
     pipeline.tick(1071.0)
-    # Délai dépassé : en attente, pas d'alerte (le jeu les envoie parfois seulement au recalcul horaire).
+    # Délai dépassé : en attente, pas d'alerte (écran de choix du personnage, ou capture lancée en cours de partie).
     assert not [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert [r.getMessage() for r in caplog.records].count(
-        "Prix moyens pas encore reçus : le jeu les envoie parfois seulement au recalcul horaire."
-    ) == 1
+    assert [r.getMessage() for r in caplog.records].count("Prix moyens pas encore reçus : ils arrivent au choix du personnage.") == 1
     status = db.get_status(pipeline.market)
     assert status.get("decode_alert", "") == "" and float(status["awaiting_prices_since"]) == 1000.0
+    assert status["awaiting_prices_late"] == "0"
     # Plus d'une heure de jeu sans aucun prix moyen : alerte, une seule fois.
     traffic(1000.0 + 70 * 60 + 5, 2)
     pipeline.tick(1000.0 + 70 * 60 + 10)
@@ -170,4 +169,25 @@ def test_keymap_is_reloaded_when_the_file_changes(tmp_path, caplog):
     os.utime(path, (6_000, 6_000))
     p.tick(1101.0)
     assert p.keymap["avg_prices"].key == "avg"
+    market.close()
+
+
+def test_a_capture_started_after_the_game_says_so(caplog):
+    """Le jeu était déjà connecté au démarrage de la capture : le premier envoi des prix moyens est raté."""
+    caplog.set_level(logging.INFO, logger="dofustool.capture")
+    market = db.connect(":memory:")
+    late = Pipeline(Archive(":memory:"), market, {}, avg_prices_timeout_s=60.0, started_at=998.0)
+    event = framed(EVENT)
+    feed(late, event)
+    late.handle(Segment(1065.0, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + len(event), 0, event))
+    late.tick(1070.0)
+    assert [r.getMessage() for r in caplog.records] == ["Capture lancée après la connexion au jeu : les prix moyens arriveront dans l'heure."]
+    assert db.get_status(market)["awaiting_prices_late"] == "1"
+    # Une connexion ouverte bien après le démarrage de la capture n'est pas concernée.
+    caplog.clear()
+    normal = Pipeline(Archive(":memory:"), db.connect(":memory:"), {}, avg_prices_timeout_s=60.0, started_at=500.0)
+    feed(normal, event)
+    normal.handle(Segment(1065.0, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + len(event), 0, event))
+    normal.tick(1070.0)
+    assert [r.getMessage() for r in caplog.records] == ["Prix moyens pas encore reçus : ils arrivent au choix du personnage."]
     market.close()

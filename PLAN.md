@@ -133,7 +133,7 @@ tests/fixtures/         # capture.pcapng (gitignoré) + *.bin nettoyés (commit�
 
 ### Phase 5 : capture live et lanceur
 - `python -m dofustool.capture` : sniff passif sur `tcp port 5555`, archivage, parsing des messages connus, écriture en base.
-- **Surveillance du décodage :** si un flux de jeu est actif mais qu'aucun message `avg_prices` n'est décodé dans les 70 minutes qui suivent la connexion (le jeu les renvoie toutes les heures, pas toujours au choix du personnage), émettre une alerte claire (log et indicateur dans le dashboard). C'est le signe d'une mise à jour qui a cassé le keymap. Ne jamais planter, ne jamais écrire de données douteuses.
+- **Surveillance du décodage :** si un flux de jeu est actif mais qu'aucun message `avg_prices` n'est décodé dans les 70 minutes qui suivent la connexion (le jeu les envoie au choix du personnage puis toutes les heures : une capture lancée après la connexion attend le prochain envoi), émettre une alerte claire (log et indicateur dans le dashboard). C'est le signe d'une mise à jour qui a cassé le keymap. Ne jamais planter, ne jamais écrire de données douteuses.
 - `launcher/start.ps1` :
   1. démarre la capture en arrière-plan et attend qu'elle soit prête ;
   2. lance le launcher Ankama, dont le chemin est dans `config.toml` ;

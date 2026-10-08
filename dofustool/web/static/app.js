@@ -1822,7 +1822,7 @@ async function pageStatus() {
       kpi('Capture', s.running ? 'En cours' : 'Arrêtée', s.running ? ago(s.started_ts, now) : when(s.stopped_ts), s.running ? 'gain' : ''),
       kpi('Dernier relevé de prix', ago(s.last_snapshot_ts, now), when(s.last_snapshot_ts)),
       s.decode_alert ? kpi('Décodage', 'Alerte', 'voir MAINTENANCE.md', 'warn')
-        : s.running && s.awaiting_prices_since ? kpi('Décodage', 'En attente', "prix moyens : jusqu'à une heure après la connexion")
+        : s.running && s.awaiting_prices_since ? kpi('Décodage', 'En attente', s.awaiting_prices_late ? 'capture lancée après la connexion au jeu : prix moyens dans l\u2019heure' : 'prix moyens : ils arrivent au choix du personnage')
         : kpi('Décodage', 'Normal', null, 'gain')),
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Données')),
       h('table', {}, h('tbody', {}, rows.map(([label, value]) => h('tr', {}, h('td', { class: 'l soft' }, label), h('td', { style: 'font-weight: 500' }, value)))))),

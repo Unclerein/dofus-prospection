@@ -40,10 +40,12 @@ trouvé, ou a trouvé plusieurs candidats (`Message … non retrouvé : plusieur
 - Le journal `data/capture.log` contient `ALERTE : Flux de jeu actif depuis … sans prix moyens décodés`.
 - Le dashboard affiche « Alerte de décodage », et la page **État** indique un dernier relevé ancien.
 
-Le jeu n'envoie pas toujours les prix moyens au choix du personnage : parfois seulement à son
-recalcul horaire. Pendant cette attente, la page **État** affiche « Décodage : En attente », et la
-capture cherche déjà si les clés ont changé. L'alerte n'apparaît qu'après 70 minutes de jeu sans
-aucun prix moyen.
+Le jeu envoie les prix moyens au choix du personnage, puis une fois par heure à partir de là. Si la
+capture est lancée alors que le jeu est déjà connecté, elle rate le premier envoi et attend le
+suivant, jusqu'à une heure : rien n'est cassé, et tout le reste est décodé entre-temps. Pendant cette
+attente, la page **État** affiche « Décodage : En attente » avec la raison, et la capture cherche déjà
+si les clés ont changé. L'alerte n'apparaît qu'après 70 minutes de jeu sans aucun prix moyen.
+Pour l'éviter : lancer le jeu par le raccourci Prospection, qui démarre la capture avant la connexion.
 
 ## Procédure
 

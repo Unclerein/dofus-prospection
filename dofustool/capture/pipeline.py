@@ -21,10 +21,13 @@ log = logging.getLogger("dofustool.capture")
 ACTIVE_WINDOW_S = 30.0
 # Tant qu'un message reste à retrouver (après une mise à jour du jeu), on le cherche à cet intervalle.
 IDENTIFY_EVERY_S = 20.0
-# Le jeu n'envoie pas toujours les prix moyens au choix du personnage : parfois seulement à son
-# recalcul horaire. Passé le délai de la configuration, la capture cherche si les clés ont changé ;
-# elle n'alerte qu'après ce délai-ci, plus d'une heure de jeu sans aucun prix moyen.
+# Le jeu envoie les prix moyens au choix du personnage, puis une fois par heure à partir de là. Une
+# capture lancée alors que le jeu est déjà connecté rate le premier envoi et attend le suivant, jusqu'à
+# une heure. Passé le délai de la configuration, la capture cherche si les clés ont changé ; elle
+# n'alerte qu'après ce délai-ci, plus d'une heure de jeu sans aucun prix moyen.
 ALERT_AFTER_S = 70 * 60.0
+# Une connexion déjà active dans les secondes qui suivent le démarrage de la capture existait avant elle.
+LATE_START_S = 10.0
 
 
 @dataclass(slots=True)
@@ -34,6 +37,7 @@ class _ConnWatch:
     archive_id: int | None
     got_prices: bool = False
     waiting: bool = False  # délai de la configuration dépassé, prix moyens toujours attendus
+    late: bool = False  # la capture a démarré alors que cette connexion était déjà ouverte
     alerted: bool = False
     next_build_check: float = 0.0  # prochaine recherche de nouvelles clés, tant que les prix manquent
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
@@ -51,7 +55,10 @@ class Pipeline:
         keymap: dict[str, Mapping],
         avg_prices_timeout_s: float = 60.0,
         keymap_path: Path | None = None,
+        started_at: float | None = None,
     ) -> None:
+        # started_at : heure de démarrage de la capture, pour reconnaître une connexion ouverte avant elle.
+        self._started_at = started_at
         # Si le chemin est donné, keymap.json est relu dès qu'il change : après une mise à jour du jeu,
         # la correction des clés prend effet sans relancer la capture (ni perdre la connexion en cours).
         self._keymap_path = keymap_path
@@ -81,6 +88,7 @@ class Pipeline:
             conn = self.session.states[msg.conn].connection
             archive_id = self.archive.open_connection(conn.first_ts, conn.key.client_port, conn.key.server, "live")
             watch = self._watch[msg.conn] = _ConnWatch(conn.first_ts, msg.ts, archive_id)
+            watch.late = self._started_at is not None and conn.first_ts - self._started_at <= LATE_START_S
             db.set_status(self.market, last_connection_ts=conn.first_ts)
         watch.last_ts = msg.ts
         source_id = self.archive.add(watch.archive_id, msg) if watch.archive_id is not None else None
@@ -256,8 +264,11 @@ class Pipeline:
                             continue
                     if not watch.waiting:
                         watch.waiting = True
-                        log.info("Prix moyens pas encore reçus : le jeu les envoie parfois seulement au recalcul horaire.")
-                        db.set_status(self.market, awaiting_prices_since=watch.first_ts)
+                        if watch.late:
+                            log.info("Capture lancée après la connexion au jeu : les prix moyens arriveront dans l'heure.")
+                        else:
+                            log.info("Prix moyens pas encore reçus : ils arrivent au choix du personnage.")
+                        db.set_status(self.market, awaiting_prices_since=watch.first_ts, awaiting_prices_late=int(watch.late))
                     if now - watch.first_ts <= ALERT_AFTER_S:
                         continue
                     watch.alerted = True

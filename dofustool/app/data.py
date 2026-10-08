@@ -343,6 +343,7 @@ def status(conn: sqlite3.Connection, now: float) -> dict:
         "decode_alert": raw.get("decode_alert", ""),
         "decode_alert_ts": ts("decode_alert_ts"),
         "awaiting_prices_since": ts("awaiting_prices_since"),
+        "awaiting_prices_late": raw.get("awaiting_prices_late") == "1",
         "last_snapshot_ts": latest[0] if latest else None,
         "snapshots": conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0],
         "priced_items": conn.execute(

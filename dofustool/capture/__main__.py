@@ -53,7 +53,7 @@ def main() -> int:
             log.info("Anciens relevés de prix moyens : %d supprimés, un par jour est gardé.", thinned)
     except Exception as exc:  # le ménage ne doit jamais empêcher la capture
         log.warning("Ménage des anciennes données non fait : %s", exc)
-    pipeline = Pipeline(archive, market, keymap, cfg.avg_prices_timeout_s, keymap_path)
+    pipeline = Pipeline(archive, market, keymap, cfg.avg_prices_timeout_s, keymap_path, started_at=time.time())
     source = LiveSource(iface=args.iface or cfg.iface)
     try:
         source.start()
