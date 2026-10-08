@@ -250,6 +250,15 @@ CREATE TABLE IF NOT EXISTS offline_sales (
     delta      INTEGER NOT NULL,
     attributed INTEGER NOT NULL DEFAULT 0
 );
+-- Lots disparus d'un relevé de mes ventes alors que des kamas gagnés hors ligne attendent d'être détaillés.
+-- Ils sont gardés d'un HDV à l'autre : la somme annoncée peut couvrir des lots de plusieurs HDV.
+CREATE TABLE IF NOT EXISTS gone_lots (
+    uid        INTEGER PRIMARY KEY,
+    item_id    INTEGER NOT NULL,
+    lot        INTEGER NOT NULL,
+    price      INTEGER NOT NULL,
+    noticed_at REAL NOT NULL
+);
 -- Passages de rune en forgemagie. Donnée personnelle, jamais partagée.
 CREATE TABLE IF NOT EXISTS fm_passes (
     source_id   INTEGER PRIMARY KEY,
@@ -693,6 +702,7 @@ def return_unsold(conn: sqlite3.Connection, count: int, ts: float) -> list[tuple
     with conn:
         for market, uid, item_id, lot, price in rows:
             conn.execute("DELETE FROM my_sales WHERE market = ? AND uid = ?", (market, uid))
+            conn.execute("DELETE FROM gone_lots WHERE uid = ?", (uid,))
             if bank_known:
                 conn.execute(
                     "INSERT INTO piles VALUES (?, ?, ?, ?, 0) ON CONFLICT (uid, container) DO UPDATE SET quantity = quantity + excluded.quantity",
@@ -781,7 +791,8 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
         ]
         # Un relevé rejoué sans les jets (clés des annonces HDV pas encore retrouvées) ne les efface pas.
         kept = dict(conn.execute("SELECT uid, effects FROM my_sales WHERE market = ? AND effects IS NOT NULL", (listing.market,)))
-        _attribute_offline(conn, gone, row[0] if row is not None else captured_at, captured_at)
+        _note_gone(conn, gone, listed, captured_at)
+        _attribute_offline(conn, captured_at)
         for market in same:
             conn.execute("DELETE FROM my_sales WHERE market = ?", (market,))
             conn.execute("DELETE FROM my_sales_meta WHERE market = ?", (market,))
@@ -836,52 +847,85 @@ def _mark_fm_sold(conn: sqlite3.Connection, uid: int, price: int, ts: float) -> 
     conn.execute("UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE uid = ? AND sold_at IS NULL", (price, ts, uid))
 
 
-# Au-delà, trop de combinaisons de lots donnent la même somme pour en retenir une (et une mise à jour
-# du jeu renumérote tous les lots d'un coup : ils semblent alors tous partis).
-MAX_OFFLINE_LOTS = 16
+# Un lot disparu ne reste candidat que ce temps-là : au-delà, c'était un retrait à la main.
+GONE_LOT_MAX_AGE_S = 14 * 86400.0
+# Une mise à jour du jeu renumérote tous les lots d'un coup : ils semblent alors tous partis. Au-delà de ce
+# nombre de disparitions dans un seul relevé, rien n'est retenu.
+MAX_GONE_AT_ONCE = 60
 
 
 def _subset(lots: list[tuple], amount: int) -> list[tuple] | None:
     """Les lots (uid, objet, taille, prix) dont les prix font exactement ce montant, si une seule réponse existe.
 
-    Deux lots identiques sont interchangeables : ils ne font pas deux réponses.
+    Deux lots identiques sont interchangeables : ils ne font pas deux réponses. Le calcul avance somme par
+    somme et par groupe de lots identiques, ce qui reste rapide avec des dizaines de lots.
     """
-    if not lots or len(lots) > MAX_OFFLINE_LOTS:
+    if not lots or amount <= 0:
         return None
-    found: dict[tuple, list[tuple]] = {}
-    for mask in range(1, 1 << len(lots)):
-        picked = [lot for bit, lot in enumerate(lots) if mask >> bit & 1]
-        if sum(lot[3] for lot in picked) == amount:
-            found.setdefault(tuple(sorted(lot[1:] for lot in picked)), picked)
-            if len(found) > 1:
-                return None
-    return next(iter(found.values()), None)
+    groups: dict[tuple, list[tuple]] = {}
+    for lot in lots:
+        groups.setdefault(tuple(lot[1:]), []).append(lot)
+    # sums : somme atteinte -> (nombre de façons distinctes, plafonné à 2 ; une façon : {groupe: nombre de lots pris})
+    sums: dict[int, tuple[int, dict]] = {0: (1, {})}
+    for signature, members in groups.items():
+        price = signature[2]
+        if price <= 0:
+            continue
+        after = dict(sums)
+        for total, (ways, taken) in sums.items():
+            for count in range(1, len(members) + 1):
+                reached = total + count * price
+                if reached > amount:
+                    break
+                known = after.get(reached)
+                after[reached] = (min(2, ways + (known[0] if known else 0)), known[1] if known else {**taken, signature: count})
+        sums = after
+        if len(sums) > 200_000:
+            return None  # trop de sommes possibles pour conclure
+    found = sums.get(amount)
+    if found is None or found[0] != 1:
+        return None
+    return [lot for signature, count in found[1].items() for lot in groups[signature][:count]]
 
 
-def _attribute_offline(conn: sqlite3.Connection, gone: list[tuple], since: float, ts: float) -> None:
-    """Rapproche les lots disparus d'un relevé de mes ventes des kamas gagnés hors ligne.
+def _note_gone(conn: sqlite3.Connection, gone: list[tuple], listed: set[int], ts: float) -> None:
+    """Retient les lots disparus de ce relevé tant que des kamas gagnés hors ligne attendent d'être détaillés."""
+    conn.execute("DELETE FROM gone_lots WHERE noticed_at < ?", (ts - GONE_LOT_MAX_AGE_S,))
+    if listed:
+        marks = ",".join("?" * len(listed))
+        conn.execute(f"DELETE FROM gone_lots WHERE uid IN ({marks})", sorted(listed))  # un lot revu n'est pas parti
+    waiting = conn.execute("SELECT 1 FROM offline_sales WHERE attributed = 0 AND delta > 0 AND ts <= ? LIMIT 1", (ts,)).fetchone()
+    if waiting is None or len(gone) > MAX_GONE_AT_ONCE:
+        return
+    conn.executemany("INSERT OR REPLACE INTO gone_lots VALUES (?, ?, ?, ?, ?)", [(*lot, ts) for lot in gone])
+
+
+def _attribute_offline(conn: sqlite3.Connection, ts: float) -> None:
+    """Rapproche les lots disparus de mes relevés de vente des kamas gagnés hors ligne.
 
     N'inscrit une vente que si les prix des lots font le montant au kama près, d'une seule façon :
-    un lot retiré à la main ou expiré ne doit pas passer pour une vente.
+    un lot retiré à la main ne doit pas passer pour une vente. Les lots peuvent venir de plusieurs HDV :
+    tant que tous n'ont pas été rouverts, la somme ne tombe pas juste et rien n'est inscrit.
     """
-    # Une vente conclue entre deux relevés a été annoncée à une connexion située entre les deux.
     pending = conn.execute(
-        "SELECT source_id, ts, delta FROM offline_sales WHERE attributed = 0 AND delta > 0 AND ts > ? AND ts <= ? ORDER BY ts",
-        (since, ts),
+        "SELECT source_id, ts, delta FROM offline_sales WHERE attributed = 0 AND delta > 0 AND ts <= ? ORDER BY ts", (ts,)
     ).fetchall()
-    if not pending or not gone:
+    if not pending:
         return
+    # Un lot ne peut répondre qu'à une annonce antérieure au relevé qui a constaté sa disparition.
+    pool = conn.execute("SELECT uid, item_id, lot, price, noticed_at FROM gone_lots ORDER BY noticed_at, uid").fetchall()
+    plan, left = [], list(pool)
     # D'abord annonce par annonce, pour dater chaque vente de la bonne connexion ; sinon le tout d'un bloc.
-    plan, left = [], list(gone)
     for source_id, at, delta in pending:
-        picked = _subset(left, delta)
+        picked = _subset([lot[:4] for lot in left if lot[4] >= at], delta)
         if picked is not None:
             plan.append(([source_id], at, picked))
-            left = [lot for lot in left if lot not in picked]
+            taken = {lot[0] for lot in picked}
+            left = [lot for lot in left if lot[0] not in taken]
     if len(plan) < len(pending):
         done = {source_id for sources, _, _ in plan for source_id in sources}
         rest = [row for row in pending if row[0] not in done]
-        picked = _subset(left, sum(delta for _, _, delta in rest))
+        picked = _subset([lot[:4] for lot in left if lot[4] >= rest[0][1]], sum(delta for _, _, delta in rest))
         if picked is not None:
             plan.append(([row[0] for row in rest], rest[-1][1], picked))
     for sources, at, picked in plan:
@@ -893,15 +937,24 @@ def _attribute_offline(conn: sqlite3.Connection, gone: list[tuple], since: float
                 (-(source_id * 100 + rank), at, item_id, lot, price, uid),
             )
             _mark_fm_sold(conn, uid, price, at)
+            conn.execute("DELETE FROM gone_lots WHERE uid = ?", (uid,))
         marks = ",".join("?" * len(sources))
         conn.execute(f"UPDATE offline_sales SET attributed = 1 WHERE source_id IN ({marks})", sources)
 
 
-def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts: float) -> int:
+def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts: float, at_login: bool = True) -> int:
     """Enregistre le total des ventes hors ligne annoncé par le jeu. Renvoie ce qui s'y est ajouté (0 si déjà connu).
 
-    Le total ne fait que monter jusqu'à ce que le joueur retire des kamas de sa banque : il repart alors de zéro.
+    Le même message a deux sens. À la connexion (at_login), c'est le total des kamas gagnés hors ligne, qui
+    ne fait que monter jusqu'à la prochaine ouverture de la banque. En cours de partie, il suit une opération
+    à la banque et donne les kamas qui s'y trouvent : ce n'est pas un gain, seulement le signe que le compteur
+    des ventes hors ligne repart de zéro, et le montant à retenir pour la banque.
     """
+    if not at_login:
+        with conn:
+            cur = conn.execute("INSERT OR IGNORE INTO offline_sales VALUES (?, ?, 0, 0, 1)", (source_id, ts))
+            conn.execute("UPDATE holdings_meta SET kamas = ? WHERE container = ? AND captured_at <= ?", (total, BANK, ts))
+        return 0
     previous = conn.execute(
         "SELECT total FROM offline_sales WHERE ts <= ? AND source_id != ? ORDER BY ts DESC, source_id DESC LIMIT 1", (ts, source_id)
     ).fetchone()

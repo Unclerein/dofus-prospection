@@ -531,7 +531,7 @@ async function pageWorkshop(r) {
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', { class: 'l' }, 'Obtention'), h('th', {}, 'Tout acheter'), h('th', { title: 'En achetant chaque ingrédient de la recette' }, 'Fabriquer'), h('th', {}, 'En stock'), h('th', {}, ''))),
         h('tbody', {}, l.goals.map((g) => h('tr', {},
-          h('td', { class: 'l' }, itemCell(g.icon, g.name, [g.note, g.mode === 'craft' ? (g.to_make < g.quantity ? `${fmt(g.to_make)} à fabriquer, le reste en stock` : 'à fabriquer') : 'à acheter'].filter(Boolean).join(' · '), g.item_id)),
+          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${g.item_id}`, title: 'Ouvrir la fiche de l\u2019objet' }, itemCell(g.icon, g.name, [g.note, g.mode === 'craft' ? (g.to_make < g.quantity ? `${fmt(g.to_make)} à fabriquer, le reste en stock` : 'à fabriquer') : 'à acheter'].filter(Boolean).join(' · '), g.item_id))),
           h('td', {}, h('input', { type: 'number', min: 1, max: 1000000, value: g.quantity, class: 'qty-input', 'aria-label': `Quantité de ${g.name}`,
             onchange: (e) => { const q = Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))); run({ action: 'goal', goal: g.id, quantity: q }); } })),
           h('td', { class: 'l' }, way(g)),
@@ -1116,7 +1116,7 @@ function salesJournal(data, ui) {
     kpi('Acheté sur 24 h', fmt(t.purchase_24h[1]), `${t.purchase_24h[0]} lot${t.purchase_24h[0] > 1 ? 's' : ''}`),
     kpi('Acheté sur 7 j', fmt(t.purchase_7d[1]), `${t.purchase_7d[0]} lot${t.purchase_7d[0] > 1 ? 's' : ''}`));
   const waiting = data.offline_pending && data.offline_pending.amount > 0
-    ? h('div', { class: 'banner' }, `${fmt(data.offline_pending.amount)} kamas gagnés hors ligne (annoncés le ${when(data.offline_pending.latest)}) ne sont pas encore détaillés. Ouvre l'onglet Vendre de tes HDV en jeu : les lots partis seront retrouvés.`)
+    ? h('div', { class: 'banner' }, `${fmt(data.offline_pending.amount)} kamas gagnés hors ligne (annoncés le ${when(data.offline_pending.latest)}) ne sont pas encore détaillés. Ouvre l'onglet Vendre de chacun de tes HDV en jeu : les lots partis seront retrouvés dès que leur somme tombera juste.`)
     : null;
   if (!data.trades.length) {
     return [kpis, waiting, h('div', { class: 'panel empty' }, 'Aucune vente ni achat capté pour l\'instant. Ils s\'ajoutent tout seuls quand le jeu les annonce, capture active.')];

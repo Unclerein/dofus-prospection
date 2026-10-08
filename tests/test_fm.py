@@ -141,6 +141,9 @@ def test_offline_sales_are_matched_to_the_lots_that_left():
     assert db.save_offline_total(conn, 103, 3_800, 3000.0) == 3_800
     assert db.save_offline_total(conn, 103, 3_800, 3000.0) == 0  # même message rejoué
     assert db.save_offline_total(conn, 104, 6_400, 4000.0) == 2_600
+    # En cours de partie, le même message suit un dépôt en banque : pas un gain, et le compteur repart de zéro.
+    assert db.save_offline_total(conn, 105, 16_900_000, 4050.0, at_login=False) == 0
+    assert conn.execute("SELECT total, delta, attributed FROM offline_sales WHERE source_id = 105").fetchone() == (0, 0, 1)
     db.save_sales(conn, SalesList(11, (listing[3],)), 4100.0)
     sold = conn.execute("SELECT ts, item_id, quantity, price, ref FROM trades WHERE source_id < 0 ORDER BY ts, ref").fetchall()
     # Chaque vente est datée de la connexion qui l'a annoncée.
@@ -191,10 +194,9 @@ def test_pipeline_records_passes_and_backfill_does_not_double_them(caplog, monke
     )
     with caplog.at_level(logging.INFO, logger="dofustool.capture"):
         feed(pipeline, stream)
-    assert [r.getMessage() for r in caplog.records] == [
-        "Forgemagie : premier passage de rune sur Geta.",
-        "Ventes hors ligne : 500 kamas depuis la dernière annonce.",
-    ]
+    # La seconde annonce de la connexion suit une opération à la banque : ce n'est pas une vente hors ligne.
+    assert [r.getMessage() for r in caplog.records] == ["Forgemagie : premier passage de rune sur Geta."]
+    assert market.execute("SELECT total, delta, attributed FROM offline_sales ORDER BY ts").fetchall() == [(4_000, 0, 1), (0, 0, 1)]
     assert market.execute("SELECT rune_id, passed, lost, pool, pool_change FROM fm_passes ORDER BY source_id").fetchall() == [
         (RUNE, 1, 1, 3.0, POOL_UP),
         (RUNE, 0, 0, 3.0, POOL_SAME),
@@ -250,3 +252,22 @@ def test_journal_is_served(app_db):  # noqa: F811
     assert sales["offline_pending"]["amount"] == 0 and sales["trades"][0]["offline"] is False
     # La vente de l'exemplaire forgemagé est rattachée à la forgemagie ; l'achat de Blé (pas une rune), non.
     assert [(t["kind"], t["fm"]) for t in sales["trades"]] == [("sale", True), ("purchase", False)]
+
+
+def test_offline_sales_can_span_several_markets():
+    """La somme annoncée couvre des lots de deux HDV : elle ne tombe juste qu'une fois les deux rouverts."""
+    conn = db.connect(":memory:")
+    db.save_offline_total(conn, 100, 0, 1000.0)
+    db.save_sales(conn, SalesList(11, (Sale(1, 1_601, 1, 2_000, 9_000), Sale(2, 1_602, 1, 700, 9_000))), 1100.0)
+    db.save_sales(conn, SalesList(22, (Sale(5, 8_001, 1, 3_000, 9_000), Sale(6, 8_002, 1, 900, 9_000))), 1150.0)
+    db.save_offline_total(conn, 101, 5_000, 2000.0)
+    db.save_sales(conn, SalesList(11, (Sale(2, 1_602, 1, 700, 9_000),)), 2100.0)  # premier HDV : il manque encore 3 000
+    assert conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
+    assert [row[0] for row in conn.execute("SELECT uid FROM gone_lots")] == [1]
+    db.save_sales(conn, SalesList(22, (Sale(6, 8_002, 1, 900, 9_000),)), 2200.0)  # second HDV : la somme tombe juste
+    assert conn.execute("SELECT item_id, price FROM trades WHERE source_id < 0 ORDER BY price").fetchall() == [(1_601, 2_000), (8_001, 3_000)]
+    assert conn.execute("SELECT COUNT(*) FROM gone_lots").fetchone()[0] == 0
+    # Sans annonce en attente, un lot retiré à la main n'est même pas retenu.
+    db.save_sales(conn, SalesList(22, ()), 2300.0)
+    assert conn.execute("SELECT COUNT(*) FROM gone_lots").fetchone()[0] == 0
+    conn.close()

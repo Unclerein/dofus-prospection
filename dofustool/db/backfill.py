@@ -16,6 +16,7 @@ from ..messages import inventory as moves
 from ..messages import load_runtime_keymap as load_keymap
 
 RUNES_SQL = "SELECT id FROM items WHERE type_name LIKE 'Rune %'"
+OFFLINE_LOGIN_WINDOW_S = 120.0  # comme capture.pipeline : l'annonce des ventes hors ligne arrive au début de la connexion
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -229,15 +230,21 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
     marks = ",".join("?" * len(by_key))
     scratch = db.connect(":memory:")
     rows = archive.execute(
-        f"SELECT id, ts, key, body FROM messages WHERE key IN ({marks}) AND direction = 's2c' ORDER BY id", sorted(by_key)
+        f"SELECT m.id, m.ts, m.key, m.body, m.connection_id, c.started_at FROM messages m JOIN connections c ON c.id = m.connection_id "
+        f"WHERE m.key IN ({marks}) AND m.direction = 's2c' ORDER BY m.id",
+        sorted(by_key),
     )
-    for source_id, ts, key, body in rows:
+    announced: set[int] = set()  # connexions dont l'annonce de connexion a déjà été lue
+    for source_id, ts, key, body, connection_id, started_at in rows:
         name = by_key[key]
         mapping = keymap[name]
         if name == "offline_sales":
             total = fm.parse_offline_total(body, mapping)
             if total is not None:
-                db.save_offline_total(scratch, source_id, total, ts)
+                # Comme la capture : seule la première annonce d'une connexion, à son début, parle des ventes hors ligne.
+                at_login = connection_id not in announced and ts - started_at <= OFFLINE_LOGIN_WINDOW_S
+                announced.add(connection_id)
+                db.save_offline_total(scratch, source_id, total, ts, at_login)
         elif name == "my_sales":
             parsed = sales.parse(body, mapping)
             if parsed is not None:
@@ -252,12 +259,22 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
                 db.save_trade(scratch, source_id, trade, ts)
     added = 0
     with market:
+        # Le rejeu fait foi : une annonce mal lue par une version précédente (kamas déposés en banque pris pour des
+        # ventes hors ligne) est corrigée, pas seulement complétée.
         for row in scratch.execute("SELECT * FROM offline_sales"):
             market.execute(
                 "INSERT INTO offline_sales VALUES (?, ?, ?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
-                "attributed = MAX(attributed, excluded.attributed)",
+                "total = excluded.total, delta = excluded.delta, attributed = excluded.attributed",
                 row,
             )
+        # Une vente déjà retrouvée reste retrouvée, et les lots disparus encore sans explication sont repris.
+        market.execute(
+            "UPDATE offline_sales SET attributed = 1 WHERE attributed = 0 AND EXISTS ("
+            " SELECT 1 FROM trades WHERE source_id BETWEEN -(offline_sales.source_id * 100 + 99) AND -(offline_sales.source_id * 100))"
+        )
+        market.execute("DELETE FROM gone_lots")
+        for row in scratch.execute("SELECT * FROM gone_lots"):
+            market.execute("INSERT OR REPLACE INTO gone_lots VALUES (?, ?, ?, ?, ?)", row)
         for row in scratch.execute("SELECT * FROM trades WHERE source_id < 0"):
             added += market.execute("INSERT OR IGNORE INTO trades VALUES (?, ?, ?, ?, ?, ?, ?)", row).rowcount
             market.execute(

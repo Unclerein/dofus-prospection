@@ -26,6 +26,8 @@ IDENTIFY_EVERY_S = 20.0
 # une heure. Passé le délai de la configuration, la capture cherche si les clés ont changé ; elle
 # n'alerte qu'après ce délai-ci, plus d'une heure de jeu sans aucun prix moyen.
 ALERT_AFTER_S = 70 * 60.0
+# L'annonce des ventes hors ligne arrive avec l'inventaire, dans les secondes qui suivent le choix du personnage.
+OFFLINE_LOGIN_WINDOW_S = 120.0
 # Une connexion déjà active dans les secondes qui suivent le démarrage de la capture existait avant elle.
 LATE_START_S = 10.0
 
@@ -39,6 +41,7 @@ class _ConnWatch:
     waiting: bool = False  # délai de la configuration dépassé, prix moyens toujours attendus
     late: bool = False  # la capture a démarré alors que cette connexion était déjà ouverte
     coffre: str | None = None  # coffre que le joueur vient d'ouvrir (banque ou havre-sac) : sa liste suit
+    offline_announced: bool = False  # l'annonce des ventes hors ligne de cette connexion a déjà été reçue
     trade: exchange.Tracker = field(default_factory=exchange.Tracker)  # échange en cours avec un autre joueur
     visible: set = field(default_factory=lambda: {db.INVENTORY})  # coffres de la dernière liste reçue
     alerted: bool = False
@@ -195,7 +198,10 @@ class Pipeline:
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             total = fm.parse_offline_total(msg.body, mapping)
             if total is not None and source_id is not None:
-                gained = db.save_offline_total(self.market, source_id, total, msg.ts)
+                # Seule la première annonce d'une connexion, reçue avec l'inventaire, parle des ventes hors ligne.
+                at_login = not watch.offline_announced and not watch.late and msg.ts - watch.first_ts <= OFFLINE_LOGIN_WINDOW_S
+                watch.offline_announced = True
+                gained = db.save_offline_total(self.market, source_id, total, msg.ts, at_login)
                 if gained:
                     log.info("Ventes hors ligne : %d kamas depuis la dernière annonce.", gained)
             return
