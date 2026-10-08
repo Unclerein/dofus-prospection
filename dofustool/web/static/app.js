@@ -2300,11 +2300,9 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
-  { id: 5, date: '8 octobre 2026', title: 'Recherche globale', points: [
-    ['Ctrl+K, ou la touche / :', 'une fenêtre de recherche s\u2019ouvre d\u2019où que tu sois. Tape le nom d\u2019un objet pour ouvrir sa fiche, ou celui d\u2019une page ou d\u2019un onglet pour y aller.'],
+  { id: 6, date: '8 octobre 2026', title: 'Recherche globale, forgemagie et annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
+    ['Recherche globale, Ctrl+K ou la touche / :', 'une fenêtre de recherche s\u2019ouvre d\u2019où que tu sois. Tape le nom d\u2019un objet pour ouvrir sa fiche, ou celui d\u2019une page ou d\u2019un onglet pour y aller.'],
     ['Aussi dans le menu :', 'le bouton « Rechercher », en haut à gauche.'],
-  ] },
-  { id: 4, date: '8 octobre 2026', title: 'Métiers de forgemagie, jets de tes objets, estimation par annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Forgemagie › Classement :', 'un choix du métier de forgemagie, et une case « Ce que je peux forgemager » d’après tes métiers et leur niveau.'],
     ['Mes critères par objet :', 'ils se règlent dans l’onglet « Par objet », panneau de gauche. Le classement le rappelle désormais.'],
     ['Mes ventes :', 'un filtre Équipements / Ressources, et les jets de tes équipements en vente au survol (après avoir rouvert l’onglet Vendre en jeu).'],
