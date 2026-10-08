@@ -11,6 +11,7 @@ import time
 from .. import db
 from ..archive import ARCHIVE_PATH
 from ..messages import avg_prices, characters, fm, hdv_listings, market_history, sales, storage, trades
+from ..messages import inventory as moves
 from ..messages import load_runtime_keymap as load_keymap
 
 RUNES_SQL = "SELECT id FROM items WHERE type_name LIKE 'Rune %'"
@@ -49,7 +50,36 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             if hdv is not None:
                 db.save_hdv_listings(market, hdv, ts)
                 counts["listes HDV enregistrées"] += 1
-    bank, inventory = keymap.get("bank"), keymap.get("inventory")
+    bank, listing = keymap.get("bank"), keymap.get("inventory")
+    opening = keymap.get("storage_open")
+    if listing is not None and listing.fields.get("uid") and bank is not None and opening is not None:
+        # Listes complètes dans l'ordre : chaque pile dit dans quels coffres elle est, et le type d'un coffre
+        # ouvert seul est annoncé juste avant sa liste. Les mouvements isolés ne sont pas rejoués : la
+        # dernière liste complète de chaque coffre suffit.
+        counts.update({"listes d'inventaire lues": 0, "coffres lus": 0})
+        opened: dict[int, str | None] = {}
+        rows = archive.execute(
+            "SELECT connection_id, ts, key, body FROM messages WHERE key IN (?, ?, ?) AND direction = 's2c' ORDER BY id",
+            (listing.key, bank.key, opening.key),
+        )
+        for connection_id, ts, key, body in rows:
+            if key == opening.key:
+                kind = moves.parse_single(body, opening, "type")
+                opened[connection_id] = db.PILE_CONTAINERS.get(moves.STORAGE_TYPES.get(kind))
+            elif key == bank.key:
+                parsed, container = storage.parse(body, bank), opened.pop(connection_id, None)
+                if parsed is not None and container is not None:
+                    db.save_piles(market, parsed, ts, only=container)
+                    counts["coffres lus"] += 1
+            else:
+                parsed = storage.parse(body, listing)
+                if parsed is not None:
+                    db.save_piles(market, parsed, ts)
+                    counts["listes d'inventaire lues"] += 1
+        bank = inventory_legacy = None
+    else:
+        inventory_legacy = listing
+    inventory = inventory_legacy
     if bank is not None:
         counts["banques lues"] = 0
         for ts, body in archive.execute("SELECT ts, body FROM messages WHERE key = ? ORDER BY ts", (bank.key,)):

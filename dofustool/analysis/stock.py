@@ -2,7 +2,7 @@
 import sqlite3
 from dataclasses import dataclass
 
-from ..db import ALL, BANK, INVENTORY
+from ..db import ALL, BANK, HAVRE, INVENTORY
 from .crafts import CraftCalculator, CraftResult
 
 
@@ -10,18 +10,20 @@ from .crafts import CraftCalculator, CraftResult
 class Owned:
     inventory: int = 0
     bank: int = 0
+    havre: int = 0  # havre-sac
 
     @property
     def total(self) -> int:
-        return self.inventory + self.bank
+        return self.inventory + self.bank + self.havre
 
 
 class Stock:
     """Quantités possédées par item, hors objets portés.
 
-    La banque est lue quand on l'ouvre en jeu. Si une liste fusionnée (envoyée à l'ouverture de
-    l'HDV) est plus récente, ou si la banque n'a jamais été ouverte pendant une capture, on la
-    déduit : fusion moins inventaire.
+    Chaque coffre (inventaire, banque, havre-sac) est suivi séparément : par ses listes complètes,
+    par la répartition que porte chaque pile d'une liste réunie d'HDV ou d'atelier, puis par les
+    mouvements isolés. Avant ce suivi, la banque se déduisait d'une liste « tout confondu » : fusion
+    moins inventaire ; ce calcul reste pour les bases qui n'ont que ces anciens relevés.
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -34,14 +36,18 @@ class Stock:
             "SELECT container, item_id, SUM(quantity) FROM holdings WHERE NOT equipped GROUP BY container, item_id"
         ):
             by.setdefault(container, {})[item_id] = quantity
-        inventory, bank = by[INVENTORY], by[BANK]
+        inventory, bank, havre = by[INVENTORY], by[BANK], by.get(HAVRE, {})
         # La liste fusionnée est souvent plus récente que la dernière visite à la banque : on s'y fie alors.
-        self.bank_inferred = ALL in self.meta and (
+        # Dès que les coffres sont suivis pile par pile, l'ancienne liste « tout confondu » ne sert plus.
+        by_pile = conn.execute("SELECT 1 FROM piles LIMIT 1").fetchone() is not None
+        self.bank_inferred = not by_pile and ALL in self.meta and (
             BANK not in self.meta or self.meta[ALL]["captured_at"] > self.meta[BANK]["captured_at"]
         )
         if self.bank_inferred:
             bank = {i: q - inventory.get(i, 0) for i, q in by[ALL].items() if q - inventory.get(i, 0) > 0}
-        self._owned = {i: Owned(inventory.get(i, 0), bank.get(i, 0)) for i in inventory.keys() | bank.keys()}
+        self._owned = {
+            i: Owned(inventory.get(i, 0), bank.get(i, 0), havre.get(i, 0)) for i in inventory.keys() | bank.keys() | havre.keys()
+        }
 
     @property
     def known(self) -> bool:

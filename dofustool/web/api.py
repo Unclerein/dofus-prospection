@@ -256,7 +256,7 @@ class Api:
                         "check": state["ws"].prices.estimate_check,
                     },
                     # Quantités possédées, pour le badge des icônes : {item_id: [inventaire, banque]}.
-                    "owned": {item_id: [o.inventory, o.bank] for item_id, o in state["stock"].items().items()},
+                    "owned": {item_id: [o.inventory, o.bank, o.havre] for item_id, o in state["stock"].items().items()},
                 }
             )
         finally:
@@ -406,6 +406,7 @@ class Api:
                     "owned": {
                         "inventory": state["stock"].get(item_id).inventory,
                         "bank": state["stock"].get(item_id).bank,
+                        "havre": state["stock"].get(item_id).havre,
                         "known": state["stock"].known,
                     },
                     "hdv_unit": hdv_unit,
@@ -981,6 +982,7 @@ class Api:
                         "category": category,
                         "inventory": owned.inventory,
                         "bank": owned.bank,
+                        "havre": owned.havre,
                         "total": owned.total,
                         "price": ref.price if ref else None,
                         "source": ref.source if ref else None,

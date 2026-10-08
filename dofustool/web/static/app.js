@@ -71,9 +71,9 @@ function tile(iconId, big, itemId) {
     box.append(img);
   }
   const owned = itemId !== undefined && S.status && S.status.owned ? S.status.owned[itemId] : null;
-  if (owned && owned[0] + owned[1] > 0) {
-    const total = owned[0] + owned[1];
-    box.append(h('span', { class: 'qty', title: `Possédé : ${fmt(total)} (inventaire ${fmt(owned[0])}, banque ${fmt(owned[1])})` }, compactQty(total)));
+  const total = owned ? owned[0] + owned[1] + (owned[2] || 0) : 0;
+  if (total > 0) {
+    box.append(h('span', { class: 'qty', title: `Possédé : ${fmt(total)} (inventaire ${fmt(owned[0])}, banque ${fmt(owned[1])}` + (owned[2] ? `, havre-sac ${fmt(owned[2])})` : ')') }, compactQty(total)));
   }
   return box;
 }
@@ -643,7 +643,7 @@ function haveTag(have, need) {
 
 function stockFreshness(meta, bankInferred, now) {
   const part = (key, label) => (meta[key] ? `${label} ${ago(meta[key].captured_at, now)}` : `${label} : jamais lu`);
-  return `${part('inventory', 'Inventaire')} · ${bankInferred ? 'banque déduite' : part('bank', 'banque')}`;
+  return `${part('inventory', 'Inventaire')} · ${bankInferred ? 'banque déduite' : part('bank', 'banque')}` + (meta.havre ? ` · ${part('havre', 'havre-sac')}` : '');
 }
 
 async function pageStock(r) {
@@ -777,11 +777,12 @@ function stockItems(data) {
     h('section', { class: 'panel', 'aria-label': 'Objets possédés' },
       rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun objet ne correspond.')
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
-          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
+          h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', {}, 'Havre-sac'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
           h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
             h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '), row.item_id)),
             h('td', { class: row.inventory ? 'soft' : 'muted' }, row.inventory ? fmt(row.inventory) : '—'),
             h('td', { class: row.bank ? 'soft' : 'muted' }, row.bank ? fmt(row.bank) : '—'),
+            h('td', { class: row.havre ? 'soft' : 'muted' }, row.havre ? fmt(row.havre) : '—'),
             h('td', { style: 'font-weight: 600' }, fmt(row.total)),
             h('td', {}, row.price === null ? h('span', { class: 'muted' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + dotClass(row.source) }), [row.source, lotLabel(row.lot)].filter(Boolean).join(' · '))]),
             h('td', { class: 'strong ' + (row.value === null ? 'muted' : '') }, fmt(row.value)),
@@ -1615,8 +1616,8 @@ async function pageItem(r) {
   const header = h('section', { class: 'panel item-head' }, tile(d.icon, true, d.id),
     h('div', { class: 'info' }, h('div', { class: 'title' }, d.name), h('div', { class: 'muted' }, `${d.type || 'Objet'} · niveau ${d.level} · ${d.exchangeable ? 'échangeable' : 'non échangeable'}`),
       d.owned.known && h('div', { class: 'tags', style: 'margin-top: 4px' },
-        d.owned.inventory + d.owned.bank > 0
-          ? [h('span', { class: 'tag good' }, `Tu en as ${fmt(d.owned.inventory + d.owned.bank)}`), h('span', { class: 'tag' }, `inventaire ${fmt(d.owned.inventory)}`), h('span', { class: 'tag' }, `banque ${fmt(d.owned.bank)}`)]
+        d.owned.inventory + d.owned.bank + (d.owned.havre || 0) > 0
+          ? [h('span', { class: 'tag good' }, `Tu en as ${fmt(d.owned.inventory + d.owned.bank + (d.owned.havre || 0))}`), h('span', { class: 'tag' }, `inventaire ${fmt(d.owned.inventory)}`), h('span', { class: 'tag' }, `banque ${fmt(d.owned.bank)}`), d.owned.havre > 0 && h('span', { class: 'tag' }, `havre-sac ${fmt(d.owned.havre)}`)]
           : h('span', { class: 'tag' }, "Tu n'en as pas"))),
     d.equipment && d.hdv && h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Voir en forgemagie'),
     h('button', { class: 'btn ' + (d.ignored ? '' : 'quiet'), onclick: () => setIgnored(id, d.name, !d.ignored) }, d.ignored ? 'Ne plus ignorer' : 'Ignorer cet objet'));

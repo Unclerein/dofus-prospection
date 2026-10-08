@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import db, identify
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, fm, hdv_listings, load_keymap, market_history, sales, storage, trades
+from ..messages import Mapping, avg_prices, characters, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -38,6 +38,8 @@ class _ConnWatch:
     got_prices: bool = False
     waiting: bool = False  # délai de la configuration dépassé, prix moyens toujours attendus
     late: bool = False  # la capture a démarré alors que cette connexion était déjà ouverte
+    coffre: str | None = None  # coffre que le joueur vient d'ouvrir (banque ou havre-sac) : sa liste suit
+    visible: set = field(default_factory=lambda: {db.INVENTORY})  # coffres de la dernière liste reçue
     alerted: bool = False
     next_build_check: float = 0.0  # prochaine recherche de nouvelles clés, tant que les prix manquent
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
@@ -73,6 +75,7 @@ class Pipeline:
         self._next_identify = 0.0
         self._context: identify.Context | None = None
         self._runes: frozenset[int] | None = None
+        self._stock_moved: float | None = None  # dernier mouvement d'inventaire pas encore signalé à l'interface
         self.backup_dir = db.MARKET_PATH.parent / "keymap-backups"
 
     def handle(self, segment: Segment) -> None:
@@ -194,17 +197,34 @@ class Pipeline:
                 log.info("Lots en vente enregistrés : %d.", len(listing.sales))
             return
 
+        if self._stock_moves(msg, watch):
+            return
+
         mapping = self.keymap.get("bank")
         if mapping is not None and msg.key == mapping.key:
             bank = storage.parse(msg.body, mapping)
-            if bank is not None and db.save_holdings(self.market, db.BANK, bank, msg.ts):
+            opened, watch.coffre = watch.coffre, None
+            if bank is None:
+                return
+            if mapping.fields.get("uid") and "storage_open" in self.keymap:
+                # Même message pour la banque et le havre-sac : seul le type annoncé juste avant les distingue.
+                if opened is not None and db.save_piles(self.market, bank, msg.ts, only=opened):
+                    log.info("%s : %d piles.", "Banque enregistrée" if opened == db.BANK else "Havre-sac enregistré", len(bank.stacks))
+            elif db.save_holdings(self.market, db.BANK, bank, msg.ts):
                 log.info("Banque enregistrée : %d piles.", len(bank.stacks))
             return
 
         mapping = self.keymap.get("inventory")
         if mapping is not None and msg.key == mapping.key:
             listing = storage.parse(msg.body, mapping)
-            if listing is not None:
+            if listing is not None and mapping.fields.get("uid"):
+                # Liste simple (inventaire) ou réunie (HDV, atelier) : chaque pile dit dans quels coffres elle est.
+                first = watch.inventory is None
+                watch.inventory = listing
+                watch.visible = {db.INVENTORY} | {db.PILE_CONTAINERS[part] for s in listing.stacks for part, _ in s.parts}
+                if db.save_piles(self.market, listing, msg.ts) and first:
+                    log.info("Inventaire enregistré : %d piles.", len(listing.stacks))
+            elif listing is not None:
                 # Même clé pour l'inventaire et pour la liste fusionnée envoyée à l'ouverture de l'HDV.
                 if storage.looks_merged(listing, watch.inventory):
                     db.save_holdings(self.market, db.ALL, listing, msg.ts)
@@ -242,6 +262,46 @@ class Pipeline:
             if watch.alerted:
                 watch.alerted = False
                 log.info("Alerte levée : les prix moyens ont fini par être décodés.")
+
+    def _stock_moves(self, msg: Message, watch: _ConnWatch) -> bool:
+        """Mouvements de l'inventaire entre deux listes complètes. Renvoie True si le message en était un."""
+        if msg.direction != S2C:
+            return False
+        keymap, listing = self.keymap, self.keymap.get("inventory")
+        mapping = keymap.get("storage_open")
+        if mapping is not None and msg.key == mapping.key:
+            kind = inventory.parse_single(msg.body, mapping, "type")
+            watch.coffre = db.PILE_CONTAINERS.get(inventory.STORAGE_TYPES.get(kind))
+            return True
+        if listing is None or not listing.fields.get("uid"):
+            return False
+        mapping = keymap.get("pile_update")
+        if mapping is not None and msg.key == mapping.key:
+            update = inventory.parse_pile_update(msg.body, mapping)
+            if update is not None and db.update_pile(self.market, update, watch.visible, msg.ts):
+                self._stock_moved = msg.ts
+            return True
+        for name in ("object_added", "object_created", "object_modified"):
+            mapping = keymap.get(name)
+            if mapping is not None and msg.key == mapping.key:
+                obj = inventory.parse_object(msg.body, mapping, listing, storage.BAG_POSITION)
+                if obj is not None and db.add_pile(self.market, obj, msg.ts):
+                    self._stock_moved = msg.ts
+                return True
+        mapping = keymap.get("object_removed")
+        if mapping is not None and msg.key == mapping.key:
+            uid = inventory.parse_single(msg.body, mapping, "uid")
+            if uid and db.remove_pile(self.market, uid, msg.ts):
+                self._stock_moved = msg.ts
+            return True
+        mapping = keymap.get("kamas")
+        if mapping is not None and msg.key == mapping.key:
+            kamas = inventory.parse_single(msg.body, mapping, "kamas")
+            if kamas is not None:
+                db.set_kamas(self.market, kamas, msg.ts)
+                self._stock_moved = msg.ts
+            return True
+        return False
 
     def _rune_ids(self) -> frozenset[int]:
         if self._runes is None:
@@ -284,6 +344,10 @@ class Pipeline:
                 for watch in self._watch.values():
                     if now - watch.last_ts <= ACTIVE_WINDOW_S:
                         self._identify(watch, new_build=False)
+            # Les derniers mouvements d'inventaire, restés sous le seuil de signalement, finissent par être signalés.
+            if self._stock_moved is not None and now - self._stock_moved >= db.STOCK_SIGNAL_EVERY_S:
+                db.flush_stock_signal(self.market, self._stock_moved)
+                self._stock_moved = None
             db.set_status(self.market, heartbeat_ts=now)
         except Exception as exc:
             self._log_error_once(exc)

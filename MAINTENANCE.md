@@ -170,6 +170,18 @@ reconnaît pas à sa forme : la clé n'est retrouvée que si le total annoncé e
 connu et vaut au moins 1 000. Sinon, la chercher à la main : un message serveur d'un seul entier, reçu
 avec l'inventaire, dont la valeur monte du prix des lots partis d'une connexion à l'autre.
 
+Stock par coffre et mouvements d'inventaire (build du 6 octobre 2026). Dans les listes de l'inventaire
+(`irl`), chaque objet porte son identifiant de pile en champ 5 et, pour une liste réunie d'HDV ou
+d'atelier, sa répartition en champ 1 répété : quantité en 1, coffre en 4 (1 inventaire, 2 banque,
+3 havre-sac). La banque et le havre-sac ouverts seuls arrivent sous la même clé (`irp`) ; `jyf`, juste
+avant, donne le type en champ 1 (15 banque, 18 havre-sac). Entre deux listes : `irx` pile modifiée
+(parts en 2 répété, puis en 3 le total en 1 et l'identifiant en 3 ; après un achat le total est juste
+mais la part de l'inventaire est encore l'ancienne), `iqx` / `isg` / `iqy` objet ajouté, créé ou modifié
+(l'objet en 1, dans une enveloppe en 2 pour `iqx` et en 1 pour les deux autres), `iqm` pile retirée
+(identifiant en 1), `ith` total de kamas en 2. Ces six messages ne sont pas retrouvés automatiquement
+après une mise à jour du jeu : sans eux le stock ne bouge qu'aux listes complètes, comme avant.
+Contrôle : à chaque liste complète, le stock suivi doit déjà être égal à ce qu'elle annonce.
+
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
 ### 3. Mettre à jour `keymap.json`

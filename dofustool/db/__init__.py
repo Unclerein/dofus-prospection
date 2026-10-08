@@ -14,6 +14,7 @@ GRAIN_DAY = "day"
 # Valeurs de holdings.container.
 INVENTORY = "inventory"
 BANK = "bank"
+HAVRE = "havre"  # havre-sac
 ALL = "all"  # liste fusionnée inventaire + banque, envoyée à l'ouverture de l'HDV
 
 STATIC_SCHEMA = """
@@ -179,6 +180,17 @@ CREATE TABLE IF NOT EXISTS holdings (
     quantity  INTEGER NOT NULL,
     PRIMARY KEY (container, item_id, equipped)
 ) WITHOUT ROWID;
+-- Les mêmes possessions, pile par pile : une pile garde son identifiant d'un coffre à l'autre.
+-- Tenue à jour par les listes complètes et par chaque mouvement d'inventaire ; holdings en est le total par objet.
+CREATE TABLE IF NOT EXISTS piles (
+    uid       INTEGER NOT NULL,
+    container TEXT NOT NULL,     -- 'inventory', 'bank' ou 'havre'
+    item_id   INTEGER NOT NULL,
+    quantity  INTEGER NOT NULL,
+    equipped  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (uid, container)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS piles_item ON piles (item_id, container);
 CREATE TABLE IF NOT EXISTS holdings_meta (
     container   TEXT PRIMARY KEY,
     captured_at REAL NOT NULL,
@@ -436,6 +448,184 @@ def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at
             (container, captured_at, storage.kamas, len(storage.stacks)),
         )
     return True
+
+
+# Coffres du jeu (messages.inventory) vers les conteneurs de la base.
+PILE_CONTAINERS = {1: INVENTORY, 2: BANK, 3: HAVRE}
+# Un mouvement isolé ne signale un changement à l'interface qu'à cet intervalle : une séance de
+# forgemagie consomme une rune par seconde, et chaque signal fait recalculer toutes les pages.
+STOCK_SIGNAL_EVERY_S = 15.0
+
+
+def _refresh_holdings(conn: sqlite3.Connection, container: str, item_ids=None) -> None:
+    """Recalcule le total par objet d'un conteneur à partir de ses piles (tout le conteneur, ou seulement ces objets)."""
+    if item_ids is None:
+        conn.execute("DELETE FROM holdings WHERE container = ?", (container,))
+        conn.execute(
+            "INSERT INTO holdings SELECT container, item_id, equipped, SUM(quantity) FROM piles "
+            "WHERE container = ? AND quantity > 0 GROUP BY item_id, equipped",
+            (container,),
+        )
+        return
+    for item_id in item_ids:
+        conn.execute("DELETE FROM holdings WHERE container = ? AND item_id = ?", (container, item_id))
+        conn.execute(
+            "INSERT INTO holdings SELECT container, item_id, equipped, SUM(quantity) FROM piles "
+            "WHERE container = ? AND item_id = ? AND quantity > 0 GROUP BY equipped",
+            (container, item_id),
+        )
+
+
+def _stamp_holdings(conn: sqlite3.Connection, container: str, ts: float, kamas: int | None = None) -> None:
+    row = conn.execute("SELECT kamas FROM holdings_meta WHERE container = ?", (container,)).fetchone()
+    stacks = conn.execute("SELECT COUNT(*) FROM piles WHERE container = ? AND quantity > 0", (container,)).fetchone()[0]
+    conn.execute(
+        "INSERT OR REPLACE INTO holdings_meta VALUES (?, ?, ?, ?)",
+        (container, ts, kamas if kamas is not None else (row[0] if row else 0), stacks),
+    )
+
+
+def save_piles(conn: sqlite3.Connection, storage, captured_at: float, only: str | None = None) -> set[str]:
+    """Enregistre une liste complète pile par pile (messages.storage.Storage dont les piles ont un identifiant).
+
+    only : conteneur d'un coffre ouvert seul (banque ou havre-sac). Sinon c'est une liste de l'inventaire :
+    simple, ou réunie quand le serveur détaille la répartition des piles ; seuls les coffres qu'elle
+    cite sont remplacés, les autres gardent leur dernier contenu connu.
+    Renvoie les conteneurs mis à jour (vide si un relevé plus récent existe déjà).
+    """
+    rows: dict[str, list[tuple]] = {}
+    if only is not None:
+        rows[only] = [(s.uid, only, s.item_id, s.quantity, 0) for s in storage.stacks]
+    else:
+        rows[INVENTORY] = []
+        for s in storage.stacks:
+            if not s.parts:
+                rows[INVENTORY].append((s.uid, INVENTORY, s.item_id, s.quantity, int(s.equipped)))
+            for part, quantity in s.parts:
+                rows.setdefault(PILE_CONTAINERS[part], []).append((s.uid, PILE_CONTAINERS[part], s.item_id, quantity, 0))
+    known = dict(conn.execute("SELECT container, captured_at FROM holdings_meta"))
+    fresh = {container for container in rows if known.get(container, 0) <= captured_at}
+    if not fresh:
+        return set()
+    with conn:
+        # L'ancienne liste réunie « tout confondu » n'a plus cours dès que les coffres sont connus séparément.
+        conn.execute("DELETE FROM holdings WHERE container = ?", (ALL,))
+        conn.execute("DELETE FROM holdings_meta WHERE container = ?", (ALL,))
+        for container in fresh:
+            conn.execute("DELETE FROM piles WHERE container = ?", (container,))
+            conn.executemany("INSERT OR REPLACE INTO piles VALUES (?, ?, ?, ?, ?)", [r for r in rows[container] if r[3] > 0])
+            _refresh_holdings(conn, container)
+            # Les kamas d'une liste de l'inventaire sont ceux du personnage ; ceux d'un coffre ouvert seul,
+            # banque ou havre-sac, sont ceux de la banque.
+            _stamp_holdings(conn, container, captured_at, storage.kamas if container == INVENTORY else 0 if container == HAVRE else None)
+        if only is not None:
+            conn.execute("UPDATE holdings_meta SET kamas = ? WHERE container = ?", (storage.kamas, BANK))
+    return fresh
+
+
+def _signal(conn: sqlite3.Connection, container: str, ts: float) -> None:
+    """Date le conteneur pour que l'interface se rafraîchisse, sans le faire à chaque mouvement."""
+    row = conn.execute("SELECT captured_at FROM holdings_meta WHERE container = ?", (container,)).fetchone()
+    if row is None or ts - row[0] >= STOCK_SIGNAL_EVERY_S:
+        _stamp_holdings(conn, container, ts)
+
+
+def flush_stock_signal(conn: sqlite3.Connection, ts: float) -> None:
+    """À appeler régulièrement : signale à l'interface les derniers mouvements restés sous le seuil."""
+    with conn:
+        for (container,) in conn.execute("SELECT container FROM holdings_meta WHERE container IN (?, ?, ?)", (INVENTORY, BANK, HAVRE)).fetchall():
+            _stamp_holdings(conn, container, ts)
+
+
+def _outdated(conn: sqlite3.Connection, ts: float) -> bool:
+    """Vrai si un relevé de l'inventaire plus récent que ce mouvement est déjà enregistré (rejeu d'archive)."""
+    row = conn.execute("SELECT captured_at FROM holdings_meta WHERE container = ?", (INVENTORY,)).fetchone()
+    return row is None or row[0] > ts
+
+
+def update_pile(conn: sqlite3.Connection, update, visible: set[str], ts: float) -> bool:
+    """Applique une pile modifiée (messages.inventory.PileUpdate). Renvoie False si la pile est inconnue.
+
+    visible : coffres que le joueur a sous les yeux (ceux de la dernière liste réunie). Une part absente
+    pour un coffre visible veut dire qu'il n'y en a plus ; pour un coffre non visible, on ne sait rien.
+    """
+    known = dict(conn.execute("SELECT container, quantity FROM piles WHERE uid = ?", (update.uid,)))
+    item = conn.execute("SELECT item_id FROM piles WHERE uid = ? LIMIT 1", (update.uid,)).fetchone()
+    if item is None or _outdated(conn, ts):
+        return False
+    seen = visible | {INVENTORY}
+    if update.parts or update.quantity == 0:
+        # Le total fait foi. Les parts de la banque et du havre-sac sont justes ; celle de l'inventaire est
+        # ce qui reste, car un lot acheté s'ajoute au total avant que le détail ne suive.
+        wanted = {container: 0 for container in seen}
+        wanted.update({PILE_CONTAINERS[part]: quantity for part, quantity in update.parts if part != 1})
+        wanted[INVENTORY] = max(0, update.quantity - sum(q for c, q in wanted.items() if c != INVENTORY))
+    else:
+        held = [container for container in seen if known.get(container, 0) > 0]
+        if len(held) == 1:
+            wanted = {held[0]: update.quantity}  # la pile n'est que dans ce coffre
+        else:
+            wanted = {INVENTORY: max(0, update.quantity - sum(known.get(c, 0) for c in seen if c != INVENTORY))}
+    with conn:
+        for container, quantity in wanted.items():
+            if known.get(container, 0) == quantity:
+                continue
+            if quantity > 0:
+                conn.execute(
+                    "INSERT INTO piles VALUES (?, ?, ?, ?, 0) ON CONFLICT (uid, container) DO UPDATE SET quantity = excluded.quantity",
+                    (update.uid, container, item[0], quantity),
+                )
+            else:
+                conn.execute("DELETE FROM piles WHERE uid = ? AND container = ?", (update.uid, container))
+            _refresh_holdings(conn, container, [item[0]])
+            _signal(conn, container, ts)
+    return True
+
+
+def add_pile(conn: sqlite3.Connection, obj, ts: float) -> bool:
+    """Objet entré dans l'inventaire, ou modifié (messages.inventory.NewObject). Renvoie True si le stock a changé.
+
+    Un objet modifié arrive entier à chaque fois (un équipement à chaque rune passée) : sans changement
+    de quantité, rien n'est écrit.
+    """
+    parts = [(PILE_CONTAINERS[part], quantity) for part, quantity in obj.parts] or [(INVENTORY, obj.quantity)]
+    if _outdated(conn, ts):
+        return False
+    known = dict(conn.execute("SELECT container, quantity FROM piles WHERE uid = ?", (obj.uid,)))
+    parts = [(container, quantity) for container, quantity in parts if quantity > 0 and known.get(container) != quantity]
+    if not parts:
+        return False
+    with conn:
+        for container, quantity in parts:
+            conn.execute(
+                "INSERT INTO piles VALUES (?, ?, ?, ?, ?) ON CONFLICT (uid, container) DO UPDATE SET "
+                "quantity = excluded.quantity, item_id = excluded.item_id, equipped = excluded.equipped",
+                (obj.uid, container, obj.item_id, quantity, int(obj.equipped)),
+            )
+            _refresh_holdings(conn, container, [obj.item_id])
+            _signal(conn, container, ts)
+    return True
+
+
+def remove_pile(conn: sqlite3.Connection, uid: int, ts: float) -> bool:
+    """Pile sortie de l'inventaire. Renvoie False si elle n'y était pas connue."""
+    row = conn.execute("SELECT item_id FROM piles WHERE uid = ? AND container = ?", (uid, INVENTORY)).fetchone()
+    if row is None or _outdated(conn, ts):
+        return False
+    with conn:
+        conn.execute("DELETE FROM piles WHERE uid = ? AND container = ?", (uid, INVENTORY))
+        _refresh_holdings(conn, INVENTORY, [row[0]])
+        _signal(conn, INVENTORY, ts)
+    return True
+
+
+def set_kamas(conn: sqlite3.Connection, kamas: int, ts: float) -> None:
+    """Nouveau total de kamas du personnage."""
+    if _outdated(conn, ts):
+        return
+    with conn:
+        conn.execute("UPDATE holdings_meta SET kamas = ? WHERE container = ?", (kamas, INVENTORY))
+        _signal(conn, INVENTORY, ts)
 
 
 def _rolls(sale) -> str | None:

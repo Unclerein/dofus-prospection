@@ -3,16 +3,19 @@
 Le serveur envoie des listes complètes :
   - l'inventaire à chaque connexion, puis régulièrement ;
   - la banque quand on l'ouvre ;
-  - une liste fusionnée (inventaire + banque, quantités additionnées) à l'ouverture de l'HDV,
-    sous la même clé que l'inventaire.
-Seuls l'identifiant de l'objet, sa quantité et sa position sont lus : jamais de texte.
+  - une liste réunie (inventaire, plus la banque et le havre-sac si le joueur les a cochés) à
+    l'ouverture d'un HDV ou d'un atelier, sous la même clé que l'inventaire. Chaque pile y porte
+    sa répartition : combien dans l'inventaire, en banque, au havre-sac ;
+  - le havre-sac, sous la même clé que la banque (un message annonce juste avant le type du coffre).
+Seuls des nombres sont lus (objet, quantité, position, identifiant de la pile, répartition) : jamais de texte.
 
 Donnée personnelle : elle reste dans la base locale, et aucune fixture réelle n'est commitée.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..protocol.wire import LEN, VARINT, WireError, iter_fields
 from . import Mapping
+from .inventory import read_parts
 
 # Position d'un objet rangé dans le sac ; toute autre valeur est un emplacement d'équipement porté.
 BAG_POSITION = 63
@@ -23,6 +26,8 @@ class Stack:
     item_id: int
     quantity: int
     equipped: bool
+    uid: int = field(default=0, compare=False)  # identifiant de la pile, le même d'un coffre à l'autre
+    parts: tuple[tuple[int, int], ...] = field(default=(), compare=False)  # (coffre, quantité), si le serveur détaille
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +42,11 @@ class Storage:
             if include_equipped or not stack.equipped:
                 out[stack.item_id] = out.get(stack.item_id, 0) + stack.quantity
         return out
+
+    @property
+    def detailed(self) -> bool:
+        """Vrai si le serveur a détaillé la répartition des piles : c'est une liste réunie d'HDV ou d'atelier."""
+        return any(stack.parts for stack in self.stacks)
 
 
 def parse(body: bytes, mapping: Mapping) -> Storage | None:
@@ -58,17 +68,23 @@ def parse(body: bytes, mapping: Mapping) -> Storage | None:
                         obj = sub_value
                 if obj is None:
                     return None
-                item_id = quantity = 0
-                for o_number, o_type, o_value in iter_fields(obj):
+                item_id = quantity = uid = 0
+                fields = list(iter_fields(obj))
+                for o_number, o_type, o_value in fields:
                     if o_type != VARINT:
                         continue  # effets et sous-messages : non lus
                     if o_number == f["item_id"]:
                         item_id = o_value
                     elif o_number == f["quantity"]:
                         quantity = o_value
+                    elif o_number == f.get("uid"):
+                        uid = o_value
                 if item_id <= 0 or quantity <= 0 or quantity > 10**9:
                     return None
-                stacks.append(Stack(item_id, quantity, position != BAG_POSITION))
+                parts = read_parts(fields, f) if f.get("split") else ()
+                if parts is None or (parts and sum(q for _, q in parts) != quantity):
+                    return None  # répartition incohérente : forme inattendue
+                stacks.append(Stack(item_id, quantity, position != BAG_POSITION, uid, parts))
             elif wire_type == LEN and number != f["entries"]:
                 continue  # champ texte annexe (non lu)
             elif wire_type != VARINT:

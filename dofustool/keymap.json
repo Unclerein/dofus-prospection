@@ -39,7 +39,11 @@
       "position": 4,
       "object": 1,
       "quantity": 3,
-      "item_id": 4
+      "item_id": 4,
+      "uid": 5,
+      "split": 1,
+      "split_quantity": 1,
+      "split_container": 4
     }
   },
   "bank": {
@@ -50,7 +54,8 @@
       "position": 4,
       "object": 1,
       "quantity": 3,
-      "item_id": 4
+      "item_id": 4,
+      "uid": 5
     }
   },
   "character_list": {
@@ -141,6 +146,56 @@
     "key": "ita",
     "fields": {
       "total": 1
+    }
+  },
+  "storage_open": {
+    "key": "jyf",
+    "fields": {
+      "type": 1
+    }
+  },
+  "pile_update": {
+    "key": "irx",
+    "fields": {
+      "parts": 2,
+      "part_quantity": 1,
+      "part_container": 4,
+      "pile": 3,
+      "quantity": 1,
+      "uid": 3
+    }
+  },
+  "object_added": {
+    "key": "iqx",
+    "fields": {
+      "wrap": 2,
+      "object": 1
+    }
+  },
+  "object_created": {
+    "key": "isg",
+    "fields": {
+      "wrap": 1,
+      "object": 1
+    }
+  },
+  "object_removed": {
+    "key": "iqm",
+    "fields": {
+      "uid": 1
+    }
+  },
+  "kamas": {
+    "key": "ith",
+    "fields": {
+      "kamas": 2
+    }
+  },
+  "object_modified": {
+    "key": "iqy",
+    "fields": {
+      "wrap": 1,
+      "object": 1
     }
   }
 }

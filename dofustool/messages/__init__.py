@@ -32,11 +32,23 @@ def _add_new_messages(path: Path) -> None:
         local = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    missing = [name for name in shipped if name not in local]
-    if not missing or local.get("avg_prices") != shipped.get("avg_prices"):
+    if local.get("avg_prices") != shipped.get("avg_prices"):
         return
-    for name in missing:
-        local[name] = shipped[name]
+    changed = False
+    for name, entry in shipped.items():
+        mine = local.get(name)
+        if mine is None:
+            local[name] = entry
+            changed = True
+        elif mine.get("key") == entry["key"] and not mine.get("stale"):
+            # Même message, mieux connu : seuls les champs que ce PC n'a pas sont ajoutés, s'il n'en contredit aucun.
+            extra = {field: number for field, number in entry["fields"].items() if field not in mine["fields"]}
+            agrees = all(mine["fields"][field] == number for field, number in entry["fields"].items() if field in mine["fields"])
+            if extra and agrees:
+                mine["fields"].update(extra)
+                changed = True
+    if not changed:
+        return
     temp = path.with_suffix(".json.tmp")
     temp.write_text(json.dumps(local, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     temp.replace(path)
