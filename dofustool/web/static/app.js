@@ -2644,22 +2644,14 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
-  { id: 9, date: '8 octobre 2026', title: 'Atelier : tes listes de courses', hash: '#/workshop', go: 'Ouvrir l\u2019atelier', points: [
-    ['Des listes d\u2019objectifs :', 'un stuff, les offrandes de la semaine, un plan de métier. Chaque liste dit ce qu\u2019il faut réunir, ce que tu as déjà (inventaire, banque, havre-sac) et ce qu\u2019il reste à acheter.'],
-    ['Acheter ou fabriquer :', 'le moins cher est proposé pour chaque objectif. « Ouvrir » un ingrédient le remplace par sa propre recette.'],
-    ['Ressources partagées :', 'quand plusieurs listes veulent la même ressource, la ligne donne aussi le besoin total.'],
-    ['Listes toutes faites :', 'un bouton sur Aujourd\u2019hui pour les offrandes de l\u2019almanax, « Envoyer vers l\u2019atelier » sur Métiers, « Ajouter à une liste » sur la Fiche objet.'],
-  ] },
-  { id: 8, date: '8 octobre 2026', title: 'Stock en direct, havre-sac, échanges et fabrications', hash: '#/stock/items', go: 'Voir mon stock', points: [
-    ['Stock en direct :', 'achats, crafts, échanges et runes consommées mettent Mon stock à jour dans les secondes qui suivent, sans rouvrir un coffre.'],
-    ['Trois coffres :', 'inventaire, banque et havre-sac sont suivis séparément. Ouvre un HDV ou un atelier avec les boutons banque et havre-sac cochés pour tout relever d\u2019un coup.'],
-    ['Mes ventes › Échanges :', 'chaque échange conclu avec un autre joueur, avec ce que tu as donné et reçu.'],
-    ['Mes ventes › Fabrications :', 'chaque objet que tu fabriques, avec sa valeur et le coût de sa recette.'],
-  ] },
-  { id: 7, date: '8 octobre 2026', title: 'Page « Aujourd\u2019hui » et menu rangé', hash: '#/today', go: 'Voir la page', points: [
-    ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, les crafts faisables avec ton stock et les signaux du marché.'],
-    ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours.'],
+  { id: 10, date: '8 octobre 2026', title: 'Page Aujourd\u2019hui, atelier, stock en direct', hash: '#/today', go: 'Voir la page Aujourd\u2019hui', points: [
+    ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, tes derniers objets forgemagés, les crafts faisables avec ton stock et les signaux du marché.'],
+    ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours, et un bouton prépare la liste de courses des prochains jours.'],
+    ['Atelier :', 'des listes d\u2019objets à obtenir (un stuff, les offrandes de la semaine, un plan de métier). Chaque liste dit ce qu\u2019il faut réunir, ce que tu as déjà et ce qu\u2019il reste à acheter. La flèche d\u2019un ingrédient déplie sa recette ; les ressources se regroupent par type et se trient.'],
+    ['Stock en direct :', 'achats, crafts, échanges et runes consommées mettent Mon stock à jour dans les secondes qui suivent. Inventaire, banque et havre-sac sont suivis séparément : ouvre un HDV ou un atelier avec les deux boutons cochés pour tout relever d\u2019un coup.'],
+    ['Mes ventes :', 'deux onglets de plus, Échanges (ce que tu as donné et reçu) et Fabrications (valeur et coût de chaque objet fabriqué). Un lot invendu rentré en banque quitte tes lots en vente.'],
     ['Menu :', 'les pages sont rangées par usage : gagner des kamas, mon compte, outils. État, Aide et Config sont en bas.'],
+    ['À faire une fois :', 'relance le jeu par le raccourci Prospection, pour que le suivi en direct démarre.'],
   ] },
   { id: 6, date: '8 octobre 2026', title: 'Recherche globale, forgemagie et annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Recherche globale, Ctrl+K ou la touche / :', 'une fenêtre de recherche s\u2019ouvre d\u2019où que tu sois. Tape le nom d\u2019un objet pour ouvrir sa fiche, ou celui d\u2019une page ou d\u2019un onglet pour y aller.'],
