@@ -243,33 +243,43 @@ function ageLabel(hours) {
 
 const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, effect: null, amount: 1, start: 'base', type: '' } }, status: null, stamp: null };
 
+// Page, libellé, tracé de l'icône, groupe du menu (« pied » : les trois liens discrets du bas).
 const NAV = [
-  ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z'],
-  ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6'],
-  ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1'],
-  ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500'],
-  ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z'],
-  ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4'],
-  ['fight', 'Combat', 'M9 2.5l6.5 6.5L9 15.5 2.5 9zM9 6.5v5M6.5 9h5'],
-  ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3'],
-  ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300'],
-  ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5'],
-  ['welcome', 'Aide', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM7.2 7.200a1.900 1.900 0 113 1.500c-.700.500-1.200.900-1.200 1.800M9 12.700v.100'],
-  ['config', 'Config', 'M3 5h4M11 5h4M3 9h8M15 9h0M3 13h2M9 13h6M9 3.5v3M13 7.5v3M7 11.5v3'],
+  ['today', 'Aujourd\'hui', 'M9 5.500a3.500 3.500 0 100 7 3.500 3.500 0 000-7zM9 1.500v1.500M9 15v1.500M1.500 9H3M15 9h1.500M3.700 3.700l1 1M13.300 13.300l1 1M3.700 14.300l1-1M13.300 4.700l1-1', null],
+  ['crafts', 'Crafts', 'M3 15l7-7M11 3l4 4-3 3-4-4z', 'Gagner des kamas'],
+  ['forge', 'Forgemagie', 'M9 2l2 4.5 5 .6-3.7 3.3 1 4.9L9 12.8 4.7 15.3l1-4.9L2 7.1l5-.6z', 'Gagner des kamas'],
+  ['trends', 'Tendances', 'M2 13l4.5-5 3 3L16 4M12 4h4v4', 'Gagner des kamas'],
+  ['item', 'Fiche objet', 'M5 2.5h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zM6 6.5h6M6 9.5h6M6 12.5h3', 'Gagner des kamas'],
+  ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6', 'Mon compte'],
+  ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1', 'Mon compte'],
+  ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500', 'Outils'],
+  ['fight', 'Combat', 'M9 2.5l6.5 6.5L9 15.5 2.5 9zM9 6.5v5M6.5 9h5', 'Outils'],
+  ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300', 'Outils'],
+  ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5', 'pied'],
+  ['welcome', 'Aide', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM7.2 7.200a1.900 1.900 0 113 1.500c-.700.500-1.200.900-1.200 1.800M9 12.700v.100', 'pied'],
+  ['config', 'Config', 'M3 5h4M11 5h4M3 9h8M15 9h0M3 13h2M9 13h6M9 3.5v3M13 7.5v3M7 11.5v3', 'pied'],
 ];
 
 function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  return { page: parts[0] || 'crafts', sub: parts[1], id: parts[2] ? Number(parts[2]) : (parts[1] && /^\d+$/.test(parts[1]) ? Number(parts[1]) : null) };
+  return { page: parts[0] || 'today', sub: parts[1], id: parts[2] ? Number(parts[2]) : (parts[1] && /^\d+$/.test(parts[1]) ? Number(parts[1]) : null) };
 }
 
 function renderNav() {
   const current = route().page;
   const nav = document.getElementById('nav');
-  nav.replaceChildren(...NAV.map(([page, label, path]) =>
-    h('a', { href: `#/${page}`, 'aria-current': page === current ? 'page' : null },
-      svg('svg', { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: path })),
-      label)));
+  const link = ([page, label, path]) => h('a', { href: `#/${page}`, 'aria-current': page === current ? 'page' : null },
+    svg('svg', { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: path })),
+    label);
+  const nodes = [];
+  let group = null;
+  for (const entry of NAV.filter((e) => e[3] !== 'pied')) {
+    if (entry[3] && entry[3] !== group) nodes.push(h('div', { class: 'nav-group' }, entry[3]));
+    group = entry[3];
+    nodes.push(link(entry));
+  }
+  nodes.push(h('div', { class: 'nav-foot' }, NAV.filter((e) => e[3] === 'pied').map(link)));
+  nav.replaceChildren(...nodes);
 }
 
 function renderCapture() {
@@ -292,7 +302,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
+  const pages = { today: pageToday, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, fight: pageFight, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -324,6 +334,7 @@ function refresh() {
 
 async function poll() {
   try {
+    markSeen();
     const { stamp } = await api('/api/version');
     const text = JSON.stringify(stamp);
     if (S.stamp !== null && text !== S.stamp) { S.cache = {}; S.status = await api('/api/status'); renderCapture(); refresh(); }
@@ -332,6 +343,114 @@ async function poll() {
 }
 
 window.addEventListener('hashchange', () => { $tip.hidden = true; window.scrollTo(0, 0); render(); });
+
+// ---------------------------------------------------------------- page Aujourd'hui
+
+/** Début de la période « depuis ta dernière visite » : la fin de la visite précédente, si elle date de plus d'une demi-heure. */
+function visitSince() {
+  const now = Date.now() / 1000;
+  try {
+    const seen = Number(localStorage.getItem('dofustool.seen')) || 0;
+    let since = Number(localStorage.getItem('dofustool.since')) || 0;
+    if (!seen || !since) since = now - 86400;
+    else if (now - seen > 1800) since = seen;
+    localStorage.setItem('dofustool.since', String(since));
+    localStorage.setItem('dofustool.seen', String(now));
+    return since;
+  } catch (error) { return now - 86400; }
+}
+const markSeen = () => { try { localStorage.setItem('dofustool.seen', String(Date.now() / 1000)); } catch (error) { /* stockage indisponible */ } };
+
+const dayLabel = (iso, today) => {
+  const diff = Math.round((new Date(iso) - new Date(today)) / 86400000);
+  if (diff === 0) return "Aujourd'hui";
+  if (diff === 1) return 'Demain';
+  if (diff === -1) return 'Hier';
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+};
+const listRow = (attrs, ...children) => h(attrs.href ? 'a' : 'div', { class: 'list-row' + (attrs.href ? ' link' : ''), ...attrs }, children);
+const plural = (n, one, many) => `${fmt(n)} ${n > 1 ? many : one}`;
+
+async function almanaxPanel() {
+  const ui = S.ui.today || (S.ui.today = { day: null });
+  const d = await cached(`almanax-${ui.day || 'today'}`, `/api/almanax${ui.day ? `?day=${ui.day}` : ''}`);
+  const go = (day) => { ui.day = day === d.today ? null : day; refresh(); };
+  const head = h('div', { class: 'panel-head' }, h('h2', {}, 'Almanax'),
+    h('div', { class: 'day-nav' },
+      h('button', { class: 'btn quiet', 'aria-label': 'Jour précédent', title: 'Jour précédent', onclick: () => go(d.previous) }, '‹'),
+      h('span', { class: 'day-label' }, dayLabel(d.day, d.today)),
+      h('button', { class: 'btn quiet', 'aria-label': 'Jour suivant', title: 'Jour suivant', onclick: () => go(d.next) }, '›'),
+      d.day !== d.today && h('button', { class: 'btn', onclick: () => go(d.today) }, "Aujourd'hui")));
+  if (!d.available) {
+    return h('section', { class: 'panel', 'aria-label': 'Almanax' }, head, h('div', { class: 'empty' }, 'Almanax indisponible : DofusDB ne répond pas. ',
+      h('button', { class: 'btn', onclick: () => { delete S.cache[`almanax-${ui.day || 'today'}`]; refresh(); } }, 'Réessayer')));
+  }
+  return h('section', { class: 'panel', 'aria-label': 'Almanax' }, head,
+    h('div', { class: 'list-row', style: 'display: block' }, h('div', { style: 'font-weight: 600; font-size: 16px' }, d.name || 'Bonus du jour'), h('div', { class: 'muted', style: 'margin-top: 2px' }, d.desc)),
+    d.items.map((it) => listRow({ href: `#/item/${it.item_id}` },
+      itemCell(it.icon, it.name, `offrande · × ${fmt(it.quantity)}` + (it.unit !== null ? ` · ${unitLabel(it.unit)} l'unité` : ''), it.item_id),
+      h('div', { class: 'end' }, h('div', { class: 'strong' }, it.cost === null ? h('span', { class: 'muted' }, 'prix inconnu') : fmt(it.cost)),
+        it.owned !== null && h('div', {}, haveTag(it.owned, it.quantity))))));
+}
+
+async function pageToday() {
+  if (!S.since) S.since = visitSince();
+  const [d, almanax] = await Promise.all([cached('today', `/api/today?since=${Math.floor(S.since)}`), almanaxPanel()]);
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, "Aujourd'hui"),
+    h('div', { class: 'lead' }, new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + ` · dernière visite ${ago(d.since, d.now)}`)));
+
+  // À faire maintenant : seulement ce qui demande un geste.
+  const t = d.todo;
+  const filter = (view) => () => { (S.ui.sales || (S.ui.sales = { tab: 'lots', view: 'all', q: '', kind: '', family: '' })).view = view; S.ui.sales.tab = 'lots'; };
+  const todo = [];
+  if (t.capture.alert) todo.push(listRow({ href: '#/status' }, h('span', { class: 'warn', style: 'font-weight: 600' }, 'Alerte de décodage'), h('span', { class: 'end muted' }, 'voir la page État')));
+  else if (!t.capture.running) todo.push(listRow({ href: '#/status' }, h('span', { style: 'font-weight: 600' }, 'Capture arrêtée'), h('span', { class: 'end muted' }, 'rien de nouveau n\u2019est relevé tant qu\u2019elle ne tourne pas')));
+  else if (t.capture.awaiting) todo.push(listRow({ href: '#/status' }, h('span', { style: 'font-weight: 600' }, 'Prix moyens en attente'), h('span', { class: 'end muted' }, t.capture.late ? 'capture lancée après le jeu : dans l\u2019heure' : 'ils arrivent au choix du personnage')));
+  if (t.undercut.count) {
+    todo.push(listRow({ href: '#/sales', onclick: filter('undercut') }, h('span', { style: 'font-weight: 600' }, plural(t.undercut.count, 'lot sous-enchéri', 'lots sous-enchéris')), h('span', { class: 'end warn', style: 'font-weight: 600' }, `${fmt(t.undercut.amount)} kamas concernés`)));
+    for (const r of t.undercut.rows) todo.push(listRow({ href: `#/item/${r.item_id}`, class: 'list-row link sub' }, itemCell(r.icon, r.name, `lot de ${r.lot} à ${fmt(r.price)}`, r.item_id), h('span', { class: 'end warn' }, `−${fmt(r.undercut)}`)));
+  }
+  if (t.expiring.count) {
+    todo.push(listRow({ href: '#/sales', onclick: filter('soon') }, h('span', { style: 'font-weight: 600' }, plural(t.expiring.count, 'lot expire sous 3 jours', 'lots expirent sous 3 jours'))));
+    for (const r of t.expiring.rows) todo.push(listRow({ href: `#/item/${r.item_id}`, class: 'list-row link sub' }, itemCell(r.icon, r.name, `lot de ${r.lot} à ${fmt(r.price)}`, r.item_id), h('span', { class: 'end warn' }, remainingLabel(r.remaining_s))));
+  }
+  const todoPanel = h('section', { class: 'panel' + (todo.length ? ' attention' : ''), 'aria-label': 'À faire maintenant' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'À faire maintenant')),
+    todo.length ? todo : h('div', { class: 'empty' }, d.quality.sales_known ? 'Rien à faire : aucun lot sous-enchéri ni proche de l\u2019expiration.' : 'Ouvre l\u2019onglet Vendre d\u2019un HDV en jeu pour suivre tes lots ici.'));
+
+  // Depuis la dernière visite.
+  const r = d.recent;
+  const mini = (label, top) => (top ? h('span', { class: 'mini-item' }, label, tile(top.icon, false), h('span', {}, top.name)) : label);
+  const recent = h('section', { class: 'kpis', 'aria-label': 'Depuis ta dernière visite' },
+    h('a', { class: 'kpi', href: '#/sales', onclick: () => { filter('all')(); S.ui.sales.tab = 'journal'; S.ui.sales.kind = 'sale'; } }, h('div', { class: 'label' }, 'Vendu depuis ta dernière visite'), h('div', { class: 'value ' + (r.sold.amount ? 'gain' : '') }, r.sold.amount ? `+${fmt(r.sold.amount)}` : '—'),
+      h('div', { class: 'hint' }, r.sold.count ? mini(`${plural(r.sold.count, 'lot', 'lots')}` + (r.sold.offline ? `, dont ${r.sold.offline} hors ligne · surtout ` : ' · surtout '), r.sold.top) : 'aucune vente')),
+    h('a', { class: 'kpi', href: '#/sales', onclick: () => { filter('all')(); S.ui.sales.tab = 'journal'; S.ui.sales.kind = 'purchase'; } }, h('div', { class: 'label' }, 'Acheté'), h('div', { class: 'value' }, r.bought.amount ? `−${fmt(r.bought.amount)}` : '—'),
+      h('div', { class: 'hint' }, r.bought.count ? mini(`${plural(r.bought.count, 'lot', 'lots')} · surtout `, r.bought.top) : 'aucun achat')),
+    h('a', { class: 'kpi', href: '#/forge/journal' }, h('div', { class: 'label' }, 'Forgemagie'), h('div', { class: 'value' }, r.forged.passes ? plural(r.forged.passes, 'rune', 'runes') : '—'),
+      h('div', { class: 'hint' }, r.forged.passes ? mini(`${fmt(r.forged.cost)} kamas sur ${plural(r.forged.objects, 'objet', 'objets')} · dernier `, r.forged.top) : 'aucune rune passée')));
+
+  // Pistes : ce que le stock permet de fabriquer, et ce qui s'écarte de sa moyenne.
+  const crafts = h('section', { class: 'panel', 'aria-label': 'Faisable avec ton stock' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Faisable avec ton stock'), h('a', { class: 'muted small', href: '#/stock' }, 'tout voir')),
+    d.crafts.length ? d.crafts.map((c) => listRow({ href: `#/item/${c.item_id}` }, itemCell(c.icon, c.name, `× ${fmt(c.craftable)} avec ce que tu possèdes`, c.item_id), h('span', { class: 'end gain', style: 'font-weight: 600' }, signed(c.margin))))
+      : h('div', { class: 'empty' }, d.stock_known ? 'Aucune recette rentable n\u2019est faisable avec ton stock seul.' : 'Stock inconnu : connecte-toi en jeu, capture active.'));
+  const signals = h('section', { class: 'panel', 'aria-label': 'Signaux du marché' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Signaux du marché'), h('a', { class: 'muted small', href: '#/trends' }, 'tout voir')),
+    d.signals.length ? d.signals.map((x) => listRow({ href: `#/item/${x.item_id}` }, itemCell(x.icon, x.name, `${fmt(x.price)} kamas · ${fmt(x.sold_7d)} vendus sur 7 j`, x.item_id),
+      h('span', { class: 'end' }, h('span', { class: 'tag ' + (x.deviation < 0 ? 'good' : 'bad'), title: x.deviation < 0 ? 'Sous sa moyenne : peut-être à acheter' : 'Au-dessus de sa moyenne : peut-être à vendre' }, `${x.deviation > 0 ? '+' : '−'}${Math.abs(Math.round(x.deviation))} % ${x.deviation < 0 ? 'sous' : 'au-dessus de'} sa moyenne`))))
+      : h('div', { class: 'empty' }, 'Aucun écart marqué parmi les objets dont les ventes sont connues.'));
+
+  // Pour de meilleures données : repliée, ce n'est pas une urgence.
+  const q = d.quality;
+  const hints = [
+    q.unpriced_lots > 0 && h('li', {}, `${plural(q.unpriced_lots, 'lot en vente', 'lots en vente')} sans prix HDV relevé : ouvre la fiche de ces objets à l\u2019HDV pour savoir si tu es le moins cher.`),
+    q.snapshot_age_s !== null && q.snapshot_age_s > 2 * 3600 && h('li', {}, `Prix moyens relevés ${ago(d.now - q.snapshot_age_s, d.now)} : ils se rafraîchissent en jeu, capture active.`),
+    !q.sales_known && h('li', {}, 'Tes lots en vente ne sont pas connus : ouvre l\u2019onglet Vendre d\u2019un HDV.'),
+  ].filter(Boolean);
+  const quality = hints.length ? h('details', { class: 'panel pad quiet-panel' }, h('summary', {}, `Pour de meilleures données · ${hints.length}`), h('ul', { class: 'tour-points', style: 'margin-top: 10px' }, hints)) : null;
+
+  return [head, todoPanel, h('div', { class: 'today-grid' }, almanax, h('div', { class: 'today-stack' }, recent)), h('div', { class: 'today-grid' }, crafts, signals), quality];
+}
 
 // ---------------------------------------------------------------- objets ignorés
 
@@ -2230,6 +2349,7 @@ function sharePanel(d, data, sync) {
 
 // Pages et onglets atteignables par leur nom, avec quelques mots pour les retrouver autrement.
 const DESTINATIONS = [
+  ['#/today', 'Aujourd\'hui', 'accueil almanax offrande resume dernière visite'],
   ['#/crafts', 'Crafts', 'recettes marge fabriquer rentable'],
   ['#/stock', 'Mon stock › Crafts faisables', 'recettes ingredients manquants'],
   ['#/stock/items', 'Mon stock › Inventaire et banque', 'possede objets valeur'],
@@ -2312,6 +2432,11 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 7, date: '8 octobre 2026', title: 'Page « Aujourd\u2019hui » et menu rangé', hash: '#/today', go: 'Voir la page', points: [
+    ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, les crafts faisables avec ton stock et les signaux du marché.'],
+    ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours.'],
+    ['Menu :', 'les pages sont rangées par usage : gagner des kamas, mon compte, outils. État, Aide et Config sont en bas.'],
+  ] },
   { id: 6, date: '8 octobre 2026', title: 'Recherche globale, forgemagie et annonces similaires', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Recherche globale, Ctrl+K ou la touche / :', 'une fenêtre de recherche s\u2019ouvre d\u2019où que tu sois. Tape le nom d\u2019un objet pour ouvrir sa fiche, ou celui d\u2019une page ou d\u2019un onglet pour y aller.'],
     ['Aussi dans le menu :', 'le bouton « Rechercher », en haut à gauche.'],

@@ -266,6 +266,12 @@ CREATE TABLE IF NOT EXISTS fm_items (
     sold_price   INTEGER,
     sold_at      REAL
 );
+-- Almanax d'un jour (bonus et offrande), tel que DofusDB le donne : gardé pour ne l'interroger qu'une fois.
+CREATE TABLE IF NOT EXISTS almanax (
+    day        TEXT PRIMARY KEY,  -- AAAA-MM-JJ
+    payload    TEXT NOT NULL,
+    fetched_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS capture_status (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

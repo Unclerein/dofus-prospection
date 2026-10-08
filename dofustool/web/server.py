@@ -125,6 +125,14 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     )
                 if path == "/api/ignored":
                     return self._json(api.ignored())
+                if path == "/api/today":
+                    try:
+                        since = float(query["since"]) if "since" in query else None
+                    except ValueError:
+                        since = None
+                    return self._json(api.today(since))
+                if path == "/api/almanax":
+                    return self._json(api.almanax(query.get("day")))
                 if path == "/api/sales":
                     return self._json(api.sales())
                 if path == "/api/stock":

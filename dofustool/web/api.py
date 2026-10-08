@@ -9,6 +9,7 @@ import math
 import sqlite3
 import threading
 import time
+from datetime import date, timedelta
 from dataclasses import asdict
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
 from ..share import client as share_client
 from ..fight import grid as fight_grid, harebourg
+from ..staticdata import almanax as almanax_source
 from ..staticdata import effects as base_effects
 
 log = logging.getLogger("dofustool.web")
@@ -101,6 +103,7 @@ class Api:
         self._ranking_stamp: tuple | None = None
         self._ranking_cache: dict[tuple, dict] = {}
         self.fetch_effects = base_effects.fetch  # remplaçable dans les tests
+        self.fetch_almanax = almanax_source.fetch
 
     def ensure_template(self, conn: sqlite3.Connection, item_id: int) -> bool:
         """Récupère sur DofusDB les caractéristiques de base d'un item si elles manquent. Renvoie True si connues."""
@@ -714,6 +717,132 @@ class Api:
                 raise ValueError("type d'objet inconnu")
             db.set_type_ignored(conn, type_name, ignored, time.time())
             return {"type": type_name, "ignored": ignored, "count": len(db.ignored_types(conn))}
+        finally:
+            conn.close()
+
+    # --- aujourd'hui ---------------------------------------------------------
+
+    def today(self, since: float | None = None) -> dict:
+        """Ce qui demande une action, ce qui s'est passé depuis la dernière visite, et quelques pistes."""
+        lots = self.sales()
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, cfg, icons = state["ws"], state["cfg"], state["icons"]
+            now = time.time()
+            since = now - 86400 if since is None else min(max(since, now - 30 * 86400), now)
+            hidden = self._hidden(conn, state)
+
+            def named(item_id: int) -> dict:
+                item = ws.items.get(item_id)
+                return {"item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": icons.get(item_id)}
+
+            undercut = [r for r in lots["rows"] if r["undercut"] > 0]
+            expiring = sorted((r for r in lots["rows"] if r["remaining_s"] < 3 * 86400), key=lambda r: r["remaining_s"])
+            pick = lambda rows: [{k: r[k] for k in ("item_id", "name", "icon", "lot", "price", "undercut", "remaining_s")} for r in rows[:4]]  # noqa: E731
+
+            sold = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(price), 0), COALESCE(SUM(source_id < 0), 0) FROM trades WHERE kind = 'sale' AND ts >= ?", (since,)
+            ).fetchone()
+            bought = conn.execute("SELECT COUNT(*), COALESCE(SUM(price), 0) FROM trades WHERE kind = 'purchase' AND ts >= ?", (since,)).fetchone()
+            # Le plus gros mouvement de chaque sens, pour donner un visage au total.
+            biggest = {
+                kind: conn.execute(
+                    "SELECT item_id, SUM(price) FROM trades WHERE kind = ? AND ts >= ? GROUP BY item_id ORDER BY 2 DESC LIMIT 1", (kind, since)
+                ).fetchone()
+                for kind in ("sale", "purchase")
+            }
+            forged = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(rune_price), 0), COUNT(DISTINCT uid) FROM fm_passes WHERE ts >= ?", (since,)
+            ).fetchone()
+            last_forged = conn.execute("SELECT item_id FROM fm_passes WHERE ts >= ? ORDER BY ts DESC LIMIT 1", (since,)).fetchone()
+
+            crafts = sorted(
+                (c for c in state["stock_crafts"] if c.craftable > 0 and (c.total_margin or 0) > 0 and not hidden(c.result.item.id)),
+                key=lambda c: -c.total_margin,
+            )[:4]
+            signals = []
+            if not state["trends"].empty:
+                frame = state["trends"]
+                frame = frame[frame["Signal"].notna() & frame["Vendus 7 j"].fillna(0).gt(0)]
+                frame = frame.reindex(frame["Écart %"].abs().sort_values(ascending=False).index)
+                for row in records(frame.head(12)):
+                    if not hidden(row["item_id"]) and len(signals) < 4:
+                        signals.append({**named(row["item_id"]), "deviation": row["Écart %"], "price": row["Prix"], "sold_7d": row["Vendus 7 j"]})
+
+            status = data.status(conn, now)
+            unpriced = [r for r in lots["rows"] if not r["equipment"] and r["hdv"] is None]
+            return clean(
+                {
+                    "now": now, "since": since,
+                    "todo": {
+                        "undercut": {"count": len(undercut), "amount": sum(r["price"] for r in undercut), "rows": pick(undercut)},
+                        "expiring": {"count": len(expiring), "rows": pick(expiring)},
+                        "capture": {
+                            "running": status["running"], "alert": bool(status["decode_alert"]),
+                            "awaiting": bool(status["running"] and status.get("awaiting_prices_since")),
+                            "late": bool(status.get("awaiting_prices_late")),
+                        },
+                    },
+                    "recent": {
+                        "sold": {"count": sold[0], "amount": sold[1], "offline": sold[2], "top": named(biggest["sale"][0]) if biggest["sale"] else None},
+                        "bought": {"count": bought[0], "amount": bought[1], "top": named(biggest["purchase"][0]) if biggest["purchase"] else None},
+                        "forged": {"passes": forged[0], "cost": forged[1], "objects": forged[2], "top": named(last_forged[0]) if last_forged else None},
+                    },
+                    "crafts": [{**named(c.result.item.id), "craftable": c.craftable, "margin": c.total_margin} for c in crafts],
+                    "signals": signals,
+                    "quality": {
+                        "unpriced_lots": len(unpriced),
+                        "snapshot_age_s": now - status["last_snapshot_ts"] if status["last_snapshot_ts"] else None,
+                        "sales_known": bool(lots["markets"]),
+                    },
+                    "stock_known": state["stock"].known,
+                }
+            )  # fmt: skip
+        finally:
+            conn.close()
+
+    def almanax(self, day: str | None = None) -> dict:
+        """Bonus et offrande d'un jour (AAAA-MM-JJ, aujourd'hui par défaut), avec le coût de l'offrande et ce qu'on en possède."""
+        today = date.today()
+        try:
+            wanted = date.fromisoformat(day) if day else today
+        except ValueError:
+            wanted = today
+        if abs((wanted - today).days) > 400:
+            wanted = today
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, stock = state["ws"], state["stock"]
+            head = {
+                "day": wanted.isoformat(), "today": today.isoformat(),
+                "previous": (wanted - timedelta(days=1)).isoformat(), "next": (wanted + timedelta(days=1)).isoformat(),
+            }  # fmt: skip
+            found = almanax_source.cached(conn, wanted)
+            if found is None:
+                try:
+                    found = self.fetch_almanax(wanted)
+                    if found["name"] or found["items"]:
+                        almanax_source.store(conn, wanted, found)
+                except Exception as exc:  # DofusDB injoignable : la case l'indique, on réessaiera
+                    log.warning("Almanax du %s non récupéré : %s", wanted.isoformat(), exc)
+                    return {**head, "available": False}
+            items, total = [], 0.0
+            for item_id, quantity, name in found["items"]:
+                item = ws.items.get(item_id)
+                ref = ws.prices.get(item_id)
+                owned = stock.get(item_id).total if stock.known else None
+                cost = ref.price * quantity if ref else None
+                total = None if cost is None or total is None else total + cost
+                items.append(
+                    {
+                        "item_id": item_id, "name": item.name if item else name or f"#{item_id}", "icon": state["icons"].get(item_id),
+                        "quantity": quantity, "unit": ref.price if ref else None, "source": ref.source if ref else None,
+                        "cost": cost, "owned": owned,
+                    }
+                )  # fmt: skip
+            return clean({**head, "available": True, "name": found["name"], "desc": found["desc"], "items": items, "cost": total})
         finally:
             conn.close()
 
