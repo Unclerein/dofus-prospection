@@ -577,7 +577,10 @@ button.fold:hover { background: var(--raised); color: var(--text); }
 .tree-item { color: inherit; min-width: 0; }
 .tree-item:hover .name { text-decoration: underline; }
 tr.made td { background: color-mix(in srgb, var(--raised) 60%, transparent); }
-tr.done .item-cell .name { color: var(--muted); }
+/* Ressource déjà réunie : barrée en vert, pour la repérer d'un coup d'œil. */
+tr.done .item-cell .name { color: var(--gain); text-decoration: line-through; text-decoration-thickness: 2px; }
+/* Le lien d'un objet ne s'étend pas à toute la largeur de sa case. */
+.kpi a.mini-item { align-self: flex-start; }
 tr.reveal td { animation: row-reveal 0.28s ease both; }
 @keyframes row-reveal { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @keyframes fold-turn { from { transform: rotate(0deg); } to { transform: rotate(90deg); } }

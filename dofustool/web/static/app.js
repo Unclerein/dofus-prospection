@@ -437,7 +437,9 @@ async function pageToday() {
     h('a', { class: 'kpi', href: '#/sales', onclick: () => { filter('all')(); S.ui.sales.tab = 'journal'; S.ui.sales.kind = 'purchase'; } }, h('div', { class: 'label' }, 'Acheté'), h('div', { class: 'value' }, r.bought.amount ? `−${fmt(r.bought.amount)}` : '—'),
       h('div', { class: 'hint' }, r.bought.count ? mini(`${plural(r.bought.count, 'lot', 'lots')} · surtout `, r.bought.top) : 'aucun achat')),
     h('div', { class: 'kpi' }, h('div', { class: 'label' }, 'Derniers objets forgemagés'),
-      r.forged.items.length ? r.forged.items.map((it) => h('a', { class: 'mini-item', href: `#/forge/journal/${it.uid}`, ...(it.rolls ? hoverRolls(it.item_id, it.rolls, `today-fm-${it.uid}`, 'Ton exemplaire, après forgemagie') : hoverTip(it.item_id)) }, tile(it.icon, false), h('span', { style: 'font-weight: 600' }, it.name), h('span', { class: 'muted small' }, ago(it.ts, d.now))))
+      r.forged.items.length ? r.forged.items.map((it) => h('a', { class: 'mini-item', href: `#/forge/journal/${it.uid}` }, tile(it.icon, false),
+        h('span', { style: 'font-weight: 600', ...(it.rolls ? hoverRolls(it.item_id, it.rolls, `today-fm-${it.uid}`, 'Ton exemplaire, après forgemagie') : hoverTip(it.item_id)) }, it.name),
+        h('span', { class: 'muted small' }, ago(it.ts, d.now))))
         : h('div', { class: 'value' }, '—'),
       h('div', { class: 'hint' }, r.forged.passes ? `${plural(r.forged.passes, 'rune', 'runes')} et ${fmt(r.forged.cost)} kamas depuis ta dernière visite` : r.forged.items.length ? 'aucune rune depuis ta dernière visite' : 'aucun objet forgemagé pour l\u2019instant')));
 
