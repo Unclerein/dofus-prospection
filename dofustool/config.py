@@ -136,7 +136,7 @@ def from_values(values: dict) -> Config:
         use_estimated_prices=bool(values.get("use_estimated_prices", True)),
         equipment_price=_choice(values.get("equipment_price", "both"), ("both", "base", "any", "avg"), "Prix des équipements"),
         iface=_text(values, "iface", "Interface réseau") or None,
-        avg_prices_timeout_s=_number(values, "avg_prices_timeout_s", "Délai d'alerte", 5, 3600),
+        avg_prices_timeout_s=_number(values, "avg_prices_timeout_s", "Recherche des clés après", 5, 3600),
         ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
         dofus_process=_text(values, "dofus_process", "Processus du jeu", 60),
         start_dashboard=bool(values.get("start_dashboard")),

@@ -60,7 +60,7 @@ def main() -> int:
     except Exception as exc:
         log.error("Impossible de démarrer l'écoute sur « %s » : %s", source.iface, exc)
         return 1
-    db.set_status(market, started_ts=time.time(), stopped_ts="", decode_alert="")
+    db.set_status(market, started_ts=time.time(), stopped_ts="", decode_alert="", awaiting_prices_since="")
     READY_FILE.write_text(str(time.time()), encoding="utf-8")
     log.info("Capture démarrée (écoute passive, tcp port %d, interface « %s »).", GAME_PORT, source.iface)
     try:

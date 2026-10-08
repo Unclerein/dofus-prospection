@@ -404,7 +404,11 @@ def test_pipeline_keeps_alerting_when_nothing_can_be_identified(tmp_path, caplog
     feed(pipeline, ping)
     pipeline.handle(Segment(1065.0, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + len(ping), 0, ping))
     pipeline.tick(1070.0)
-    assert [r.levelno for r in caplog.records].count(logging.WARNING) == 1  # écran de choix du personnage, ou vraie panne
+    assert [r.levelno for r in caplog.records].count(logging.WARNING) == 0  # prix moyens peut-être attendus à l'heure
+    late = 1000.0 + 70 * 60 + 10
+    pipeline.handle(Segment(late - 5, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + 2 * len(ping), 0, ping))
+    pipeline.tick(late)
+    assert [r.levelno for r in caplog.records].count(logging.WARNING) == 1  # plus d'une heure : vraie panne
     assert identify.read_keymap(path) == json.loads(path.read_text(encoding="utf-8")) and not (tmp_path / "backups").exists()
     market.close()
 

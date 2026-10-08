@@ -67,18 +67,51 @@ def test_market_history_saved_and_logged(pipeline, caplog):
     assert pipeline.archive.count() == 3  # les deux messages restent dans l'archive brute
 
 
-def test_alert_when_no_avg_prices_after_timeout(pipeline, caplog):
-    feed(pipeline, framed(EVENT))
+def test_waits_for_hourly_avg_prices_then_alerts(pipeline, caplog):
+    caplog.set_level(logging.INFO, logger="dofustool.capture")
+    event = framed(EVENT)
+
+    def traffic(t: float, n: int) -> None:  # le flux reste actif, toujours sans prix moyens
+        pipeline.handle(Segment(t, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + n * len(event), 0, event))
+
+    feed(pipeline, event)
     pipeline.tick(1030.0)
-    assert not caplog.records  # encore dans le délai
-    # Le flux reste actif (nouveau trafic), toujours sans prix moyens.
+    assert not caplog.records  # encore dans le délai de la configuration
+    traffic(1065.0, 1)
+    pipeline.tick(1070.0)
+    pipeline.tick(1071.0)
+    # Délai dépassé : en attente, pas d'alerte (le jeu les envoie parfois seulement au recalcul horaire).
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in caplog.records].count(
+        "Prix moyens pas encore reçus : le jeu les envoie parfois seulement au recalcul horaire."
+    ) == 1
+    status = db.get_status(pipeline.market)
+    assert status.get("decode_alert", "") == "" and float(status["awaiting_prices_since"]) == 1000.0
+    # Plus d'une heure de jeu sans aucun prix moyen : alerte, une seule fois.
+    traffic(1000.0 + 70 * 60 + 5, 2)
+    pipeline.tick(1000.0 + 70 * 60 + 10)
+    pipeline.tick(1000.0 + 70 * 60 + 11)
+    alerts = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(alerts) == 1
+    assert db.get_status(pipeline.market)["decode_alert"].startswith("Flux de jeu actif depuis 70 min")
+    # Les prix finissent par arriver : alerte et attente levées.
+    pipeline.handle(Segment(5300.0, "192.0.2.2", 5555, "10.0.0.2", 40001, 501 + 3 * len(event), 0,
+                            framed(any_frame("avg", synthetic(1200)))))
+    status = db.get_status(pipeline.market)
+    assert status["decode_alert"] == "" and status["awaiting_prices_since"] == ""
+
+
+def test_avg_prices_within_the_hour_raise_no_alert(pipeline, caplog):
+    feed(pipeline, framed(EVENT))
     next_seq = 501 + len(framed(EVENT))
     pipeline.handle(Segment(1065.0, "192.0.2.2", 5555, "10.0.0.2", 40001, next_seq, 0, framed(EVENT)))
     pipeline.tick(1070.0)
-    pipeline.tick(1071.0)
-    alerts = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(alerts) == 1  # une seule fois
-    assert db.get_status(pipeline.market)["decode_alert"].startswith("Flux de jeu actif")
+    # 22 minutes plus tard, au recalcul horaire du jeu, comme chez Xilef le 7 octobre.
+    pipeline.handle(Segment(2320.0, "192.0.2.2", 5555, "10.0.0.2", 40001, next_seq + len(framed(EVENT)), 0,
+                            framed(any_frame("avg", synthetic(1200)))))
+    pipeline.tick(2321.0)
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert db.latest_snapshot(pipeline.market) is not None
 
 
 def test_no_alert_for_idle_or_auth_only_connection(pipeline, caplog):

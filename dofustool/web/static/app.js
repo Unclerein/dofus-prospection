@@ -1811,7 +1811,9 @@ async function pageStatus() {
     h('section', { class: 'kpis' },
       kpi('Capture', s.running ? 'En cours' : 'Arrêtée', s.running ? ago(s.started_ts, now) : when(s.stopped_ts), s.running ? 'gain' : ''),
       kpi('Dernier relevé de prix', ago(s.last_snapshot_ts, now), when(s.last_snapshot_ts)),
-      kpi('Décodage', s.decode_alert ? 'Alerte' : 'Normal', s.decode_alert ? 'voir MAINTENANCE.md' : null, s.decode_alert ? 'warn' : 'gain')),
+      s.decode_alert ? kpi('Décodage', 'Alerte', 'voir MAINTENANCE.md', 'warn')
+        : s.running && s.awaiting_prices_since ? kpi('Décodage', 'En attente', "prix moyens : jusqu'à une heure après la connexion")
+        : kpi('Décodage', 'Normal', null, 'gain')),
     h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Données')),
       h('table', {}, h('tbody', {}, rows.map(([label, value]) => h('tr', {}, h('td', { class: 'l soft' }, label), h('td', { style: 'font-weight: 500' }, value)))))),
     sharePanelStatus(s),
@@ -2145,7 +2147,7 @@ async function pageConfig() {
       h('div', { class: 'filters' },
         text('c-server', 'Serveur', 'server_name', 160),
         text('c-iface', 'Interface réseau', 'iface', 220, 'par défaut'),
-        number('c-timeout', 'Alerte sans prix après (s)', d.avg_prices_timeout_s, (v) => { d.avg_prices_timeout_s = v; }, { min: 5, max: 3600, step: 5 }),
+        number('c-timeout', 'Recherche des clés après (s)', d.avg_prices_timeout_s, (v) => { d.avg_prices_timeout_s = v; }, { min: 5, max: 3600, step: 5 }),
         text('c-process', 'Processus du jeu', 'dofus_process', 140)),
       h('div', { class: 'filters' },
         text('c-ankama', 'Launcher Ankama', 'ankama_path', 520),

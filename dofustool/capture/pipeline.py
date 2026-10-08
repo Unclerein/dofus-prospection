@@ -21,6 +21,10 @@ log = logging.getLogger("dofustool.capture")
 ACTIVE_WINDOW_S = 30.0
 # Tant qu'un message reste à retrouver (après une mise à jour du jeu), on le cherche à cet intervalle.
 IDENTIFY_EVERY_S = 20.0
+# Le jeu n'envoie pas toujours les prix moyens au choix du personnage : parfois seulement à son
+# recalcul horaire. Passé le délai de la configuration, la capture cherche si les clés ont changé ;
+# elle n'alerte qu'après ce délai-ci, plus d'une heure de jeu sans aucun prix moyen.
+ALERT_AFTER_S = 70 * 60.0
 
 
 @dataclass(slots=True)
@@ -29,7 +33,9 @@ class _ConnWatch:
     last_ts: float
     archive_id: int | None
     got_prices: bool = False
+    waiting: bool = False  # délai de la configuration dépassé, prix moyens toujours attendus
     alerted: bool = False
+    next_build_check: float = 0.0  # prochaine recherche de nouvelles clés, tant que les prix manquent
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
     character_id: int | None = None  # personnage choisi sur cette connexion
     scan: identify.Scan | None = None  # ce que la connexion a échangé, pour retrouver les messages
@@ -223,7 +229,8 @@ class Pipeline:
                 log.info("Prix moyens reçus (%d items) : identiques au dernier relevé, non réenregistrés.", len(prices))
             else:
                 log.info("Relevé de prix moyens enregistré : %d items.", len(prices))
-            db.set_status(self.market, last_avg_prices_ts=msg.ts, decode_alert="")
+            db.set_status(self.market, last_avg_prices_ts=msg.ts, decode_alert="", awaiting_prices_since="")
+            watch.waiting = False
             if watch.alerted:
                 watch.alerted = False
                 log.info("Alerte levée : les prix moyens ont fini par être décodés.")
@@ -241,15 +248,23 @@ class Pipeline:
             for watch in self._watch.values():
                 active = now - watch.last_ts <= ACTIVE_WINDOW_S
                 if active and not watch.got_prices and not watch.alerted and now - watch.first_ts > self.timeout:
-                    # Avant d'alerter : une mise à jour du jeu a peut-être seulement changé les clés.
-                    self._identify(watch, new_build=True)
-                    if watch.got_prices:
+                    # Une mise à jour du jeu a peut-être changé les clés : on cherche régulièrement.
+                    if now >= watch.next_build_check:
+                        watch.next_build_check = now + IDENTIFY_EVERY_S
+                        self._identify(watch, new_build=True)
+                        if watch.got_prices:
+                            continue
+                    if not watch.waiting:
+                        watch.waiting = True
+                        log.info("Prix moyens pas encore reçus : le jeu les envoie parfois seulement au recalcul horaire.")
+                        db.set_status(self.market, awaiting_prices_since=watch.first_ts)
+                    if now - watch.first_ts <= ALERT_AFTER_S:
                         continue
                     watch.alerted = True
                     text = (
-                        f"Flux de jeu actif depuis {now - watch.first_ts:.0f} s sans prix moyens décodés. "
-                        "Si tu as bien choisi un personnage, une mise à jour du jeu a sans doute changé les clés : "
-                        "voir MAINTENANCE.md."
+                        f"Flux de jeu actif depuis {(now - watch.first_ts) / 60:.0f} min sans prix moyens décodés. "
+                        "Le jeu les envoie au moins toutes les heures : une mise à jour du jeu a sans doute changé "
+                        "les clés, voir MAINTENANCE.md."
                     )
                     log.warning("ALERTE : %s", text)
                     db.set_status(self.market, decode_alert=text, decode_alert_ts=now)

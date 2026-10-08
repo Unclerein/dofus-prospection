@@ -40,9 +40,10 @@ trouvé, ou a trouvé plusieurs candidats (`Message … non retrouvé : plusieur
 - Le journal `data/capture.log` contient `ALERTE : Flux de jeu actif depuis … sans prix moyens décodés`.
 - Le dashboard affiche « Alerte de décodage », et la page **État** indique un dernier relevé ancien.
 
-Fausse alerte possible : les prix moyens n'arrivent qu'après le choix du personnage. Si tu es
-resté plus d'une minute sur l'écran de sélection, l'alerte se lève toute seule ensuite (ligne
-`Alerte levée` dans le journal). Dans ce cas, il n'y a rien à faire.
+Le jeu n'envoie pas toujours les prix moyens au choix du personnage : parfois seulement à son
+recalcul horaire. Pendant cette attente, la page **État** affiche « Décodage : En attente », et la
+capture cherche déjà si les clés ont changé. L'alerte n'apparaît qu'après 70 minutes de jeu sans
+aucun prix moyen.
 
 ## Procédure
 
