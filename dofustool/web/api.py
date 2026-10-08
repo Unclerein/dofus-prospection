@@ -357,7 +357,12 @@ class Api:
                 if hdv["kind"] == "lots" and not hdv["frame"].empty:
                     best = hdv["frame"].loc[hdv["frame"]["Prix unitaire"].idxmin()]  # à égalité, le plus petit lot
                     hdv_unit, hdv_lot = float(best["Prix unitaire"]), int(best["Lot"].lstrip("x"))
-                hdv = {**hdv, "frame": records(hdv["frame"])}
+                hdv = {
+                    **hdv,
+                    "frame": records(hdv["frame"]),
+                    # Mes lots en vente : {taille du lot: prix le plus bas}, pour les reconnaître dans les annonces.
+                    "mine": dict(conn.execute("SELECT lot, MIN(price) FROM my_sales WHERE item_id = ? GROUP BY lot", (item_id,))),
+                }
             rebuilt = detail["rebuilt"]
             if rebuilt is not None and rebuilt.processed_ts > rebuilt.base_at:
                 rebuilt = {
@@ -1025,9 +1030,10 @@ class Api:
             if template is None:
                 return {**head, "template_known": False}
 
-            def listing(entry) -> dict:
+            def listing(entry, mine: bool = False) -> dict:
                 price, c, first_seen, last_seen = entry
                 return {
+                    "mine": mine,
                     "price": price, "label": c.label, "plain": c.plain,
                     "quality": round(c.quality * 100) if c.quality is not None else None,
                     "transcended": c.transcended,
@@ -1065,7 +1071,10 @@ class Api:
                     ],
                     "names": {i: names.get(i, f"effet {i}") for i in used},
                     "template": {effect_id: [low, high] for effect_id, (low, high) in template.items()},
-                    "listings": [listing(entry) for entry in current],
+                    "listings": [
+                        listing(entry, mine)
+                        for entry, mine in zip(current, forge.mark_own(current, forge.own_listings(conn, item_id, template)))
+                    ],
                     "gone": [listing(entry) for entry in everything if latest is not None and entry[3] < latest],
                     "filter": db.load_fm_filter(conn, item_id),
                 }

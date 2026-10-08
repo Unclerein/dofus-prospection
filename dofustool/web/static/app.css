@@ -513,3 +513,7 @@ table.dense .th-sort .stat-ico { margin-right: 0; }
 .tip-prices .tip-price { grid-template-columns: 120px auto minmax(0, 1fr); }
 
 .tip-note { color: var(--accent); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Mes annonces dans les annonces de l'HDV (Fiche objet, Forgemagie). */
+tr.mine td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tag.mine { margin-left: 6px; background: var(--accent); color: var(--surface); font-weight: 600; }

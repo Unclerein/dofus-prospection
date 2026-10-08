@@ -108,6 +108,33 @@ def read_listings(
     ]
 
 
+def own_listings(conn: sqlite3.Connection, item_id: int, template: Template) -> list[tuple[int, Classification]]:
+    """Mes exemplaires en vente (prix, jets), relevés dans l'onglet Vendre de l'HDV."""
+    ignored = non_stat_effects(conn)
+    return [
+        (price, classify([tuple(e) for e in json.loads(effects) if e[0] not in ignored], template))
+        for price, effects in conn.execute(
+            "SELECT price, effects FROM my_sales WHERE item_id = ? AND lot = 1 AND effects IS NOT NULL", (item_id,)
+        )
+    ]
+
+
+def mark_own(listings: list[tuple[int, Classification, float, float]], own: list[tuple[int, Classification]]) -> list[bool]:
+    """Pour chaque annonce, vrai si c'est l'un de mes exemplaires : même prix et mêmes jets.
+
+    Les annonces de l'HDV n'ont pas le même identifiant que mes lots : c'est la seule façon de les reconnaître.
+    Chacun de mes lots ne reconnaît qu'une annonce.
+    """
+    left = list(own)
+    out = []
+    for price, item, *_ in listings:
+        match = next((i for i, (mine, c) in enumerate(left) if mine == price and c.values == item.values), None)
+        if match is not None:
+            del left[match]
+        out.append(match is not None)
+    return out
+
+
 def listings_frame(
     listings: list[tuple[int, Classification, float, float]], template: Template, names: dict[int, str]
 ) -> pd.DataFrame:

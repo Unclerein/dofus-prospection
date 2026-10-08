@@ -371,3 +371,24 @@ def test_harebourg_helper(api):
         api.harebourg({"me": [1, "a"]})
     with pytest.raises(ValueError):
         api.harebourg({"rotation": 45})
+
+
+def test_own_listings_are_marked(api):
+    conn = api.connect()
+    conn.executemany(
+        "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, 86400, 9e9, ?)",
+        [
+            (1, 11, 500, 1, 90_000, "[[111, 1], [125, 250]]"),  # même prix et mêmes jets qu'une annonce : la mienne
+            (1, 12, 500, 1, 50_000, "[[111, 1], [125, 211]]"),  # même prix qu'une annonce, autres jets : pas la mienne
+            (2, 13, 3, 10, 2500, None),  # lot de 10 au prix de l'annonce la moins chère
+            (2, 14, 3, 1, 400, None),  # lot de 1 plus cher que l'annonce affichée
+        ],
+    )
+    conn.execute("INSERT INTO hdv_listings VALUES (3, 1, 300, 2500, 0, 0, '[]', 9e9, 9e9)")
+    conn.commit()
+    conn.close()
+    item = api.forge_item(500)
+    assert [(l["price"], l["mine"]) for l in item["listings"]] == [(30_000, False), (50_000, False), (90_000, True), (400_000, False)]
+    pain = api.item(3)["hdv"]
+    assert pain["mine"] == {"1": 400, "10": 2500}
+    json.dumps(api.item(3), allow_nan=False)

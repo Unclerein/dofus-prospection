@@ -1217,12 +1217,13 @@ function listingsTable(listings, d, f, withDates) {
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
       d.lines.map((line) => head(line.id, d.assets[line.id] ? statIcon(d.assets[line.id]) : short(line.name), false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
+      class: l.mine ? 'mine' : '',
       onmouseenter: (event) => showTip(event, itemTooltip(l, d)),
       onmousemove: placeTip,
       onmouseleave: () => { $tip.hidden = true; },
     },
       h('td', { style: 'font-weight: 600' }, fmt(l.price)),
-      h('td', { class: 'l' }, typeTag(l)),
+      h('td', { class: 'l' }, typeTag(l), l.mine && h('span', { class: 'tag mine' }, 'à toi')),
       h('td', { class: 'l' }, l.quality === null ? h('span', { class: 'muted' }, '—')
         : [h('span', { class: 'bar thin' }, h('span', { style: `width: ${l.quality}%` })), h('span', { class: 'muted' }, ` ${l.quality} %`)]),
       h('td', { class: 'l' }, l.exo.length ? h('div', { class: 'tags' }, l.exo.map((i) => h('span', { class: 'tag exo with-ico' }, statIcon(d.assets[i]), `${d.names[i]} ${l.values[i]}`))) : h('span', { class: 'muted' }, '—')),
@@ -1558,12 +1559,21 @@ async function pageItem(r) {
   if (!d.hdv) {
     hdv = h('div', { class: 'empty' }, "Fiche HDV non consultée.");
   } else if (d.hdv.kind === 'lots') {
+    // Mon lot de cette taille : c'est l'annonce affichée s'il est au même prix (à égalité, on ne peut pas savoir laquelle).
+    const mineFor = (row) => (d.hdv.mine || {})[row['Lot'].slice(1)];
     hdv = h('div', { class: 'scroll' }, h('table', { style: 'min-width: 360px' },
       h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Lot'), h('th', {}, 'Prix du lot'), h('th', {}, 'Prix unitaire'))),
-      h('tbody', {}, d.hdv.frame.map((row) => h('tr', {}, h('td', { class: 'l', style: 'font-weight: 600' }, row['Lot']), h('td', {}, fmt(row['Prix du lot'])), h('td', { class: 'soft' }, row['Prix unitaire'].toFixed(2).replace('.', ',')))))));
+      h('tbody', {}, d.hdv.frame.map((row) => {
+        const mine = mineFor(row), own = mine !== undefined && mine <= row['Prix du lot'];
+        return h('tr', { class: own ? 'mine' : '' },
+          h('td', { class: 'l', style: 'font-weight: 600' }, row['Lot'], own ? h('span', { class: 'tag mine' }, 'à toi')
+            : mine !== undefined && h('span', { class: 'tag', style: 'margin-left: 6px', title: 'Ton lot de cette taille est plus cher que l\u2019annonce la moins chère.' }, `le tien : ${fmt(mine)}`)),
+          h('td', {}, fmt(row['Prix du lot'])), h('td', { class: 'soft' }, row['Prix unitaire'].toFixed(2).replace('.', ',')));
+      }))));
   } else {
     hdv = h('div', { style: 'padding: 16px 18px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center' },
       h('span', { class: 'muted' }, `${d.hdv.frame.length} exemplaires en vente :`),
+      (d.hdv.mine || {})[1] !== undefined && h('span', { class: 'tag mine' }, 'dont les tiens'),
       Object.entries(d.hdv.counts || {}).map(([label, n]) => h('span', { class: 'tag' }, `${n} ${label}`)),
       h('a', { class: 'btn', href: `#/forge/item/${id}`, style: 'display: inline-flex; align-items: center; margin-left: auto' }, 'Détail en forgemagie'));
   }
