@@ -430,14 +430,16 @@ async function pageToday() {
       h('div', { class: 'hint' }, r.forged.passes ? mini(`${fmt(r.forged.cost)} kamas sur ${plural(r.forged.objects, 'objet', 'objets')} · dernier `, r.forged.top) : 'aucune rune passée')));
 
   // Pistes : ce que le stock permet de fabriquer, et ce qui s'écarte de sa moyenne.
+  // Le bouton « ignorer » vit dans une ligne cliquable : il ne doit pas ouvrir la fiche de l'objet.
+  const ignore = (x) => { const button = ignoreButton(x.item_id, x.name); button.addEventListener('click', (event) => event.preventDefault()); return button; };
   const crafts = h('section', { class: 'panel', 'aria-label': 'Faisable avec ton stock' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Faisable avec ton stock'), h('a', { class: 'muted small', href: '#/stock' }, 'tout voir')),
-    d.crafts.length ? d.crafts.map((c) => listRow({ href: `#/item/${c.item_id}` }, itemCell(c.icon, c.name, `× ${fmt(c.craftable)} avec ce que tu possèdes`, c.item_id), h('span', { class: 'end gain', style: 'font-weight: 600' }, signed(c.margin))))
+    d.crafts.length ? d.crafts.map((c) => listRow({ href: `#/item/${c.item_id}` }, itemCell(c.icon, c.name, `× ${fmt(c.craftable)} avec ce que tu possèdes`, c.item_id), h('span', { class: 'end gain', style: 'font-weight: 600' }, signed(c.margin)), ignore(c)))
       : h('div', { class: 'empty' }, d.stock_known ? 'Aucune recette rentable n\u2019est faisable avec ton stock seul.' : 'Stock inconnu : connecte-toi en jeu, capture active.'));
   const signals = h('section', { class: 'panel', 'aria-label': 'Signaux du marché' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Signaux du marché'), h('a', { class: 'muted small', href: '#/trends' }, 'tout voir')),
     d.signals.length ? d.signals.map((x) => listRow({ href: `#/item/${x.item_id}` }, itemCell(x.icon, x.name, `${fmt(x.price)} kamas · ${fmt(x.sold_7d)} vendus sur 7 j`, x.item_id),
-      h('span', { class: 'end' }, h('span', { class: 'tag ' + (x.deviation < 0 ? 'good' : 'bad'), title: x.deviation < 0 ? 'Sous sa moyenne : peut-être à acheter' : 'Au-dessus de sa moyenne : peut-être à vendre' }, `${x.deviation > 0 ? '+' : '−'}${Math.abs(Math.round(x.deviation))} % ${x.deviation < 0 ? 'sous' : 'au-dessus de'} sa moyenne`))))
+      h('span', { class: 'end' }, h('span', { class: 'tag ' + (x.deviation < 0 ? 'good' : 'bad'), title: x.deviation < 0 ? 'Sous sa moyenne : peut-être à acheter' : 'Au-dessus de sa moyenne : peut-être à vendre' }, `${x.deviation > 0 ? '+' : '−'}${Math.abs(Math.round(x.deviation))} % ${x.deviation < 0 ? 'sous' : 'au-dessus de'} sa moyenne`)), ignore(x)))
       : h('div', { class: 'empty' }, 'Aucun écart marqué parmi les objets dont les ventes sont connues.'));
 
   // Pour de meilleures données : repliée, ce n'est pas une urgence.

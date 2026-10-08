@@ -14,6 +14,14 @@ from datetime import date
 API = "https://api.dofusdb.fr/almanax?date={month:02d}/{day:02d}/{year}"  # mois/jour/année
 _HEADERS = {"User-Agent": "dofustool"}
 _TAGS = re.compile(r"<[^>]+>")
+# Renvoi du jeu vers une fiche : {{monsterRace,229::Firefoux}} se lit « Firefoux ».
+_LINKS = re.compile(r"\{\{[^{}]*?::([^{}]*)\}\}")
+_BRACES = re.compile(r"\{\{[^{}]*\}\}")
+
+
+def plain(text: str) -> str:
+    """Texte du jeu sans balises ni renvois : seul le libellé d'un renvoi est gardé."""
+    return " ".join(_BRACES.sub("", _LINKS.sub(r"", _TAGS.sub("", text))).split())
 MAX_ITEMS = 10
 
 
@@ -25,7 +33,7 @@ def parse(payload: dict) -> dict:
         items.append([int(item_id), int(quantity), names.get(int(item_id), "")[:80]])
     return {
         "name": str((payload.get("name") or {}).get("fr") or "")[:120],
-        "desc": _TAGS.sub("", str((payload.get("desc") or {}).get("fr") or ""))[:400],
+        "desc": plain(str((payload.get("desc") or {}).get("fr") or ""))[:400],
         "items": items,
     }
 

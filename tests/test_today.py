@@ -25,6 +25,10 @@ def test_almanax_payload_keeps_names_numbers_and_plain_text():
         "items": [[3, 5, "Pain"]],
     }
     assert almanax.parse({}) == {"name": "", "desc": "", "items": []}
+    # Un renvoi du jeu vers une fiche ne garde que son libellé.
+    raw = "Un challenge supplémentaire est généré contre les créatures de type {{monsterRace,229::Firefoux}}."
+    assert almanax.plain(raw) == "Un challenge supplémentaire est généré contre les créatures de type Firefoux."
+    assert almanax.plain("Bonus {{inconnu}} sur <i>les</i>  récoltes") == "Bonus sur les récoltes"
 
 
 def test_almanax_is_fetched_once_per_day_and_priced(app_db):  # noqa: F811

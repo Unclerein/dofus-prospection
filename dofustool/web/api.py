@@ -842,7 +842,9 @@ class Api:
                         "cost": cost, "owned": owned,
                     }
                 )  # fmt: skip
-            return clean({**head, "available": True, "name": found["name"], "desc": found["desc"], "items": items, "cost": total})
+            # plain() de nouveau : les jours déjà gardés en base l'ont été avant que les renvois soient nettoyés.
+            desc = almanax_source.plain(found["desc"])
+            return clean({**head, "available": True, "name": found["name"], "desc": desc, "items": items, "cost": total})
         finally:
             conn.close()
 
