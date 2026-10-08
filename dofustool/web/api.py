@@ -1419,11 +1419,13 @@ class Api:
                 "SELECT i.id, i.name, i.level, COUNT(*) FROM hdv_current h JOIN items i ON i.id = h.item_id "
                 "WHERE i.category_id = 0 GROUP BY i.id ORDER BY i.name"
             ).fetchall()
+            hidden = self._hidden(conn, state)
             return {
                 "items": [
                     {"id": i, "name": name, "level": level, "count": count, "icon": state["icons"].get(i),
                      "template_known": i in fetched, "type": state["meta"].get(i, (None, None))[0]}
                     for i, name, level, count in rows
+                    if not hidden(i)
                 ]
             }  # fmt: skip
         finally:
@@ -1644,7 +1646,14 @@ class Api:
         cache, key = self._ranking_cache, (criterion, exo, effect, amount)
         if key not in cache:
             cache[key] = self._forge_ranking(criterion, exo, effect, amount)
-        return cache[key]
+        # Les objets ignorés sont retirés à la sortie : en ignorer un ne fait pas recalculer le classement.
+        conn = self.connect()
+        try:
+            hidden = self._hidden(conn, self._load(conn))
+        finally:
+            conn.close()
+        found = cache[key]
+        return {**found, "rows": [row for row in found["rows"] if not hidden(row["item_id"])]}
 
     def _forge_ranking(self, criterion: str, exo: int | None, effect: int | None, amount: int | None) -> dict:
         conn = self.connect()

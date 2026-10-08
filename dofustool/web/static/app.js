@@ -1418,7 +1418,8 @@ async function forgeItem(id, options) {
     h('div', { class: 'info' }, h('div', { class: 'title' }, d.name),
       h('div', { class: 'muted' }, `${(options.find((o) => o.id === id) || {}).type || 'Équipement'} · niveau ${d.level}` + (d.template_known ? ` · ${d.listings.length} annonces relevées ${ago(d.captured_at, d.now)}` : ''))),
     picker,
-    h('a', { class: 'btn', href: `#/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Fiche objet'));
+    h('a', { class: 'btn', href: `#/item/${id}`, style: 'display: inline-flex; align-items: center' }, 'Fiche objet'),
+    listButton(id, d.name), ignoreButton(id, d.name));
   if (!d.template_known) {
     return [header, h('div', { class: 'note' }, "Les caractéristiques de base de cet objet n'ont pas pu être récupérées sur DofusDB (service injoignable ?) : exos, overs et jets ne peuvent pas être lus pour l'instant. "),
       h('button', { class: 'btn', onclick: () => { delete S.cache[`forge-${id}`]; refresh(); } }, 'Réessayer')];
@@ -1675,7 +1676,8 @@ async function forgeRanking() {
         : h('div', { class: 'bar-cell' }, h('span', { class: 'bar' }, h('span', { style: `width: ${Math.max(0, Math.round(value / top * 100))}%` })), h('span', { class: 'num', style: 'text-align: right' }, signed(value)))),
       h('td', { class: 'soft' }, fmt(r['Coût de craft'])),
       h('td', { class: 'gain', style: 'font-weight: 600' }, signed(ui.start === 'base' ? r['Gain sur le craft'] : r['Prime sur la base'])),
-      soldCell(r));
+      soldCell(r),
+      h('td', { class: 'act two' }, listButton(r.item_id, r['Objet']), ignoreButton(r.item_id, r['Objet'])));
   });
 
   return [controls, h('section', { class: 'panel', 'aria-label': 'Classement' },
@@ -1683,10 +1685,10 @@ async function forgeRanking() {
       ? h('div', { class: 'empty' }, ui.criterion === 'saved' ? "Aucun critère enregistré : règle-les dans l'onglet « Par objet »."
         : ui.criterion === 'over' ? `Aucune annonce connue avec ${lineName} à ${ui.amount} ou plus au-dessus de son jet parfait, parmi les ${data.rows.length} objets qui ont cette ligne de base.`
         : matching.length ? 'Aucun objet ne correspond à ces filtres (type, métier, « ce que je peux forgemager »).' : 'Aucun objet connu ne répond à ce critère.')
-      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 1040px' },
+      : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 1130px' },
         h('thead', {}, h('tr', {}, h('th', {}, '#'), sortTh(sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(sort, 'base', 'De base'), sortTh(sort, 'with', label),
           sortTh(sort, 'main', ui.start === 'base' ? 'Marge sur la base' : 'Marge sur un craft', { left: true }), sortTh(sort, 'craft', 'Coût de craft'),
-          sortTh(sort, 'other', ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'), sortTh(sort, 'sold', 'Vendus 7 j', { title: SOLD_TITLE }))),
+          sortTh(sort, 'other', ui.start === 'base' ? 'Marge sur un craft' : 'Marge sur la base'), sortTh(sort, 'sold', 'Vendus 7 j', { title: SOLD_TITLE }), h('th', {}, ''))),
         h('tbody', {}, body))),
     h('div', { class: 'panel-foot' },
       h('span', {}, ui.criterion === 'over'

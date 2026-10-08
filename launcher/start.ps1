@@ -79,24 +79,38 @@ try {
         }
     }
 
-    # 4. Attendre le jeu, puis sa fermeture.
+    # 4. Attendre le jeu, puis la fin de la session.
+    #    La session dure tant que le launcher Ankama est ouvert : on relance souvent le jeu depuis lui, sans
+    #    repasser par ce raccourci, et la capture doit alors déjà écouter. Elle ne s'arrête que lorsque le jeu
+    #    ET le launcher Ankama sont fermés. Si le launcher est introuvable, seule la fermeture du jeu compte.
+    $ankamaName = if ($cfg.ankama_path) { [IO.Path]::GetFileNameWithoutExtension($cfg.ankama_path) } else { $null }
+    function Test-Ankama { [bool]($ankamaName -and (Get-Process -Name $ankamaName -ErrorAction SilentlyContinue)) }
+    function Test-Game { [bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) }
     Say "En attente du lancement de Dofus…"
     $deadline = (Get-Date).AddMinutes($WaitForGameMinutes)
-    while (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue)) {
+    while (-not (Test-Game)) {
         if ($capture.HasExited) { throw "La capture s'est arrêtée : voir data\capture.log." }
-        if ((Get-Date) -gt $deadline) { Say "Dofus n'a pas été lancé : arrêt."; return }
+        if ((Get-Date) -gt $deadline -and -not (Test-Ankama)) { Say "Dofus n'a pas été lancé : arrêt."; return }
         Start-Sleep -Seconds 2
     }
-    Say "Dofus détecté. La capture s'arrêtera à sa fermeture."
+    Say "Dofus détecté. La capture s'arrêtera quand le jeu et le launcher Ankama seront fermés."
+    $waiting = $false
     while ($true) {
         Start-Sleep -Seconds 3
         if ($capture.HasExited) { throw "La capture s'est arrêtée pendant le jeu : voir data\capture.log." }
-        if (Get-Process -Name $gameName -ErrorAction SilentlyContinue) { continue }
+        if (Test-Game) {
+            if ($waiting) { Say "Dofus relancé : la capture écoutait déjà."; $waiting = $false }
+            continue
+        }
+        if (Test-Ankama) {
+            if (-not $waiting) { Say "Dofus fermé, launcher Ankama encore ouvert : la capture continue."; $waiting = $true }
+            continue
+        }
         # Le client redémarre parfois (mise à jour, changement de compte) : laisser un délai de grâce.
         Start-Sleep -Seconds 20
-        if (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue)) { break }
+        if (-not (Test-Game) -and -not (Test-Ankama)) { break }
     }
-    Say "Dofus fermé."
+    Say "Dofus et le launcher Ankama sont fermés."
 }
 finally {
     # Arrêt propre : la capture surveille ce fichier et termine ses écritures avant de sortir.
