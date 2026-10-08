@@ -152,6 +152,14 @@ class Pipeline:
                 )  # fmt: skip
             return
 
+        mapping = self.keymap.get("my_sale_removed")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            # Retrait d'un lot, ou première moitié d'un changement de prix : le lot recréé suit aussitôt.
+            uid = inventory.parse_single(msg.body, mapping, "uid")
+            if uid:
+                db.remove_lot(self.market, uid, msg.ts)
+            return
+
         mapping = self.keymap.get("my_sale_update")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             lot = trades.parse_lot_update(msg.body, mapping, self.keymap.get("hdv_listings"))

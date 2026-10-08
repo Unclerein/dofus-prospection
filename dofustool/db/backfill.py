@@ -225,7 +225,7 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
     Le rejeu se fait dans une base vide en mémoire : la vraie base ne garde que le dernier relevé de
     chaque HDV, alors qu'il faut ici comparer chaque relevé au précédent. Seul le résultat est recopié.
     """
-    names = ("offline_sales", "my_sales", "my_sale_update", "info_text")
+    names = ("offline_sales", "my_sales", "my_sale_update", "my_sale_removed", "info_text")
     by_key = {keymap[name].key: name for name in names if name in keymap}
     marks = ",".join("?" * len(by_key))
     scratch = db.connect(":memory:")
@@ -235,6 +235,7 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
         sorted(by_key),
     )
     announced: set[int] = set()  # connexions dont l'annonce de connexion a déjà été lue
+    updates = []  # lots mis en vente ou modifiés un par un, dans l'ordre
     for source_id, ts, key, body, connection_id, started_at in rows:
         name = by_key[key]
         mapping = keymap[name]
@@ -250,13 +251,25 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
             if parsed is not None:
                 db.save_sales(scratch, parsed, ts)
         elif name == "my_sale_update":
-            lot = trades.parse_lot_update(body, mapping)
+            lot = trades.parse_lot_update(body, mapping, keymap.get("hdv_listings"))
             if lot is not None:
                 db.save_lot_update(scratch, lot, ts)
+                updates.append((lot, ts))
+        elif name == "my_sale_removed":
+            uid = moves.parse_single(body, mapping, "uid")
+            if uid:
+                db.remove_lot(scratch, uid, ts)
+                db.remove_lot(market, uid, ts)  # un lot retiré depuis le dernier relevé quitte aussi la vraie base
         else:
             trade = trades.parse_text(body, mapping)
             if trade is not None:
                 db.save_trade(scratch, source_id, trade, ts)
+    # Un lot mis en vente depuis le dernier relevé de l'onglet Vendre n'est dans aucune liste : il est remis,
+    # s'il est toujours en vente à la fin du rejeu (ni vendu, ni retiré, ni remplacé depuis).
+    last = market.execute("SELECT MAX(captured_at) FROM my_sales_meta").fetchone()[0]
+    for lot, ts in updates:
+        if last is not None and ts > last and scratch.execute("SELECT 1 FROM my_sales WHERE uid = ? AND captured_at = ?", (lot.uid, ts)).fetchone():
+            db.save_lot_update(market, lot, ts)
     added = 0
     with market:
         # Le rejeu fait foi : une annonce mal lue par une version précédente (kamas déposés en banque pris pour des
@@ -278,8 +291,9 @@ def _offline_sales(archive: sqlite3.Connection, market: sqlite3.Connection, keym
         for row in scratch.execute("SELECT * FROM trades WHERE source_id < 0"):
             added += market.execute("INSERT OR IGNORE INTO trades VALUES (?, ?, ?, ?, ?, ?, ?)", row).rowcount
             market.execute(
-                "UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE uid = ? AND sold_at IS NULL", (row[5], row[1], row[6])
+                "UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE lot_uid = ? AND sold_at IS NULL", (row[5], row[1], row[6])
             )
+    db.link_fm_lots(market)
     scratch.close()
     return added
 

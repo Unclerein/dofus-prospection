@@ -285,7 +285,8 @@ CREATE TABLE IF NOT EXISTS fm_items (
     listed_price INTEGER,
     listed_at    REAL,
     sold_price   INTEGER,
-    sold_at      REAL
+    sold_at      REAL,
+    lot_uid      INTEGER   -- lot en vente qui contient l'objet, reconnu à ses jets (le numéro de l'objet change à l'HDV)
 );
 -- Échanges conclus avec d'autres joueurs, et objets fabriqués. Donnée personnelle, jamais partagée.
 -- L'autre joueur n'est pas enregistré : ni son nom, ni son identifiant.
@@ -369,6 +370,9 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
     if columns and "ref" not in columns:  # renseignée pour les anciens achats au prochain rejeu de l'archive
         conn.execute("ALTER TABLE trades ADD COLUMN ref INTEGER")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(fm_items)")}
+    if columns and "lot_uid" not in columns:  # renseigné au prochain relevé de l'onglet Vendre
+        conn.execute("ALTER TABLE fm_items ADD COLUMN lot_uid INTEGER")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -703,6 +707,7 @@ def return_unsold(conn: sqlite3.Connection, count: int, ts: float) -> list[tuple
         for market, uid, item_id, lot, price in rows:
             conn.execute("DELETE FROM my_sales WHERE market = ? AND uid = ?", (market, uid))
             conn.execute("DELETE FROM gone_lots WHERE uid = ?", (uid,))
+            conn.execute("UPDATE fm_items SET lot_uid = NULL, listed_price = NULL WHERE lot_uid = ? AND sold_at IS NULL", (uid,))
             if bank_known:
                 conn.execute(
                     "INSERT INTO piles VALUES (?, ?, ?, ?, 0) ON CONFLICT (uid, container) DO UPDATE SET quantity = quantity + excluded.quantity",
@@ -798,10 +803,6 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
             conn.execute("DELETE FROM my_sales_meta WHERE market = ?", (market,))
         conn.execute("DELETE FROM my_sales WHERE market = ?", (listing.market,))
         conn.executemany(
-            "UPDATE fm_items SET listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ? AND sold_at IS NULL",
-            ((s.price, captured_at, s.uid) for s in listing.sales),
-        )
-        conn.executemany(
             "INSERT OR REPLACE INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ((listing.market, s.uid, s.item_id, s.lot, s.price, s.remaining_s, captured_at, _rolls(s)) for s in listing.sales),
         )
@@ -810,6 +811,8 @@ def save_sales(conn: sqlite3.Connection, listing, captured_at: float) -> bool:
             "UPDATE my_sales SET effects = ? WHERE market = ? AND uid = ? AND effects IS NULL",
             ((effects, listing.market, uid) for uid, effects in kept.items()),
         )
+        for sale in listing.sales:
+            _link_fm(conn, sale.uid, sale.item_id, sale.lot, sale.price, sale.effects, captured_at)
     return True
 
 
@@ -844,7 +847,63 @@ def save_trade(conn: sqlite3.Connection, source_id: int, trade, ts: float) -> bo
 
 
 def _mark_fm_sold(conn: sqlite3.Connection, uid: int, price: int, ts: float) -> None:
-    conn.execute("UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE uid = ? AND sold_at IS NULL", (price, ts, uid))
+    """uid : numéro du lot vendu. L'objet forgemagé qu'il contenait, s'il y en a un, reçoit son prix de vente."""
+    conn.execute("UPDATE fm_items SET sold_price = ?, sold_at = ? WHERE lot_uid = ? AND sold_at IS NULL", (price, ts, uid))
+
+
+def _rolls_key(effects) -> list[tuple[int, int]]:
+    """Jets d'un exemplaire, comparables d'un message à l'autre. Un effet sans valeur porte du texte, pas un jet."""
+    return sorted((int(effect_id), int(value)) for effect_id, value in effects if value is not None)
+
+
+def _link_fm(conn: sqlite3.Connection, lot_uid: int, item_id: int, lot: int, price: int, effects, ts: float) -> None:
+    """Rattache un lot en vente à l'objet forgemagé qu'il contient.
+
+    L'objet est reconnu à ses jets, pas à son numéro : mis en vente, il en reçoit un autre, et encore un
+    autre à chaque changement de prix. Deux objets aux jets identiques sont interchangeables : le lot va au
+    plus ancien qui n'est pas déjà dans un autre lot en vente.
+    """
+    if lot != 1:
+        return
+    found = conn.execute("SELECT uid FROM fm_items WHERE lot_uid = ? AND sold_at IS NULL", (lot_uid,)).fetchone()
+    if found is None and effects:
+        rolls = _rolls_key(effects)
+        candidates = conn.execute(
+            "SELECT uid, after FROM fm_items f WHERE item_id = ? AND sold_at IS NULL AND last_ts <= ? "
+            "AND (lot_uid IS NULL OR NOT EXISTS (SELECT 1 FROM my_sales s WHERE s.uid = f.lot_uid)) ORDER BY last_ts, uid",
+            (item_id, ts),
+        ).fetchall()
+        found = next(((uid,) for uid, after in candidates if _rolls_key(json.loads(after)) == rolls), None)
+    if found is None:
+        return
+    conn.execute(
+        "UPDATE fm_items SET lot_uid = ?, listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ?",
+        (lot_uid, price, ts, found[0]),
+    )
+
+
+def link_fm_lots(conn: sqlite3.Connection) -> None:
+    """Rattache mes lots en vente aux objets forgemagés, après un rejeu de l'archive (où les lots sont lus avant les passages)."""
+    rows = conn.execute("SELECT uid, item_id, lot, price, effects, captured_at FROM my_sales WHERE effects IS NOT NULL ORDER BY captured_at").fetchall()
+    with conn:
+        for uid, item_id, lot, price, effects, captured_at in rows:
+            _link_fm(conn, uid, item_id, lot, price, json.loads(effects), captured_at)
+
+
+def remove_lot(conn: sqlite3.Connection, uid: int, ts: float) -> bool:
+    """Lot que le joueur retire de la vente. Renvoie False s'il n'était pas connu.
+
+    Un changement de prix passe aussi par là : le jeu retire le lot puis en crée un autre dans la foulée
+    (même numéro pour une ressource, nouveau numéro pour un équipement). Ce n'est donc jamais une vente :
+    le lot ne doit pas compter parmi ceux qui expliquent des kamas gagnés hors ligne.
+    """
+    with conn:
+        # Un lot relevé après ce retrait est celui qui l'a remplacé : il reste.
+        cur = conn.execute("DELETE FROM my_sales WHERE uid = ? AND captured_at < ?", (uid, ts))
+        conn.execute("DELETE FROM gone_lots WHERE uid = ? AND noticed_at <= ?", (uid, ts))
+        if cur.rowcount:
+            conn.execute("UPDATE fm_items SET lot_uid = NULL, listed_price = NULL WHERE lot_uid = ? AND sold_at IS NULL", (uid,))
+    return bool(cur.rowcount)
 
 
 # Un lot disparu ne reste candidat que ce temps-là : au-delà, c'était un retrait à la main.
@@ -1019,10 +1078,7 @@ def save_lot_update(conn: sqlite3.Connection, sale, ts: float) -> None:
             "INSERT INTO my_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (row[0], sale.uid, sale.item_id, sale.lot, sale.price, sale.remaining_s, ts, _rolls(sale)),
         )
-        conn.execute(
-            "UPDATE fm_items SET listed_price = ?, listed_at = COALESCE(listed_at, ?) WHERE uid = ? AND sold_at IS NULL",
-            (sale.price, ts, sale.uid),
-        )
+        _link_fm(conn, sale.uid, sale.item_id, sale.lot, sale.price, sale.effects, ts)
 
 
 def save_characters(conn: sqlite3.Connection, characters, seen_at: float) -> None:

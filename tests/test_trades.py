@@ -184,3 +184,13 @@ def test_equipment_lots_keep_their_rolls_when_the_effect_fields_are_known():
     db.save_lot_update(conn, lot, 1_200.0)
     assert conn.execute("SELECT effects FROM my_sales WHERE uid = 494120").fetchone() == ("[[125, 371], [985, null]]",)
     conn.close()
+
+
+def test_pipeline_replaces_a_repriced_lot():
+    """Changement de prix : le jeu retire le lot, puis en crée un autre. L'ancien ne reste pas en double."""
+    market = db.connect(":memory:")
+    db.save_sales(market, SalesList(11, (Sale(1, 21_209, 10, 248_204, 9_000), Sale(857_000, 22_219, 1, 300_000, 9_000))), 900.0)
+    pipeline = Pipeline(Archive(":memory:"), market, {"my_sale_update": UPDATE, "my_sale_removed": Mapping("rem", {"uid": 1})})
+    feed(pipeline, framed(any_frame("rem", vi(1, 857_000))) + framed(any_frame("upd", update(857_144, 22_219, 1, 259_999))))
+    assert market.execute("SELECT uid, price FROM my_sales ORDER BY uid").fetchall() == [(1, 248_204), (857_144, 259_999)]
+    market.close()

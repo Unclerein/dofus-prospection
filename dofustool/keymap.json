@@ -241,5 +241,11 @@
     "fields": {
       "count": 1
     }
+  },
+  "my_sale_removed": {
+    "key": "jye",
+    "fields": {
+      "uid": 1
+    }
   }
 }

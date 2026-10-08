@@ -113,16 +113,61 @@ def test_base_cost_and_real_rune_cost_come_from_my_purchases():
     conn.close()
 
 
+LOT, RELISTED = 880_001, 880_002  # numéros de lot : jamais celui de l'objet, et un nouveau à chaque changement de prix
+
+
 def test_a_forged_object_is_followed_until_its_sale():
+    """Mis en vente, l'objet change de numéro : il est reconnu à ses jets, et suivi d'un changement de prix à l'autre."""
     conn = db.connect(":memory:")
     db.save_fm_pass(conn, 10, 1000.0, result(True, START), RUNE, START)
     db.save_sales(conn, SalesList(11, (Sale(1, 7_300, 10, 5_973, 9_000),)), 1100.0)
-    db.save_lot_update(conn, Sale(UID, BOOTS, 1, 2_500_000, 2_419_200), 1200.0)  # mis en vente
-    db.save_lot_update(conn, Sale(UID, BOOTS, 1, 2_300_000, 2_419_200), 1300.0)  # prix baissé
-    assert conn.execute("SELECT listed_price, listed_at, sold_at FROM fm_items").fetchone() == (2_300_000, 1200.0, None)
+    db.save_lot_update(conn, Sale(LOT + 5, BOOTS, 1, 900_000, 2_419_200, ((125, 300), (119, 40))), 1150.0)  # d'autres jets
+    assert conn.execute("SELECT lot_uid, listed_price FROM fm_items").fetchone() == (None, None)
+    worn = (*reversed(START), (985, None))  # mêmes jets dans un autre ordre, plus un effet qui porte du texte
+    db.save_lot_update(conn, Sale(LOT, BOOTS, 1, 2_500_000, 2_419_200, worn), 1200.0)  # mis en vente
+    assert conn.execute("SELECT lot_uid, listed_price, listed_at FROM fm_items").fetchone() == (LOT, 2_500_000, 1200.0)
+    # Prix baissé : le jeu retire le lot puis en crée un autre, sous un nouveau numéro.
+    assert db.remove_lot(conn, LOT, 1300.0)
+    assert conn.execute("SELECT lot_uid, listed_price FROM fm_items").fetchone() == (None, None)
+    db.save_lot_update(conn, Sale(RELISTED, BOOTS, 1, 2_300_000, 2_419_200, worn), 1300.0)
+    assert conn.execute("SELECT lot_uid, listed_price, listed_at, sold_at FROM fm_items").fetchone() == (RELISTED, 2_300_000, 1200.0, None)
+    assert lots(conn) == [1, RELISTED, LOT + 5]
+    # Un relevé complet de l'onglet Vendre garde le lien.
+    db.save_sales(conn, SalesList(12, (Sale(RELISTED, BOOTS, 1, 2_300_000, 2_400_000, worn),)), 1350.0)
+    assert conn.execute("SELECT lot_uid FROM fm_items").fetchone() == (RELISTED,)
     assert db.save_trade(conn, 50, Trade(SALE, BOOTS, 1, 2_300_000), 1400.0)
     assert conn.execute("SELECT sold_price, sold_at FROM fm_items").fetchone() == (2_300_000, 1400.0)
-    assert conn.execute("SELECT ref FROM trades WHERE source_id = 50").fetchone() == (UID,)
+    assert conn.execute("SELECT ref FROM trades WHERE source_id = 50").fetchone() == (RELISTED,)
+    conn.close()
+
+
+def test_a_repriced_lot_is_not_an_offline_sale():
+    """Un lot retiré par le joueur ne doit pas expliquer des kamas gagnés hors ligne, même s'ils font pile son prix."""
+    conn = db.connect(":memory:")
+    db.save_offline_total(conn, 1, 10_000, 1000.0)
+    db.save_sales(conn, SalesList(11, (Sale(1, 7_300, 10, 5_000, 9_000), Sale(2, 7_301, 1, 80_000, 9_000))), 1100.0)
+    db.save_offline_total(conn, 2, 15_000, 2000.0)  # 5 000 kamas gagnés hors ligne, pas encore détaillés
+    assert db.remove_lot(conn, 1, 2100.0)  # le lot à 5 000 change de prix…
+    db.save_lot_update(conn, Sale(3, 7_300, 10, 4_500, 2_419_200), 2100.0)  # …et revient sous un nouveau numéro
+    # Une ressource garde son numéro : le lot recréé n'est pas emporté si le retrait est rejoué.
+    assert db.remove_lot(conn, 2, 2150.0)
+    db.save_lot_update(conn, Sale(2, 7_301, 1, 75_000, 2_419_200), 2150.0)
+    assert not db.remove_lot(conn, 2, 2150.0)
+    db.save_sales(conn, SalesList(11, (Sale(3, 7_300, 10, 4_500, 2_419_000), Sale(2, 7_301, 1, 75_000, 2_419_000))), 2200.0)
+    assert conn.execute("SELECT COUNT(*) FROM trades").fetchone() == (0,)
+    assert conn.execute("SELECT attributed FROM offline_sales WHERE source_id = 2").fetchone() == (0,)
+    assert not db.remove_lot(conn, 99, 2300.0)  # lot inconnu : rien à faire
+    conn.close()
+
+
+def test_twin_forged_objects_each_get_their_lot():
+    conn = db.connect(":memory:")
+    db.save_fm_pass(conn, 10, 1000.0, result(True, START), RUNE, START)
+    db.save_fm_pass(conn, 11, 1010.0, result(True, START, uid=UID + 1), RUNE, START)
+    db.save_sales(conn, SalesList(11, (Sale(LOT, BOOTS, 1, 2_000_000, 9_000, START), Sale(RELISTED, BOOTS, 1, 2_100_000, 9_000, START))), 1100.0)
+    assert conn.execute("SELECT uid, lot_uid FROM fm_items ORDER BY uid").fetchall() == [(UID, LOT), (UID + 1, RELISTED)]
+    db.link_fm_lots(conn)  # rejouer ne déplace rien
+    assert conn.execute("SELECT uid, lot_uid FROM fm_items ORDER BY uid").fetchall() == [(UID, LOT), (UID + 1, RELISTED)]
     conn.close()
 
 
@@ -133,9 +178,9 @@ def lots(conn):
 def test_offline_sales_are_matched_to_the_lots_that_left():
     conn = db.connect(":memory:")
     assert db.save_offline_total(conn, 100, 150_000, 1000.0) == 0  # première annonce : point de départ
-    listing = (Sale(1, 1_601, 1, 1_900, 9_000), Sale(2, 1_601, 1, 1_900, 9_000), Sale(3, 1_602, 1, 2_600, 9_000), Sale(4, 7_300, 10, 5_973, 9_000))
+    db.save_fm_pass(conn, 10, 1050.0, result(True, START, uid=77), RUNE, START)  # le lot 3 contient cet objet forgemagé
+    listing = (Sale(1, 1_601, 1, 1_900, 9_000), Sale(2, 1_601, 1, 1_900, 9_000), Sale(3, BOOTS, 1, 2_600, 9_000, START), Sale(4, 7_300, 10, 5_973, 9_000))
     db.save_sales(conn, SalesList(11, listing), 1100.0)
-    db.save_fm_pass(conn, 10, 1150.0, result(True, START, uid=3), RUNE, START)  # le lot 3 est un objet forgemagé
     assert db.save_offline_total(conn, 101, 150_000, 2000.0) == 0  # rien de neuf
     assert db.save_offline_total(conn, 102, 0, 2500.0) == 0  # kamas retirés de la banque
     assert db.save_offline_total(conn, 103, 3_800, 3000.0) == 3_800
@@ -147,9 +192,9 @@ def test_offline_sales_are_matched_to_the_lots_that_left():
     db.save_sales(conn, SalesList(11, (listing[3],)), 4100.0)
     sold = conn.execute("SELECT ts, item_id, quantity, price, ref FROM trades WHERE source_id < 0 ORDER BY ts, ref").fetchall()
     # Chaque vente est datée de la connexion qui l'a annoncée.
-    assert sold == [(3000.0, 1_601, 1, 1_900, 1), (3000.0, 1_601, 1, 1_900, 2), (4000.0, 1_602, 1, 2_600, 3)]
+    assert sold == [(3000.0, 1_601, 1, 1_900, 1), (3000.0, 1_601, 1, 1_900, 2), (4000.0, BOOTS, 1, 2_600, 3)]
     assert conn.execute("SELECT COUNT(*) FROM offline_sales WHERE attributed = 0").fetchone()[0] == 0
-    assert conn.execute("SELECT sold_price, sold_at FROM fm_items WHERE uid = 3").fetchone() == (2_600, 4000.0)
+    assert conn.execute("SELECT sold_price, sold_at FROM fm_items WHERE uid = 77").fetchone() == (2_600, 4000.0)
     conn.close()
 
 
@@ -237,7 +282,7 @@ def test_journal_is_served(app_db):  # noqa: F811
 
     assert api.set_forge_base_cost(UID, 1_000_000) == {"uid": UID, "base_cost": 1_000_000}
     conn = db.connect(app_db)
-    db.save_sales(conn, SalesList(11, (Sale(UID, 500, 1, 3_000_000, 86_400),)), now - 60)
+    db.save_sales(conn, SalesList(11, (Sale(LOT, 500, 1, 3_000_000, 86_400, forged.object.effects),)), now - 60)  # le lot a son propre numéro
     conn.close()
     assert api.version()["stamp"] != stamp
     (d,) = api.forge_journal()["dossiers"]

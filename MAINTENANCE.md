@@ -182,6 +182,14 @@ mais la part de l'inventaire est encore l'ancienne), `iqx` / `isg` / `iqy` objet
 après une mise à jour du jeu : sans eux le stock ne bouge qu'aux listes complètes, comme avant.
 Contrôle : à chaque liste complète, le stock suivi doit déjà être égal à ce qu'elle annonce.
 
+Lot retiré de la vente (build du 6 octobre 2026) : `jye`, numéro du lot en champ 1. Un changement de
+prix n'est pas une modification : le client envoie `jzt` (lot en 2, nouveau prix en 3), le serveur
+répond `jye` (lot retiré) puis `jxt` (lot recréé, durée remise à 28 jours). Une ressource garde son
+numéro de lot, un équipement en reçoit un nouveau. `jye` n'est pas retrouvé automatiquement après une
+mise à jour du jeu : sans lui, un lot dont le prix a changé reste en double jusqu'au prochain relevé
+de l'onglet Vendre, et l'ancien peut passer pour une vente hors ligne. Un objet forgemagé mis en vente
+est donc suivi par ses jets (`fm_items.lot_uid`), jamais par son numéro.
+
 La capture relit `keymap.json` dès qu'il change : inutile de la relancer après la correction.
 
 ### 3. Mettre à jour `keymap.json`

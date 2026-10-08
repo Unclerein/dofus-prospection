@@ -53,6 +53,7 @@ class Dossier:
     listed_at: float | None
     sold_price: int | None
     sold_at: float | None
+    lot_uid: int | None  # lot en vente qui contient l'objet
     passes: int = 0
     sc: int = 0
     sn: int = 0
@@ -97,7 +98,7 @@ def load(conn: sqlite3.Connection) -> list[Dossier]:
     dossiers = {
         row[0]: Dossier(row[0], row[1], row[2], row[3], _effects(row[4]), _effects(row[5]) or {}, *row[6:])
         for row in conn.execute(
-            "SELECT uid, item_id, first_ts, last_ts, before, after, base_cost, listed_price, listed_at, sold_price, sold_at "
+            "SELECT uid, item_id, first_ts, last_ts, before, after, base_cost, listed_price, listed_at, sold_price, sold_at, lot_uid "
             "FROM fm_items"
         )
     }

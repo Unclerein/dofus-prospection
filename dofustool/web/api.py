@@ -1165,7 +1165,8 @@ class Api:
             meta = conn.execute("SELECT COUNT(*), MIN(captured_at), MAX(captured_at) FROM my_sales_meta").fetchone()
             # Journal : ventes conclues et achats annoncés par le jeu, les plus récents d'abord.
             trades = []
-            forged = {row[0] for row in conn.execute("SELECT uid FROM fm_items")}
+            # Une vente porte le numéro du lot, un achat celui de l'objet.
+            forged = {uid for row in conn.execute("SELECT uid, lot_uid FROM fm_items") for uid in row if uid is not None}
             for source_id, ts, kind, item_id, quantity, price, ref in conn.execute(
                 "SELECT source_id, ts, kind, item_id, quantity, price, ref FROM trades ORDER BY ts DESC, source_id DESC LIMIT 500"
             ):
@@ -1537,8 +1538,8 @@ class Api:
                         base_source = None
                 if d.sold_price is not None:
                     status, sale, sale_ts = "sold", d.sold_price, d.sold_at
-                elif d.uid in on_sale:
-                    status, sale, sale_ts = "listed", on_sale[d.uid], d.listed_at
+                elif d.lot_uid in on_sale:
+                    status, sale, sale_ts = "listed", on_sale[d.lot_uid], d.listed_at
                 else:
                     reference = ws.prices.get(d.item_id)
                     status, sale, sale_ts = "kept", reference.price if reference else None, None
