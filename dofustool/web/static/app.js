@@ -448,12 +448,12 @@ async function pageToday() {
   const ignore = (x) => { const button = ignoreButton(x.item_id, x.name); button.addEventListener('click', (event) => event.preventDefault()); return button; };
   const crafts = h('section', { class: 'panel', 'aria-label': 'Faisable avec ton stock' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Faisable avec ton stock'), h('a', { class: 'muted small', href: '#/stock' }, 'tout voir')),
-    d.crafts.length ? d.crafts.map((c) => listRow({ href: `#/item/${c.item_id}` }, itemCell(c.icon, c.name, `× ${fmt(c.craftable)} avec ce que tu possèdes`, c.item_id), h('span', { class: 'end gain', style: 'font-weight: 600' }, signed(c.margin)), ignore(c)))
+    d.crafts.length ? d.crafts.map((c) => listRow({ href: `#/item/${c.item_id}` }, itemCell(c.icon, c.name, `× ${fmt(c.craftable)} avec ce que tu possèdes`, c.item_id), h('span', { class: 'end gain', style: 'font-weight: 600' }, signed(c.margin)), listButton(c.item_id, c.name), ignore(c)))
       : h('div', { class: 'empty' }, d.stock_known ? 'Aucune recette rentable n\u2019est faisable avec ton stock seul.' : 'Stock inconnu : connecte-toi en jeu, capture active.'));
   const signals = h('section', { class: 'panel', 'aria-label': 'Signaux du marché' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Signaux du marché'), h('a', { class: 'muted small', href: '#/trends' }, 'tout voir')),
     d.signals.length ? d.signals.map((x) => listRow({ href: `#/item/${x.item_id}` }, itemCell(x.icon, x.name, `${fmt(x.price)} kamas · ${fmt(x.sold_7d)} vendus sur 7 j`, x.item_id),
-      h('span', { class: 'end' }, h('span', { class: 'tag ' + (x.deviation < 0 ? 'good' : 'bad'), title: x.deviation < 0 ? 'Sous sa moyenne : peut-être à acheter' : 'Au-dessus de sa moyenne : peut-être à vendre' }, `${x.deviation > 0 ? '+' : '−'}${Math.abs(Math.round(x.deviation))} % ${x.deviation < 0 ? 'sous' : 'au-dessus de'} sa moyenne`)), ignore(x)))
+      h('span', { class: 'end' }, h('span', { class: 'tag ' + (x.deviation < 0 ? 'good' : 'bad'), title: x.deviation < 0 ? 'Sous sa moyenne : peut-être à acheter' : 'Au-dessus de sa moyenne : peut-être à vendre' }, `${x.deviation > 0 ? '+' : '−'}${Math.abs(Math.round(x.deviation))} % ${x.deviation < 0 ? 'sous' : 'au-dessus de'} sa moyenne`)), listButton(x.item_id, x.name), ignore(x)))
       : h('div', { class: 'empty' }, 'Aucun écart marqué parmi les objets dont les ventes sont connues.'));
 
   // Pour de meilleures données : repliée, ce n'est pas une urgence.
@@ -624,6 +624,55 @@ async function setIgnored(itemId, name, ignored) {
 }
 
 /** Bouton d'une ligne de classement : un clic et l'objet disparaît des classements. */
+// Menu « ajouter à une liste de l'atelier », ouvert à côté du bouton cliqué.
+const $listMenu = h('div', { class: 'list-menu', hidden: true, role: 'menu' });
+document.body.append($listMenu);
+const closeListMenu = () => { $listMenu.hidden = true; };
+document.addEventListener('click', (event) => { if (!$listMenu.hidden && !$listMenu.contains(event.target)) closeListMenu(); });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeListMenu(); });
+window.addEventListener('hashchange', closeListMenu);
+
+async function addToList(target, itemId, name) {
+  closeListMenu();
+  let list = target;
+  if (list === null) { const made = await workshopAct({ action: 'create', name }); if (!made) return; list = made.list; }
+  const done = await workshopAct({ action: 'add', list, item_id: itemId, quantity: 1 });
+  if (!done) return;
+  try { localStorage.setItem('dofustool.lastList', String(list)); } catch (error) { /* stockage indisponible */ }
+  if (route().page === 'workshop') refresh();
+  clearTimeout(toastTimer);
+  $toast.replaceChildren(h('span', {}, `${name} ajouté à la liste.`), h('a', { class: 'btn', href: `#/workshop/${list}`, onclick: () => { $toast.hidden = true; } }, 'Voir la liste'));
+  $toast.hidden = false;
+  toastTimer = setTimeout(() => { $toast.hidden = true; }, 6000);
+}
+
+/** Bouton « ajouter à une liste » : un clic propose tes listes de l'atelier, la dernière utilisée en premier. */
+function listButton(itemId, name) {
+  return h('button', { class: 'icon-btn', title: `Ajouter ${name} à une liste de l\u2019atelier`, 'aria-label': `Ajouter ${name} à une liste`, 'aria-haspopup': 'menu',
+    onclick: async (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      $tip.hidden = true;
+      const box = event.currentTarget.getBoundingClientRect();
+      let lists = [];
+      try { lists = (await cached('workshop', '/api/workshop')).lists; } catch (error) { /* le menu propose au moins d'en créer une */ }
+      let last = null;
+      try { last = Number(localStorage.getItem('dofustool.lastList')); } catch (error) { /* stockage indisponible */ }
+      const ordered = lists.slice().sort((a, b) => (b.id === last) - (a.id === last));
+      $listMenu.replaceChildren(
+        h('div', { class: 'list-menu-head' }, `Ajouter ${name} à…`),
+        ...ordered.map((l) => h('button', { role: 'menuitem', onclick: () => addToList(l.id, itemId, name) }, h('span', {}, l.name), h('span', { class: 'muted small' }, plural(l.goals.length, 'objectif', 'objectifs')))),
+        h('button', { role: 'menuitem', class: 'new', onclick: () => addToList(null, itemId, name) }, '+ Nouvelle liste'));
+      $listMenu.hidden = false;
+      const menu = $listMenu.getBoundingClientRect();
+      $listMenu.style.left = `${Math.max(8, Math.min(box.right - menu.width, window.innerWidth - menu.width - 8))}px`;
+      $listMenu.style.top = `${box.bottom + menu.height + 8 > window.innerHeight ? Math.max(8, box.top - menu.height - 6) : box.bottom + 6}px`;
+      const first = $listMenu.querySelector('button');
+      if (first) first.focus();
+    } },
+    svg('svg', { width: 18, height: 18, viewBox: '0 0 18 18', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: 'M3 4.500h9M3 9h6M3 13.500h6M14 10.500v5M11.500 13h5' })));
+}
+
 function ignoreButton(itemId, name) {
   return h('button', { class: 'icon-btn', title: `Ignorer ${name}`, 'aria-label': `Ignorer ${name}`,
     onclick: (event) => { event.stopPropagation(); $tip.hidden = true; setIgnored(itemId, name, true); } },
@@ -751,7 +800,7 @@ async function pageCrafts() {
       soldCell(r),
       h('td', {}, r.craftable > 0 ? h('span', { class: 'tag good' }, `× ${fmt(r.craftable)}`) : h('span', { class: 'muted' }, '—')),
       h('td', { class: 'l wrap' }, h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag ' + (t.includes('sous-craft') ? 'info' : t.includes('manquant') || t.includes('non échangeable') ? 'bad' : '') }, t)))),
-      h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet'])));
+      h('td', { class: 'act two' }, listButton(r.item_id, r['Objet']), ignoreButton(r.item_id, r['Objet'])));
   });
 
   return [
@@ -868,7 +917,7 @@ function stockCrafts(data) {
     h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
     h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
     h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—'),
-    h('td', { class: 'act' }, ignoreButton(row.item_id, row.name))));
+    h('td', { class: 'act two' }, listButton(row.item_id, row.name), ignoreButton(row.item_id, row.name))));
 
   return [
     h('section', { class: 'kpis' },
@@ -1672,7 +1721,7 @@ async function pageTrends() {
           h('td', { class: 'soft' }, `${positive ? '+' : '−'}${price(kamasGap(r))}`),
           h('td', { class: 'strong ' + (positive ? 'warn' : 'gain') }, `${r['Écart %'] >= 0 ? '+' : '−'}${fmt(Math.abs(r['Écart %']))} %`),
           h('td', { class: r.recipes ? 'soft' : 'muted' }, r.recipes || '—'),
-          h('td', { class: 'act' }, ignoreButton(r.item_id, r['Objet']))))))),
+          h('td', { class: 'act two' }, listButton(r.item_id, r['Objet']), ignoreButton(r.item_id, r['Objet']))))))),
     rows.length > 150 ? h('div', { class: 'panel-foot' }, h('span', {}, `150 sur ${fmt(rows.length)}`)) : null);
   const ui = S.ui.trends || (S.ui.trends = { category: '', type: '', usedOnly: false, pct: Math.round((status.trend_threshold || 0.15) * 100), kamas: 0, sort: { key: 'gap', dir: -1 } });
   const refValue = (r) => (r['Prix moyen'] !== null && r['Prix moyen'] !== undefined ? r['Prix moyen'] : r['Moyenne 30 j'] !== null ? r['Moyenne 30 j'] : r['Moyenne 7 j']);
