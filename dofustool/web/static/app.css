@@ -541,3 +541,13 @@ a.kpi:hover { background: var(--raised); }
 .day-nav .day-label { min-width: 110px; text-align: center; font-weight: 600; }
 .day-nav .btn.quiet { min-width: 34px; font-size: 18px; line-height: 1; }
 .quiet-panel summary { cursor: pointer; color: var(--muted); font-weight: 500; }
+
+/* Journal des échanges : une ligne par échange, ce qui est donné à gauche, reçu à droite. */
+.trade { display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 18px; padding: 14px 18px; border-top: 1px solid var(--line); align-items: start; }
+.trade-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.trade-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.trade-item { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border-radius: 8px; background: var(--raised); color: var(--soft); font-size: 13px; }
+.trade-item:hover { color: var(--text); }
+.trade-item .tile { width: 26px; height: 26px; border-radius: 6px; }
+.trade-item .tile img { width: 22px; height: 22px; }
+@media (max-width: 900px) { .trade { grid-template-columns: 1fr; } }

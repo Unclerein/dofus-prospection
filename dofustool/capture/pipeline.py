@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import db, identify
 from ..archive import Archive
-from ..messages import Mapping, avg_prices, characters, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
+from ..messages import Mapping, avg_prices, characters, exchange, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -39,6 +39,7 @@ class _ConnWatch:
     waiting: bool = False  # délai de la configuration dépassé, prix moyens toujours attendus
     late: bool = False  # la capture a démarré alors que cette connexion était déjà ouverte
     coffre: str | None = None  # coffre que le joueur vient d'ouvrir (banque ou havre-sac) : sa liste suit
+    trade: exchange.Tracker = field(default_factory=exchange.Tracker)  # échange en cours avec un autre joueur
     visible: set = field(default_factory=lambda: {db.INVENTORY})  # coffres de la dernière liste reçue
     alerted: bool = False
     next_build_check: float = 0.0  # prochaine recherche de nouvelles clés, tant que les prix manquent
@@ -155,6 +156,9 @@ class Pipeline:
                 db.save_lot_update(self.market, lot, msg.ts)
             return
 
+        if msg.direction == S2C and self._trade(msg, watch, source_id):
+            return
+
         mapping = self.keymap.get("fm_object")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             placed = fm.parse_object(msg.body, mapping)
@@ -169,8 +173,14 @@ class Pipeline:
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             result = fm.parse_result(msg.body, mapping)
             rune, watch.fm_rune = watch.fm_rune, None
+            if result is not None and not result.forged and result.passed and source_id is not None:
+                # Ni puits ni rune : une fabrication ordinaire, qui entre dans le journal des crafts.
+                if db.save_craft(self.market, source_id, msg.ts, result.object):
+                    row = self.market.execute("SELECT name FROM items WHERE id = ?", (result.object.item_id,)).fetchone()
+                    log.info("Fabrication : %s x%d.", row[0] if row else f"item {result.object.item_id}", result.object.quantity)
+                return
             # Sans rune posée, c'est le résultat d'une autre fabrication, pas un passage de rune.
-            if result is None or rune is None or result.object.item_id in self._rune_ids():
+            if result is None or rune is None or not result.forged or result.object.item_id in self._rune_ids():
                 return
             uid = result.object.uid
             known = self.market.execute("SELECT 1 FROM fm_items WHERE uid = ?", (uid,)).fetchone()
@@ -262,6 +272,49 @@ class Pipeline:
             if watch.alerted:
                 watch.alerted = False
                 log.info("Alerte levée : les prix moyens ont fini par être décodés.")
+
+    def _trade(self, msg: Message, watch: _ConnWatch, source_id: int | None) -> bool:
+        """Échange avec un autre joueur. Renvoie True si le message lui appartenait.
+
+        Les objets posés et la clôture passent par les mêmes messages qu'un atelier : hors d'un échange
+        ouvert, ils sont laissés aux autres traitements.
+        """
+        keymap, trade = self.keymap, watch.trade
+        mapping = keymap.get("exchange_started")
+        if mapping is not None and msg.key == mapping.key:
+            trade.start()
+            return True
+        if trade.current is None:
+            return False
+        for name in ("fm_object", "exchange_modified"):
+            mapping = keymap.get(name)
+            if mapping is not None and msg.key == mapping.key:
+                placed = exchange.parse_placed(msg.body, mapping)
+                if placed is not None:
+                    trade.place(*placed)
+                return True
+        mapping = keymap.get("exchange_removed")
+        if mapping is not None and msg.key == mapping.key:
+            removed = exchange.parse_flagged(msg.body, mapping, "uid")
+            if removed is not None:
+                trade.remove(*removed)
+            return True
+        mapping = keymap.get("exchange_kamas")
+        if mapping is not None and msg.key == mapping.key:
+            offered = exchange.parse_flagged(msg.body, mapping, "amount")
+            if offered is not None:
+                trade.kamas(*offered)
+            return True
+        mapping = keymap.get("exchange_closed")
+        if mapping is not None and msg.key == mapping.key:
+            done = trade.close(bool(exchange.parse_closed(msg.body, mapping)))
+            if done is not None and source_id is not None and db.save_exchange(self.market, source_id, msg.ts, done):
+                log.info(
+                    "Échange conclu : %d objets donnés, %d reçus, %d kamas donnés, %d reçus.",
+                    len(done.given), len(done.received), done.kamas_given, done.kamas_received,
+                )  # fmt: skip
+            return True
+        return False
 
     def _stock_moves(self, msg: Message, watch: _ConnWatch) -> bool:
         """Mouvements de l'inventaire entre deux listes complètes. Renvoie True si le message en était un."""

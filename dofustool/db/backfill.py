@@ -11,6 +11,7 @@ import time
 from .. import db
 from ..archive import ARCHIVE_PATH
 from ..messages import avg_prices, characters, fm, hdv_listings, market_history, sales, storage, trades
+from ..messages import exchange
 from ..messages import inventory as moves
 from ..messages import load_runtime_keymap as load_keymap
 
@@ -134,6 +135,7 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             "ORDER BY connection_id, id",
             (placed.key, outcome.key),
         )
+        counts["fabrications ajoutées"] = 0
         for source_id, connection_id, ts, key, body in rows:
             if key == placed.key:
                 obj = fm.parse_object(body, placed)
@@ -144,12 +146,47 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
                 continue
             result = fm.parse_result(body, outcome)
             used = rune.pop(connection_id, None)
+            if result is not None and not result.forged and result.passed:
+                counts["fabrications ajoutées"] += db.save_craft(market, source_id, ts, result.object)
+                continue
             if result is None or used is None or result.object.item_id in runes:
                 continue
             slot = (connection_id, result.object.uid)
             if db.save_fm_pass(market, source_id, ts, result, used, objects.get(slot)):
                 counts["passages de rune ajoutés"] += 1
             objects[slot] = result.object.effects
+    names = ("exchange_started", "fm_object", "exchange_modified", "exchange_removed", "exchange_kamas", "exchange_closed")
+    if all(name in keymap for name in names):
+        counts["échanges ajoutés"] = 0
+        by_key = {keymap[name].key: name for name in names}
+        trackers: dict[int, exchange.Tracker] = {}
+        marks = ",".join("?" * len(by_key))
+        rows = archive.execute(
+            f"SELECT id, connection_id, ts, key, body FROM messages WHERE key IN ({marks}) AND direction = 's2c' ORDER BY id",
+            sorted(by_key),
+        )
+        for source_id, connection_id, ts, key, body in rows:
+            name, tracker = by_key[key], trackers.setdefault(connection_id, exchange.Tracker())
+            if name == "exchange_started":
+                tracker.start()
+            elif tracker.current is None:
+                continue
+            elif name in ("fm_object", "exchange_modified"):
+                found = exchange.parse_placed(body, keymap[name])
+                if found is not None:
+                    tracker.place(*found)
+            elif name == "exchange_removed":
+                found = exchange.parse_flagged(body, keymap[name], "uid")
+                if found is not None:
+                    tracker.remove(*found)
+            elif name == "exchange_kamas":
+                found = exchange.parse_flagged(body, keymap[name], "amount")
+                if found is not None:
+                    tracker.kamas(*found)
+            else:
+                done = tracker.close(bool(exchange.parse_closed(body, keymap[name])))
+                if done is not None:
+                    counts["échanges ajoutés"] += db.save_exchange(market, source_id, ts, done)
     offline = keymap.get("offline_sales")
     if offline is not None and mine is not None:
         counts["ventes hors ligne retrouvées"] = _offline_sales(archive, market, keymap)

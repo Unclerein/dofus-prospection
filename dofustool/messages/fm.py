@@ -39,6 +39,8 @@ class Result:
     pool: float  # puits après le passage
     pool_change: int  # POOL_SAME, POOL_UP ou POOL_DOWN
     object: Object
+    # Faux pour une fabrication ordinaire : son résultat ne parle ni de puits ni de sa variation.
+    forged: bool = True
 
 
 def _object(body: bytes, f: dict[str, int]) -> Object | None:
@@ -99,6 +101,7 @@ def parse_result(body: bytes, mapping: Mapping) -> Result | None:
     status = found = None
     pool = 0.0  # un puits vide n'est pas transmis
     change = POOL_SAME
+    forged = False
     try:
         for number, wire_type, value in iter_fields(body):
             if number == f["status"] and wire_type == VARINT:
@@ -107,8 +110,10 @@ def parse_result(body: bytes, mapping: Mapping) -> Result | None:
                 for r_number, r_type, r_value in iter_fields(value):
                     if r_number == f["pool"] and r_type == I32:
                         pool = struct.unpack("<f", r_value.to_bytes(4, "little"))[0]
+                        forged = True
                     elif r_number == f["pool_change"] and r_type == VARINT:
                         change = r_value
+                        forged = True
                     elif r_number == f["object"] and r_type == LEN:
                         found = _object(r_value, f)
                     else:
@@ -121,7 +126,7 @@ def parse_result(body: bytes, mapping: Mapping) -> Result | None:
         return None
     if not 0 <= pool <= MAX_POOL:  # exclut aussi NaN
         return None
-    return Result(status == PASSED, pool, change, found)
+    return Result(status == PASSED, pool, change, found, forged)
 
 
 def parse_offline_total(body: bytes, mapping: Mapping) -> int | None:

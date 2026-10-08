@@ -278,6 +278,30 @@ CREATE TABLE IF NOT EXISTS fm_items (
     sold_price   INTEGER,
     sold_at      REAL
 );
+-- Échanges conclus avec d'autres joueurs, et objets fabriqués. Donnée personnelle, jamais partagée.
+-- L'autre joueur n'est pas enregistré : ni son nom, ni son identifiant.
+CREATE TABLE IF NOT EXISTS exchanges (
+    source_id      INTEGER PRIMARY KEY,  -- numéro du message de clôture dans l'archive brute
+    ts             REAL NOT NULL,
+    kamas_given    INTEGER NOT NULL,
+    kamas_received INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS exchange_items (
+    source_id INTEGER NOT NULL REFERENCES exchanges(source_id),
+    received  INTEGER NOT NULL,  -- 1 : reçu ; 0 : donné
+    uid       INTEGER NOT NULL,
+    item_id   INTEGER NOT NULL,
+    quantity  INTEGER NOT NULL,
+    PRIMARY KEY (source_id, received, uid)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS crafts (
+    source_id INTEGER PRIMARY KEY,
+    ts        REAL NOT NULL,
+    item_id   INTEGER NOT NULL,
+    quantity  INTEGER NOT NULL,
+    uid       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS crafts_ts ON crafts (ts);
 -- Almanax d'un jour (bonus et offrande), tel que DofusDB le donne : gardé pour ne l'interroger qu'une fois.
 CREATE TABLE IF NOT EXISTS almanax (
     day        TEXT PRIMARY KEY,  -- AAAA-MM-JJ
@@ -626,6 +650,32 @@ def set_kamas(conn: sqlite3.Connection, kamas: int, ts: float) -> None:
     with conn:
         conn.execute("UPDATE holdings_meta SET kamas = ? WHERE container = ?", (kamas, INVENTORY))
         _signal(conn, INVENTORY, ts)
+
+
+def save_exchange(conn: sqlite3.Connection, source_id: int, ts: float, exchange) -> bool:
+    """Enregistre un échange conclu (messages.exchange.Exchange). Renvoie False s'il était déjà connu."""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO exchanges VALUES (?, ?, ?, ?)", (source_id, ts, exchange.kamas_given, exchange.kamas_received)
+        )
+        if not cur.rowcount:
+            return False
+        conn.executemany(
+            "INSERT OR REPLACE INTO exchange_items VALUES (?, ?, ?, ?, ?)",
+            [
+                (source_id, received, uid, item_id, quantity)
+                for received, side in ((0, exchange.given), (1, exchange.received))
+                for uid, (item_id, quantity) in side.items()
+            ],
+        )
+    return True
+
+
+def save_craft(conn: sqlite3.Connection, source_id: int, ts: float, obj) -> bool:
+    """Enregistre un objet fabriqué (messages.fm.Object). Renvoie False s'il était déjà connu."""
+    with conn:
+        cur = conn.execute("INSERT OR IGNORE INTO crafts VALUES (?, ?, ?, ?, ?)", (source_id, ts, obj.item_id, obj.quantity, obj.uid))
+    return bool(cur.rowcount)
 
 
 def _rolls(sale) -> str | None:

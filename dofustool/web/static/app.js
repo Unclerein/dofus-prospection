@@ -763,7 +763,7 @@ function stockItems(data) {
     h('div', { class: 'field', style: 'flex: 0 1 220px' }, h('label', { for: 'i-cat' }, 'Famille'),
       h('select', { id: 'i-cat', class: ui.category ? 'set' : '', onchange: (e) => set({ category: e.target.value, limit: 150 }) },
         h('option', { value: '' }, 'Toutes'), [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => h('option', { value: name, selected: name === ui.category }, `${name} · ${n}`)))),
-    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Où'), segmented('Où', [['', 'Partout'], ['inventory', 'Inventaire'], ['bank', 'Banque']], ui.where, (where) => set({ where }))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Où'), segmented('Où', [['', 'Partout'], ['inventory', 'Inventaire'], ['bank', 'Banque'], ['havre', 'Havre-sac']], ui.where, (where) => set({ where }))),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Trier par'), segmented('Trier par', [['value', 'Valeur'], ['total', 'Quantité'], ['name', 'Nom']], ui.sort, (sort) => set({ sort }))),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.usedOnly, onchange: (e) => set({ usedOnly: e.target.checked }) }), 'Sert dans une recette'));
 
@@ -806,9 +806,12 @@ async function pageSales() {
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Mes ventes'),
     h('div', { class: 'lead' }, data.latest ? `Relevé ${ago(data.latest, data.now)}` + (data.markets > 1 ? ` · ${data.markets} HDV` : '') : 'Lots que tu as mis en vente')));
   const ui = S.ui.sales || (S.ui.sales = { tab: 'lots', view: 'all', q: '', kind: '', family: '' });
-  const tabs = segmented('Vue', [['lots', `Lots en vente · ${data.rows.length}`], ['journal', `Journal · ${data.trades.length}`]], ui.tab, (tab) => { ui.tab = tab; refresh(); });
+  const tabs = segmented('Vue', [['lots', `Lots en vente · ${data.rows.length}`], ['journal', `Ventes et achats · ${data.trades.length}`],
+    ['exchanges', `Échanges · ${data.exchanges.length}`], ['crafts', `Fabrications · ${data.crafts.length}`]], ui.tab, (tab) => { ui.tab = tab; refresh(); });
   head.append(tabs);
   if (ui.tab === 'journal') return [head, ...salesJournal(data, ui)];
+  if (ui.tab === 'exchanges') return [head, ...exchangesJournal(data)];
+  if (ui.tab === 'crafts') return [head, ...craftsJournal(data)];
   if (!data.markets) {
     return [head, h('div', { class: 'panel empty' }, 'Ouvre l\'onglet Vendre d\'un HDV en jeu, capture active : tes lots apparaîtront ici.')];
   }
@@ -862,6 +865,52 @@ async function pageSales() {
           h('td', { class: 'soft' }, fmt(r.avg)),
           h('td', { class: r.remaining_s < 3 * 86400 ? 'warn' : 'soft' }, remainingLabel(r.remaining_s))))))));
   return [head, kpis, filters, table];
+}
+
+/** Échanges conclus avec d'autres joueurs : ce que tu as donné, ce que tu as reçu. */
+function exchangesJournal(data) {
+  if (!data.exchanges.length) {
+    return [h('div', { class: 'panel empty' }, 'Aucun échange capté pour l\u2019instant. Ils s\u2019ajoutent tout seuls quand un échange avec un autre joueur est conclu, capture active.')];
+  }
+  const side = (label, kamas, items, value, cls) => h('div', { class: 'trade-side' },
+    h('div', { class: 'trade-head' }, h('span', { class: 'muted' }, label), h('span', { class: 'strong ' + cls }, kamas ? `${fmt(kamas)} kamas` : ''),
+      items.length ? h('span', { class: 'muted small' }, `${plural(items.length, 'objet', 'objets')} · ${fmt(value)} au prix du jour`) : null),
+    items.length ? h('div', { class: 'trade-items' }, items.slice(0, 40).map((it) => h('a', { class: 'trade-item', href: `#/item/${it.item_id}`, title: it.value !== null ? `${it.name} · ${fmt(it.value)} kamas` : it.name, ...hoverTip(it.item_id) },
+      tile(it.icon, false), h('span', {}, it.quantity > 1 ? `${fmt(it.quantity)} × ${it.name}` : it.name))),
+      items.length > 40 && h('span', { class: 'muted small' }, `et ${items.length - 40} autres`))
+      : !kamas && h('div', { class: 'muted' }, 'rien'));
+  return [h('section', { class: 'panel', 'aria-label': 'Échanges' },
+    h('div', { class: 'panel-head' }, h('h2', {}, plural(data.exchanges.length, 'échange conclu', 'échanges conclus')), h('span', { class: 'muted small' }, 'Les échanges annulés ne sont pas notés · l\u2019autre joueur n\u2019est pas enregistré')),
+    data.exchanges.map((x) => {
+      const balance = x.kamas_received + x.value_received - x.kamas_given - x.value_given;
+      return h('div', { class: 'trade' },
+        h('div', { class: 'trade-when' }, h('div', { style: 'font-weight: 600' }, when(x.ts)),
+          h('div', { class: 'small ' + (balance >= 0 ? 'gain' : 'warn'), title: 'Reçu moins donné, kamas et objets au prix de référence du jour' }, `solde ${signed(balance)}`)),
+        side('Donné', x.kamas_given, x.given, x.value_given, ''), side('Reçu', x.kamas_received, x.received, x.value_received, 'gain'));
+    }))];
+}
+
+/** Objets fabriqués, avec leur valeur et leur coût de fabrication aux prix du jour. */
+function craftsJournal(data) {
+  if (!data.crafts.length) {
+    return [h('div', { class: 'panel empty' }, 'Aucune fabrication captée pour l\u2019instant. Elles s\u2019ajoutent toutes seules quand tu fabriques un objet, capture active.')];
+  }
+  const value = data.crafts.reduce((sum, c) => sum + (c.value || 0), 0), cost = data.crafts.reduce((sum, c) => sum + (c.cost || 0), 0);
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Fabrications', fmt(data.crafts.length), `depuis le ${when(data.crafts[data.crafts.length - 1].ts, false)}`),
+    kpi('Valeur fabriquée', fmt(value), 'au prix de référence du jour'),
+    kpi('Coût des ingrédients', fmt(cost), 'recette aux prix du jour'),
+    kpi('Marge', signed(value * (1 - data.tax) - cost), 'après taxe de mise en vente', value * (1 - data.tax) - cost >= 0 ? 'gain' : 'warn'));
+  const table = h('section', { class: 'panel' }, h('div', { class: 'scroll' }, h('table', { style: 'min-width: 700px' },
+    h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Quand'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', {}, 'Valeur'), h('th', {}, 'Coût'), h('th', {}, 'Marge'))),
+    h('tbody', {}, data.crafts.map((c) => {
+      const margin = c.value !== null && c.cost !== null ? c.value * (1 - data.tax) - c.cost : null;
+      return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${c.item_id}`; } },
+        h('td', { class: 'l soft' }, when(c.ts)), h('td', { class: 'l' }, itemCell(c.icon, c.name, null, c.item_id)), h('td', { class: 'soft' }, `× ${fmt(c.quantity)}`),
+        h('td', { class: 'soft' }, fmt(c.value)), h('td', { class: 'soft' }, fmt(c.cost)),
+        h('td', { class: 'strong ' + (margin === null ? 'muted' : margin >= 0 ? 'gain' : 'warn') }, margin === null ? '—' : signed(margin)));
+    })))));
+  return [kpis, table];
 }
 
 /** Journal des ventes conclues et des achats, tels que le jeu les annonce. */
@@ -2435,6 +2484,12 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 8, date: '8 octobre 2026', title: 'Stock en direct, havre-sac, échanges et fabrications', hash: '#/stock/items', go: 'Voir mon stock', points: [
+    ['Stock en direct :', 'achats, crafts, échanges et runes consommées mettent Mon stock à jour dans les secondes qui suivent, sans rouvrir un coffre.'],
+    ['Trois coffres :', 'inventaire, banque et havre-sac sont suivis séparément. Ouvre un HDV ou un atelier avec les boutons banque et havre-sac cochés pour tout relever d\u2019un coup.'],
+    ['Mes ventes › Échanges :', 'chaque échange conclu avec un autre joueur, avec ce que tu as donné et reçu.'],
+    ['Mes ventes › Fabrications :', 'chaque objet que tu fabriques, avec sa valeur et le coût de sa recette.'],
+  ] },
   { id: 7, date: '8 octobre 2026', title: 'Page « Aujourd\u2019hui » et menu rangé', hash: '#/today', go: 'Voir la page', points: [
     ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, les crafts faisables avec ton stock et les signaux du marché.'],
     ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours.'],

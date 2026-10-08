@@ -224,7 +224,8 @@ class Api:
             # minute, et ces compteurs restent hors de l'empreinte qui déclenche le recalcul des pages.
             journal = conn.execute(
                 "SELECT (SELECT COUNT(*) FROM fm_items), (SELECT CAST(MAX(ts) / 60 AS INTEGER) FROM fm_passes), "
-                "(SELECT COUNT(*) FROM offline_sales), (SELECT COUNT(*) FROM fm_items WHERE base_cost IS NOT NULL OR sold_at IS NOT NULL)"
+                "(SELECT COUNT(*) FROM offline_sales), (SELECT COUNT(*) FROM fm_items WHERE base_cost IS NOT NULL OR sold_at IS NOT NULL), "
+                "(SELECT COUNT(*) FROM exchanges), (SELECT COUNT(*) FROM crafts)"
             ).fetchone()
             return {"stamp": [*data_stamp(conn, self.config_path), *journal]}
         finally:
@@ -941,6 +942,39 @@ class Api:
             pending = conn.execute(
                 "SELECT COALESCE(SUM(delta), 0), MIN(ts), MAX(ts) FROM offline_sales WHERE attributed = 0 AND delta > 0"
             ).fetchone()
+            def valued(item_id: int, quantity: int) -> dict:
+                item = ws.items.get(item_id)
+                ref = ws.prices.get(item_id)
+                return {
+                    "item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": state["icons"].get(item_id),
+                    "quantity": quantity, "value": ref.price * quantity if ref else None,
+                }  # fmt: skip
+
+            # Échanges conclus avec d'autres joueurs : ce qui a été donné et reçu, valorisé au prix de référence du jour.
+            exchanges = []
+            for source_id, ts, given_kamas, received_kamas in conn.execute(
+                "SELECT source_id, ts, kamas_given, kamas_received FROM exchanges ORDER BY ts DESC LIMIT 100"
+            ).fetchall():
+                sides = {0: [], 1: []}
+                for received, item_id, quantity in conn.execute(
+                    "SELECT received, item_id, SUM(quantity) FROM exchange_items WHERE source_id = ? GROUP BY received, item_id", (source_id,)
+                ):
+                    sides[received].append(valued(item_id, quantity))
+                for side in sides.values():
+                    side.sort(key=lambda row: -(row["value"] or 0))
+                exchanges.append(
+                    {
+                        "ts": ts, "kamas_given": given_kamas, "kamas_received": received_kamas,
+                        "given": sides[0], "received": sides[1],
+                        "value_given": sum(row["value"] or 0 for row in sides[0]),
+                        "value_received": sum(row["value"] or 0 for row in sides[1]),
+                    }
+                )  # fmt: skip
+            # Objets fabriqués : valeur et coût de fabrication aux prix du jour.
+            crafts = []
+            for ts, item_id, quantity in conn.execute("SELECT ts, item_id, quantity FROM crafts ORDER BY ts DESC, source_id DESC LIMIT 300"):
+                cost = forge.craft_cost(ws, item_id)
+                crafts.append({**valued(item_id, quantity), "ts": ts, "cost": cost * quantity if cost is not None else None})
             totals = {
                 f"{kind}_{label}": conn.execute(
                     "SELECT COUNT(*), COALESCE(SUM(price), 0) FROM trades WHERE kind = ? AND ts >= ?", (kind, now - days * 86400)
@@ -951,7 +985,7 @@ class Api:
             return clean(
                 {
                     "rows": rows, "markets": meta[0], "oldest": meta[1], "latest": meta[2], "tax": cfg.hdv_tax, "now": now,
-                    "trades": trades, "totals": totals,
+                    "trades": trades, "totals": totals, "exchanges": exchanges, "crafts": crafts,
                     "offline_pending": {"amount": pending[0], "since": pending[1], "latest": pending[2]},
                     "first_trade": conn.execute("SELECT MIN(ts) FROM trades").fetchone()[0],
                 }
