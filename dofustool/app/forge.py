@@ -20,11 +20,25 @@ EXO = "Un exo"
 OVER = "Un over"
 
 
-def base_line_counts(conn: sqlite3.Connection) -> dict[int, int]:
-    """Caractéristiques de base rencontrées sur les équipements connus, avec le nombre d'objets qui les portent."""
-    counts: dict[int, int] = {}
+def load_all(conn: sqlite3.Connection) -> dict:
+    """{équipement: (caractéristiques de base ou None, annonces courantes lues)} pour tous les équipements relevés.
+
+    Le classement général, la liste des exos et celle des lignes de base parcourent tous les mêmes
+    annonces : les lire une seule fois divise son temps de calcul par trois.
+    """
+    ignored = non_stat_effects(conn)
+    out = {}
     for item_id in equipment_options(conn):
         template = load_template(conn, item_id)
+        out[item_id] = (template, read_listings(conn, item_id, template, ignored=ignored) if template is not None else [])
+    return out
+
+
+def base_line_counts(conn: sqlite3.Connection, loaded: dict | None = None) -> dict[int, int]:
+    """Caractéristiques de base rencontrées sur les équipements connus, avec le nombre d'objets qui les portent."""
+    counts: dict[int, int] = {}
+    for item_id in loaded if loaded is not None else equipment_options(conn):
+        template = loaded[item_id][0] if loaded is not None else load_template(conn, item_id)
         for effect_id in base_lines(template or {}):
             counts[effect_id] = counts.get(effect_id, 0) + 1
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
@@ -89,14 +103,15 @@ def _describe(ids: tuple[int, ...], values: dict[int, int], names: dict[int, str
 
 
 def read_listings(
-    conn: sqlite3.Connection, item_id: int, template: Template, current: bool = True
+    conn: sqlite3.Connection, item_id: int, template: Template, current: bool = True, ignored: frozenset[int] | None = None
 ) -> list[tuple[int, Classification, float, float]]:
     """Renvoie (prix, lecture de la forgemagie, première vue, dernière vue), du moins cher au plus cher."""
     table = "hdv_current" if current else "hdv_listings"
     rows = conn.execute(
         f"SELECT p1, effects, first_seen, captured_at FROM {table} WHERE item_id = ? AND p1 > 0 ORDER BY p1", (item_id,)
     )
-    ignored = non_stat_effects(conn)
+    if ignored is None:
+        ignored = non_stat_effects(conn)
     return [
         (
             price,
@@ -219,6 +234,7 @@ def ranking(
     criterion: str,
     exo: int | None = None,
     over: tuple[int, int] | None = None,
+    loaded: dict | None = None,
 ) -> pd.DataFrame:
     """Une ligne par équipement dont on connaît les annonces et les caractéristiques de base.
 
@@ -227,11 +243,11 @@ def ranking(
     """
     names = effect_names(conn)
     rows = []
-    for item_id in equipment_options(conn):
-        template = load_template(conn, item_id)
+    if loaded is None:
+        loaded = load_all(conn)
+    for item_id, (template, listings) in loaded.items():
         if template is None:
             continue
-        listings = read_listings(conn, item_id, template)
         if criterion == OVER:
             lines = base_lines(template)
             if over is None or over[0] not in lines:
@@ -271,13 +287,14 @@ def ranking(
     return pd.DataFrame(rows, columns=columns)
 
 
-def all_exo_counts(conn: sqlite3.Connection) -> dict[int, int]:
+def all_exo_counts(conn: sqlite3.Connection, loaded: dict | None = None) -> dict[int, int]:
     """Exos rencontrés sur l'ensemble des annonces courantes, pour le sélecteur du classement."""
     counts: dict[int, int] = {}
-    for item_id in equipment_options(conn):
-        template = load_template(conn, item_id)
+    if loaded is None:
+        loaded = load_all(conn)
+    for template, listings in loaded.values():
         if template is None:
             continue
-        for effect_id, count in exo_counts(read_listings(conn, item_id, template)).items():
+        for effect_id, count in exo_counts(listings).items():
             counts[effect_id] = counts.get(effect_id, 0) + count
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))

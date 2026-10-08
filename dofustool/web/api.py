@@ -56,6 +56,18 @@ def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH)
     return [*stamp, cfg_mtime]
 
 
+# Positions, dans l'empreinte, de ce qui ne change pas les calculs lourds (prix, crafts, tendances) :
+# le stock (6), mes lots en vente (9, 10), mes ventes et achats (11), l'état de la capture (12).
+# Un mouvement d'inventaire arrive toutes les quelques secondes en jeu : il ne doit pas tout faire recalculer.
+STOCK_POSITION = 6
+LIGHT_POSITIONS = frozenset({STOCK_POSITION, 9, 10, 11, 12})
+
+
+def core_stamp(stamp: list) -> tuple:
+    """L'empreinte réduite à ce dont dépendent les prix, les crafts et les tendances."""
+    return tuple(value for position, value in enumerate(stamp) if position not in LIGHT_POSITIONS)
+
+
 def local_addresses() -> list[dict]:
     """Adresses de ce PC sur ses réseaux, pour indiquer aux amis où joindre le hub."""
     import ipaddress
@@ -102,6 +114,7 @@ class Api:
         self._fetching = threading.Lock()
         self._ranking_stamp: tuple | None = None
         self._ranking_cache: dict[tuple, dict] = {}
+        self._ranking_loaded: dict | None = None  # annonces lues de tous les équipements, pour la même empreinte
         self.fetch_effects = base_effects.fetch  # remplaçable dans les tests
         self.fetch_almanax = almanax_source.fetch
 
@@ -142,6 +155,17 @@ class Api:
     def _load(self, conn: sqlite3.Connection) -> dict:
         stamp = data_stamp(conn, self.config_path)
         with self._lock:
+            fresh = self._state is not None and self._stamp is not None
+            if fresh and stamp != self._stamp and core_stamp(stamp) == core_stamp(self._stamp):
+                # Seuls le stock, mes lots ou mon journal ont bougé : les prix et les crafts restent valables.
+                if stamp[STOCK_POSITION] != self._stamp[STOCK_POSITION]:
+                    stock = Stock(conn)
+                    crafts_from_stock = stock_crafts(conn, self._state["ws"].calculator, stock)
+                    self._state = {
+                        **self._state, "stock": stock, "stock_crafts": crafts_from_stock,
+                        "craftable": {c.result.item.id: c.craftable for c in crafts_from_stock if c.craftable},
+                    }  # fmt: skip
+                self._stamp = stamp
             if self._state is None or stamp != self._stamp:
                 cfg = config.load(self.config_path)
                 ws = data.build_workspace(conn, cfg, time.time())
@@ -1608,14 +1632,15 @@ class Api:
         """
         conn = self.connect()
         try:
+            # Ni le stock ni mes ventes n'entrent dans le classement : un achat en jeu ne le fait pas recalculer.
             stamp = (
-                *data_stamp(conn, self.config_path),
+                *core_stamp(data_stamp(conn, self.config_path)),
                 conn.execute("SELECT group_concat(item_id || ':' || config, '|') FROM (SELECT * FROM fm_filters ORDER BY item_id)").fetchone()[0],
             )
         finally:
             conn.close()
         if stamp != self._ranking_stamp:
-            self._ranking_stamp, self._ranking_cache = stamp, {}
+            self._ranking_stamp, self._ranking_cache, self._ranking_loaded = stamp, {}, None
         cache, key = self._ranking_cache, (criterion, exo, effect, amount)
         if key not in cache:
             cache[key] = self._forge_ranking(criterion, exo, effect, amount)
@@ -1628,7 +1653,11 @@ class Api:
             names = state["effects"]
             mode = {"saved": forge.SAVED, "exo": forge.EXO, "over": forge.OVER}.get(criterion, forge.SAVED)
             over = (effect, max(1, amount or 1)) if effect else None
-            frame = forge.ranking(conn, state["ws"], mode, exo, over)
+            # Les annonces de tous les équipements sont lues une fois, puis servent à tous les critères.
+            if self._ranking_loaded is None:
+                self._ranking_loaded = forge.load_all(conn)
+            loaded = self._ranking_loaded
+            frame = forge.ranking(conn, state["ws"], mode, exo, over, loaded)
             rows = records(frame) if not frame.empty else []
             # Métier de forgemagie de chaque objet : celui de son métier de fabrication ; pour un objet
             # sans recette, celui qui fabrique d'ordinaire ce type d'objet.
@@ -1660,11 +1689,11 @@ class Api:
                 "mages": {name: mine.get(name) for name in sorted(job_names[j] for j in MAGE_OF.values() if j in job_names)},
                 "exos": [
                     {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
-                    for effect_id, count in forge.all_exo_counts(conn).items()
+                    for effect_id, count in forge.all_exo_counts(conn, loaded).items()
                 ],
                 "lines": [
                     {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
-                    for effect_id, count in forge.base_line_counts(conn).items()
+                    for effect_id, count in forge.base_line_counts(conn, loaded).items()
                 ],
                 "known": len(forge.equipment_options(conn)),
             }
