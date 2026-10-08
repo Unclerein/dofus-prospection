@@ -792,7 +792,6 @@ class Api:
                         children = [
                             node(child, parts[item_id], (*trail, item_id)) for child, parts in found.sources.items() if parts.get(item_id)
                         ]
-                        children.sort(key=lambda row: (-(row["cost"] or 0), row["name"]))
                         return {
                             **named(item_id), "kind": "made", "share": share, "need": wanted, "to_make": to_make,
                             "owned": {"inventory": have.inventory, "bank": have.bank, "havre": have.havre, "total": have.total},
@@ -807,8 +806,8 @@ class Api:
                         "repeat": not first, "cost": row["cost"] if first else None, "children": [],
                     }
 
+                # Dans l'ordre des recettes, pas du coût : déplier un ingrédient ne doit pas le déplacer.
                 tree = [node(item_id, parts[0], ()) for item_id, parts in found.sources.items() if parts.get(0)]
-                tree.sort(key=lambda row: (row["kind"] != "made", -(row["cost"] or 0), row["name"]))
                 lists.append(
                     {
                         "id": list_id, "name": name, "created_at": created_at,
@@ -969,7 +968,14 @@ class Api:
             ).fetchone()
             last_forged = conn.execute("SELECT item_id FROM fm_passes WHERE ts >= ? ORDER BY ts DESC LIMIT 1", (since,)).fetchone()
             # Les derniers objets travaillés, quelle que soit la date : c'est eux qu'on veut retrouver d'un clic.
-            recent_forged = conn.execute("SELECT uid, item_id, last_ts FROM fm_items ORDER BY last_ts DESC LIMIT 3").fetchall()
+            recent_forged = []
+            ignored = forge.non_stat_effects(conn)
+            for uid, item_id, ts, after in conn.execute("SELECT uid, item_id, last_ts, after FROM fm_items ORDER BY last_ts DESC LIMIT 3").fetchall():
+                # Ses jets tels qu'ils sont après forgemagie, pour l'infobulle (si les caractéristiques de base sont connues).
+                template = forge.load_template(conn, item_id)
+                effects = [(e, v) for e, v in json.loads(after) if v is not None and e not in ignored]
+                rolls = self._rolls(classify(effects, template), None) if template is not None else None
+                recent_forged.append({**named(item_id), "uid": uid, "ts": ts, "rolls": rolls})
 
             crafts = sorted(
                 (c for c in state["stock_crafts"] if c.craftable > 0 and (c.total_margin or 0) > 0 and not hidden(c.result.item.id)),
@@ -1003,7 +1009,7 @@ class Api:
                         "bought": {"count": bought[0], "amount": bought[1], "top": named(biggest["purchase"][0]) if biggest["purchase"] else None},
                         "forged": {
                             "passes": forged[0], "cost": forged[1], "objects": forged[2], "top": named(last_forged[0]) if last_forged else None,
-                            "items": [{**named(item_id), "uid": uid, "ts": ts} for uid, item_id, ts in recent_forged],
+                            "items": recent_forged,
                         },
                     },
                     "crafts": [{**named(c.result.item.id), "craftable": c.craftable, "margin": c.total_margin} for c in crafts],

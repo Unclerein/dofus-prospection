@@ -563,10 +563,25 @@ a.kpi:hover { background: var(--raised); }
 .field > .picker { flex: none; width: 100%; }
 
 /* Atelier : arbre des sous-recettes, replié ou déplié par une flèche. */
-.tree-cell { display: flex; align-items: center; gap: 6px; }
-.fold { flex: none; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; }
+.tree-cell { display: flex; align-items: center; gap: 8px; }
+.fold {
+  flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--soft);
+}
+.fold svg { transition: transform 0.18s ease; }
+.fold.open { border-color: var(--accent); color: var(--accent); }
+.fold.open svg { transform: rotate(90deg); }
+.fold.turning svg { animation: fold-turn 0.2s ease; }
 button.fold:hover { background: var(--raised); color: var(--text); }
-.fold.none { display: inline-block; }
+.fold.none { border: 0; background: transparent; }
+.tree-item { color: inherit; min-width: 0; }
+.tree-item:hover .name { text-decoration: underline; }
 tr.made td { background: color-mix(in srgb, var(--raised) 60%, transparent); }
 tr.done .item-cell .name { color: var(--muted); }
-.days-input { width: 58px; text-align: center; padding-left: 6px; padding-right: 6px; }
+tr.reveal td { animation: row-reveal 0.28s ease both; }
+@keyframes row-reveal { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@keyframes fold-turn { from { transform: rotate(0deg); } to { transform: rotate(90deg); } }
+@media (prefers-reduced-motion: reduce) { tr.reveal td, .fold.turning svg { animation: none; } .fold svg { transition: none; } }
+/* « input. » : la règle générale des champs impose toute la largeur. */
+input.days-input { width: 54px; flex: none; text-align: center; padding: 0 4px; }
+input.qty-input { width: 92px; flex: none; }

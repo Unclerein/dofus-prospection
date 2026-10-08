@@ -437,7 +437,7 @@ async function pageToday() {
     h('a', { class: 'kpi', href: '#/sales', onclick: () => { filter('all')(); S.ui.sales.tab = 'journal'; S.ui.sales.kind = 'purchase'; } }, h('div', { class: 'label' }, 'Acheté'), h('div', { class: 'value' }, r.bought.amount ? `−${fmt(r.bought.amount)}` : '—'),
       h('div', { class: 'hint' }, r.bought.count ? mini(`${plural(r.bought.count, 'lot', 'lots')} · surtout `, r.bought.top) : 'aucun achat')),
     h('div', { class: 'kpi' }, h('div', { class: 'label' }, 'Derniers objets forgemagés'),
-      r.forged.items.length ? r.forged.items.map((it) => h('a', { class: 'mini-item', href: `#/forge/journal/${it.uid}`, title: `Dernier passage ${when(it.ts)}`, ...hoverTip(it.item_id) }, tile(it.icon, false), h('span', { style: 'font-weight: 600' }, it.name), h('span', { class: 'muted small' }, ago(it.ts, d.now))))
+      r.forged.items.length ? r.forged.items.map((it) => h('a', { class: 'mini-item', href: `#/forge/journal/${it.uid}`, ...(it.rolls ? hoverRolls(it.item_id, it.rolls, `today-fm-${it.uid}`, 'Ton exemplaire, après forgemagie') : hoverTip(it.item_id)) }, tile(it.icon, false), h('span', { style: 'font-weight: 600' }, it.name), h('span', { class: 'muted small' }, ago(it.ts, d.now))))
         : h('div', { class: 'value' }, '—'),
       h('div', { class: 'hint' }, r.forged.passes ? `${plural(r.forged.passes, 'rune', 'runes')} et ${fmt(r.forged.cost)} kamas depuis ta dernière visite` : r.forged.items.length ? 'aucune rune depuis ta dernière visite' : 'aucun objet forgemagé pour l\u2019instant')));
 
@@ -537,18 +537,22 @@ async function pageWorkshop(r) {
   const where = (o) => [o.inventory && `inventaire ${fmt(o.inventory)}`, o.bank && `banque ${fmt(o.bank)}`, o.havre && `havre-sac ${fmt(o.havre)}`].filter(Boolean).join(' · ');
   // Une ressource est « faite » quand il n'en reste rien à acheter ; un ingrédient fabriqué, quand rien n'est à fabriquer
   // et que tout ce qu'il réclame est fait.
-  const done = (x) => (x.kind === 'made' ? x.to_make === 0 || x.children.every(done) : x.to_buy === 0);
-  const toggle = (x, open) => (event) => { event.stopPropagation(); run({ action: 'open', list: l.id, item_id: x.item_id, opened: open }); };
+  // Un ingrédient à fabriquer reste affiché tant qu'il n'est pas fabriqué, même si tout ce que sa recette réclame est en stock.
+  const done = (x) => (x.kind === 'made' ? x.to_make === 0 : x.to_buy === 0);
+  const toggle = (x, open) => (event) => { event.stopPropagation(); ui.justOpened = open ? x.item_id : null; run({ action: 'open', list: l.id, item_id: x.item_id, opened: open }); };
+  const chevron = () => svg('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, svg('path', { d: 'M6 3.500l4.500 4.500-4.500 4.500' }));
   const arrow = (x) => (x.kind === 'made'
-    ? h('button', { class: 'fold', 'aria-expanded': 'true', title: 'Replier : l\u2019acheter tout fait', 'aria-label': `Replier ${x.name}`, onclick: toggle(x, false) }, '▾')
-    : x.craftable ? h('button', { class: 'fold', 'aria-expanded': 'false', title: 'Déplier sa recette : le fabriquer au lieu de l\u2019acheter', 'aria-label': `Déplier la recette de ${x.name}`, onclick: toggle(x, true) }, '▸')
+    ? h('button', { class: 'fold open' + (ui.justOpened === x.item_id ? ' turning' : ''), 'aria-expanded': 'true', title: 'Replier : l\u2019acheter tout fait', 'aria-label': `Replier ${x.name}`, onclick: toggle(x, false) }, chevron())
+    : x.craftable ? h('button', { class: 'fold', 'aria-expanded': 'false', title: 'Déplier sa recette : le fabriquer au lieu de l\u2019acheter', 'aria-label': `Déplier la recette de ${x.name}`, onclick: toggle(x, true) }, chevron())
       : h('span', { class: 'fold none', 'aria-hidden': 'true' }));
-  const rowsOf = (nodes, depth) => nodes.filter((x) => !ui.hideDone || !done(x)).flatMap((x) => {
+  const rowsOf = (nodes, depth, fresh) => nodes.filter((x) => !ui.hideDone || !done(x)).flatMap((x) => {
     const made = x.kind === 'made';
     const part = depth > 0 && x.share !== x.need ? h('div', { class: 'source', title: 'Besoin de cette ressource pour toute la liste' }, `${fmt(x.need)} pour la liste`) : null;
-    const row = h('tr', { class: 'link' + (made ? ' made' : '') + (done(x) ? ' done' : ''), onclick: () => { location.hash = `#/item/${x.item_id}`; } },
-      h('td', { class: 'l' }, h('div', { class: 'tree-cell', style: `padding-left: ${depth * 26}px` }, arrow(x),
-        itemCell(x.icon, x.name, made ? 'à fabriquer · recette ci-dessous' : (where(x.owned) || null), x.item_id))),
+    // La ligne n'est pas cliquable : un clic à côté de la flèche ne doit pas quitter la page. Le nom mène à la fiche.
+    const row = h('tr', { class: (made ? 'made' : '') + (done(x) ? ' done' : '') + (fresh ? ' reveal' : '') },
+      h('td', { class: 'l' }, h('div', { class: 'tree-cell', style: `padding-left: ${depth * 30}px` }, arrow(x),
+        h('a', { class: 'tree-item', href: `#/item/${x.item_id}`, title: 'Ouvrir la fiche de l\u2019objet' },
+          itemCell(x.icon, x.name, made ? 'à fabriquer · recette ci-dessous' : (where(x.owned) || null), x.item_id)))),
       h('td', {}, h('div', { style: 'font-weight: 600' }, fmt(depth > 0 ? x.share : x.need)), part,
         !made && x.shared.length ? h('div', { class: 'source ' + (x.missing_all ? 'warn' : ''), title: x.shared.map((o) => `${o.name} : ${fmt(o.need)}`).join('\n') }, `${fmt(x.need_all)} toutes listes`) : null),
       h('td', {}, haveTag(x.owned.total, x.need)),
@@ -558,9 +562,10 @@ async function pageWorkshop(r) {
       made ? h('td', { class: 'muted' }, '—')
         : h('td', {}, x.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, unitLabel(x.price)), h('div', { class: 'source', title: lotTitle(x.lot, x.price) }, h('span', { class: 'dot ' + dotClass(x.source) }), shortSource(x.source, x.lot))]),
       h('td', { class: made ? 'soft' : 'strong', title: made ? 'Somme de ce que sa recette réclame' : x.repeat ? 'Déjà comptée plus haut dans la liste' : null }, x.repeat ? h('span', { class: 'muted' }, 'déjà comptée') : fmt(x.cost)));
-    return [row, ...rowsOf(x.children, depth + 1)];
+    return [row, ...rowsOf(x.children, depth + 1, fresh || ui.justOpened === x.item_id)];
   });
-  const shown = rowsOf(l.tree, 0);
+  const shown = rowsOf(l.tree, 0, false);
+  ui.justOpened = null; // l'apparition ne se rejoue pas aux rafraîchissements suivants
   const lines = h('section', { class: 'panel', 'aria-label': 'À réunir' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'À réunir'), h('span', { class: 'muted small' }, 'La flèche déplie la recette d\u2019un ingrédient : tu le fabriques au lieu de l\u2019acheter')),
     l.tree.length === 0 ? h('div', { class: 'empty' }, l.goals.length ? 'Rien à réunir : tu possèdes déjà tout ce qu\u2019il faut.' : 'Rien à réunir pour l\u2019instant.')
