@@ -9,6 +9,7 @@ from dofustool.capture.pipeline import Pipeline
 from dofustool.db.backfill import backfill
 from dofustool.messages import Mapping, inventory, storage
 from dofustool.messages.inventory import BANK, HAVRE, INVENTORY, NewObject, PileUpdate
+from dofustool.messages.sales import Sale, SalesList
 
 from .test_pipeline import any_frame, feed
 from .test_protocol import framed, ld, vi
@@ -191,4 +192,22 @@ def test_old_readings_without_pile_identifiers_still_work():
     pipeline = Pipeline(Archive(":memory:"), market, {"inventory": old})
     feed(pipeline, framed(any_frame("inv", listing([(11, WHEAT, 40, (), 63)]))) + framed(any_frame("upd", pile(11, 5))))
     assert totals(market) == {(db.INVENTORY, WHEAT): 40} and market.execute("SELECT COUNT(*) FROM piles").fetchone()[0] == 0
+    market.close()
+
+
+def test_unsold_lots_go_back_to_the_bank(caplog):
+    """Le jeu annonce seulement combien de lots invendus il rentre en banque : ce sont ceux qui arrivent à expiration."""
+    market = db.connect(":memory:")
+    market.execute("INSERT INTO items VALUES (?, 'Blé', 1, 'Céréale', 1, 1, 0, 2)", (WHEAT,))
+    db.save_piles(market, storage.parse(listing(MERGED), LIST), 300.0)
+    # Relevé de l'onglet Vendre à 300 s : le blé expire 600 s plus tard, la farine dans plus d'une heure.
+    lots = (Sale(51, WHEAT, 100, 900, 600), Sale(52, FLOUR, 10, 80, 5_000), Sale(53, RUNE, 1, 2_000, 2_000_000))
+    db.save_sales(market, SalesList(11, lots), 300.0)
+    pipeline = Pipeline(Archive(":memory:"), market, {"unsold_returned": Mapping("uns", {"count": 1})})
+    with caplog.at_level("INFO", logger="dofustool.capture"):
+        feed(pipeline, framed(any_frame("uns", vi(1, 2))))  # annoncé vers 1 000 s : deux lots, un seul a expiré
+    assert [r.getMessage() for r in caplog.records] == ["Lot invendu rentré en banque : Blé x100 (mis en vente à 900 kamas)."]
+    assert [row[0] for row in market.execute("SELECT uid FROM my_sales ORDER BY uid")] == [52, 53]
+    assert totals(market)[(db.BANK, WHEAT)] == 160  # les 60 déjà en banque, plus le lot de 100
+    assert db.return_unsold(market, 5, 1_000.0) == []  # plus aucun lot proche de l'expiration
     market.close()

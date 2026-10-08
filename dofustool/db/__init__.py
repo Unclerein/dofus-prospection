@@ -652,6 +652,38 @@ def set_kamas(conn: sqlite3.Connection, kamas: int, ts: float) -> None:
         _signal(conn, INVENTORY, ts)
 
 
+# Un lot est rendu à l'expiration de sa mise en vente ; l'heure calculée d'après le dernier relevé peut
+# dériver un peu, et un lot expiré hors ligne n'est annoncé qu'à la connexion suivante.
+UNSOLD_TOLERANCE_S = 3600.0
+
+
+def return_unsold(conn: sqlite3.Connection, count: int, ts: float) -> list[tuple[int, int, int]]:
+    """Lots invendus que le jeu vient de rentrer en banque : il n'en donne que le nombre.
+
+    Ce sont ceux dont la mise en vente arrive à expiration. Ils quittent mes lots en vente et rejoignent
+    la banque. Renvoie [(objet, taille du lot, prix)] ; moins que count si l'heure d'expiration ne désigne
+    pas assez de lots (relevé de l'onglet Vendre trop ancien).
+    """
+    rows = conn.execute(
+        "SELECT market, uid, item_id, lot, price FROM my_sales WHERE remaining_s - (? - captured_at) <= ? "
+        "ORDER BY remaining_s - (? - captured_at) LIMIT ?",
+        (ts, UNSOLD_TOLERANCE_S, ts, max(0, min(count, 200))),
+    ).fetchall()
+    bank_known = conn.execute("SELECT 1 FROM holdings_meta WHERE container = ?", (BANK,)).fetchone() is not None
+    with conn:
+        for market, uid, item_id, lot, price in rows:
+            conn.execute("DELETE FROM my_sales WHERE market = ? AND uid = ?", (market, uid))
+            if bank_known:
+                conn.execute(
+                    "INSERT INTO piles VALUES (?, ?, ?, ?, 0) ON CONFLICT (uid, container) DO UPDATE SET quantity = quantity + excluded.quantity",
+                    (uid, BANK, item_id, lot),
+                )
+                _refresh_holdings(conn, BANK, [item_id])
+        if rows and bank_known:
+            _stamp_holdings(conn, BANK, ts)
+    return [(item_id, lot, price) for _, _, item_id, lot, price in rows]
+
+
 def save_exchange(conn: sqlite3.Connection, source_id: int, ts: float, exchange) -> bool:
     """Enregistre un échange conclu (messages.exchange.Exchange). Renvoie False s'il était déjà connu."""
     with conn:

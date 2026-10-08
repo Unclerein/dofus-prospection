@@ -200,6 +200,14 @@ class Pipeline:
                     log.info("Ventes hors ligne : %d kamas depuis la dernière annonce.", gained)
             return
 
+        mapping = self.keymap.get("unsold_returned")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            count = inventory.parse_single(msg.body, mapping, "count")
+            for item_id, lot, price in db.return_unsold(self.market, count or 0, msg.ts):
+                row = self.market.execute("SELECT name FROM items WHERE id = ?", (item_id,)).fetchone()
+                log.info("Lot invendu rentré en banque : %s x%d (mis en vente à %d kamas).", row[0] if row else f"item {item_id}", lot, price)
+            return
+
         mapping = self.keymap.get("my_sales")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             listing = sales.parse(msg.body, mapping, self.keymap.get("hdv_listings"))
