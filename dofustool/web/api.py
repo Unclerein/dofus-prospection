@@ -934,6 +934,20 @@ class Api:
                         raise ValueError("objectif inconnu")
                     rows.append((entry[0], entry[1], workshop.CRAFT, ""))
                 return {"list": db.workshop_create(conn, text("name"), rows, now)}
+            if action == "import":
+                # Liste venue d'ailleurs (un stuff Dofusbook) : des identifiants d'objets du jeu, un exemplaire
+                # de chaque. Ceux que cette base ne connaît pas sont laissés de côté, et comptés.
+                ids = payload.get("items")
+                if not isinstance(ids, list) or not 0 < len(ids) <= 60 or not all(isinstance(v, int) and not isinstance(v, bool) for v in ids):
+                    raise ValueError("items attendu")
+                counts: dict[int, int] = {}
+                for item_id in ids:
+                    if known(item_id):
+                        counts[item_id] = counts.get(item_id, 0) + 1
+                if not counts:
+                    raise ValueError("aucun objet connu")
+                rows = [(item_id, quantity, None, "") for item_id, quantity in counts.items()]
+                return {"list": db.workshop_create(conn, text("name"), rows, now), "skipped": len(ids) - sum(counts.values())}
             if action == "almanax":
                 days = number("days", 1, 31)
                 start = date.today()

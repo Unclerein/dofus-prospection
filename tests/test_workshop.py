@@ -145,3 +145,16 @@ def test_malformed_requests_are_refused(app_db, payload):  # noqa: F811
         api.workshop_action({"action": "add", "list": first, "item_id": 3})
     with pytest.raises(ValueError):
         api.workshop_action(payload)
+
+
+def test_a_list_is_imported_from_item_ids(app_db):  # noqa: F811
+    """Un stuff venu d'ailleurs : des identifiants d'objets, un exemplaire de chacun ; les inconnus sont laissés de côté."""
+    api = Api(app_db)
+    done = api.workshop_action({"action": "import", "name": " eau  pvm ", "items": [3, 2, 3, 999_999]})
+    assert done["skipped"] == 1
+    (imported,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]]
+    assert imported["name"] == "eau pvm"
+    assert sorted((goal["item_id"], goal["quantity"]) for goal in imported["goals"]) == [(2, 1), (3, 2)]
+    for bad in ([], [999_999], ["3"], [True], list(range(1, 80))):
+        with pytest.raises(ValueError):
+            api.workshop_action({"action": "import", "name": "x", "items": bad})

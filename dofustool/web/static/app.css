@@ -611,3 +611,7 @@ table.dense td.act.two { width: 80px; }
 tr.focus td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.focus td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 tr.mine.focus td { background: color-mix(in srgb, var(--accent) 12%, transparent); }  /* la mienne reste reconnaissable */
+
+/* Atelier : mode d'emploi de l'import d'un stuff Dofusbook. */
+.import-help summary { cursor: pointer; font-weight: 600; }
+.import-help ol { margin: 10px 0 8px; padding-left: 20px; display: grid; gap: 8px; }
