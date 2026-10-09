@@ -517,15 +517,16 @@ async function pageWorkshop(r) {
     h('div', { class: 'guide-import' },
       h('select', { 'aria-label': 'Guide', onchange: (e) => { ui.guide = Number(e.target.value); refresh(); } },
         ganymede.guides.map((g) => h('option', { value: g.id, selected: g.id === guideChoice.id }, guideLabel(g)))),
-      h('label', { class: 'check', title: 'Décoché : seulement à partir de l\u2019étape où tu en es' },
-        h('input', { type: 'checkbox', checked: !!ui.guideWhole, onchange: (e) => { ui.guideWhole = e.target.checked; } }), 'Depuis le début du guide'),
+      h('label', { class: 'check', title: 'Décoché : sans les quêtes que tu as déjà terminées' },
+        h('input', { type: 'checkbox', checked: !!ui.guideWhole, onchange: (e) => { ui.guideWhole = e.target.checked; } }), 'Tout le guide'),
       h('button', { class: 'btn', onclick: async () => {
         const done = await workshopAct({ action: 'ganymede', guide: guideChoice.id, whole: !!ui.guideWhole });
         if (!done) return;
-        if (done.skipped) notify(`${plural(done.skipped, 'objet de quête laissé', 'objets de quête laissés')} de côté : ils ne s\u2019achètent pas.`);
+        if (!done.listed) notify('Ce guide n\u2019a pas de liste de ressources au début : les objets viennent de tout son texte, récompenses comprises. À trier.');
+        else if (done.skipped) notify(`${plural(done.skipped, 'objet de quête laissé', 'objets de quête laissés')} de côté : ils ne s\u2019achètent pas.`);
         location.hash = `#/workshop/${done.list}`;
       } }, 'Créer la liste')),
-    h('div', { class: 'source' }, 'Les objets que le guide demande à partir de ton étape. Quantités lues dans le texte du guide : à vérifier avant d\u2019acheter.'));
+    h('div', { class: 'source' }, 'La liste des ressources donnée au début du guide, sans les quêtes que tu as déjà terminées. Quantités lues dans le texte : à vérifier avant d\u2019acheter.'));
   const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook')),
     h('ol', {},

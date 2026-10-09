@@ -972,12 +972,18 @@ class Api:
                 wanted = ganymede.needs(guide_id, self.ganymede_dir, from_start=payload.get("whole") is True)
                 if found is None or wanted is None:
                     raise ValueError("guide introuvable")
-                tradable = {row[0] for row in conn.execute("SELECT id FROM items WHERE exchangeable")}
-                rows = [(item_id, min(quantity, 10**6), None, "") for item_id, quantity in sorted(wanted.items()) if item_id in tradable][:200]
+                tradable = dict(conn.execute("SELECT id, category_id FROM items WHERE exchangeable"))
+                # Un équipement (catégorie 0, Dofus compris) demandé par plusieurs quêtes est le même exemplaire gardé sur soi.
+                rows = [
+                    (item_id, min(wanted.peak.get(item_id, quantity) if tradable[item_id] == 0 else quantity, 10**6), None, "")
+                    for item_id, quantity in sorted(wanted.items.items())
+                    if item_id in tradable
+                ][:200]
                 if not rows:
                     raise ValueError("aucun objet à acheter dans ce qu'il reste de ce guide")
                 name = " ".join(found.name.split())[:80]
-                return {"list": db.workshop_create(conn, name, rows, now), "skipped": len(wanted) - len(rows)}
+                # listed : faux si le guide n'a pas de liste de ressources au début (objets lus dans tout son texte).
+                return {"list": db.workshop_create(conn, name, rows, now), "skipped": len(wanted.items) - len(rows), "listed": wanted.listed}
             if action == "import":
                 # Liste venue d'ailleurs (un stuff Dofusbook) : des identifiants d'objets du jeu, un exemplaire
                 # de chaque. Ceux que cette base ne connaît pas sont laissés de côté, et comptés.
