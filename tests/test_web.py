@@ -246,6 +246,10 @@ def test_forge_ranking(api):
     over = api.forge_ranking("over", effect=125, amount=5)["rows"]
     assert len(over) == 1 and over[0]["Correspondent"] == 0 and over[0]["Moins cher selon critère"] is None
     assert api.forge_ranking("over", effect=123, amount=1)["rows"] == []  # Chance n'est pas une ligne de base
+    # Valeur exacte de l'exo : l'annonce a Chance 15.
+    assert api.forge_ranking("exo", 123, exo_value=15, exact=True)["rows"][0]["Moins cher selon critère"] == 400_000
+    assert api.forge_ranking("exo", 123, exo_value=10, exact=True)["rows"][0]["Moins cher selon critère"] is None
+    assert api.forge_ranking("exo", 123, exo_value=10)["rows"][0]["Moins cher selon critère"] == 400_000  # 10 ou plus
 
 
 # --- serveur HTTP ------------------------------------------------------------
@@ -281,6 +285,8 @@ def test_http_routes(server):
     assert "rows" in json.loads(get(server + "/api/stock/crafts")[2])
     assert json.loads(get(server + "/api/forge/ranking?criterion=exo&exo=123")[2])["rows"]
     assert json.loads(get(server + "/api/forge/ranking?criterion=over&effect=125&amount=2")[2])["rows"]
+    exact = json.loads(get(server + "/api/forge/ranking?criterion=exo&exo=123&exo_value=10&exact=1")[2])["rows"]
+    assert exact[0]["Moins cher selon critère"] is None  # Chance 15 n'est pas pile 10
     status, content_type, body = get(server + "/")
     assert status == 200 and content_type.startswith("text/html") and b"Prospection" in body
     assert get(server + "/app.js")[1].startswith(("text/javascript", "application/javascript"))

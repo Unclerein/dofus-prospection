@@ -175,3 +175,34 @@ def pd_isna(value) -> bool:
     import pandas as pd
 
     return bool(pd.isna(value))
+
+
+def test_ranking_exact_value(conn):
+    """« 1 % de dommages aux sorts » ne doit pas montrer ceux à 2 % ; « +10 Vitalité » : pile 10 au-dessus du jet parfait."""
+    ws = workspace(conn)
+    pick = lambda frame, name: frame.set_index("Objet").loc[name, "Moins cher selon critère"]  # noqa: E731
+    # Exo Chance : l'anneau l'a à 15, le bouclier à 5.
+    exact5 = forge.ranking(conn, ws, forge.EXO, CHANCE, exo_value=5, exact=True)
+    assert pd_isna(pick(exact5, "Anneau")) and pick(exact5, "Bouclier") == 1_000_000
+    at_least5 = forge.ranking(conn, ws, forge.EXO, CHANCE, exo_value=5)
+    assert pick(at_least5, "Anneau") == 400_000 and pick(at_least5, "Bouclier") == 1_000_000
+    exact15 = forge.ranking(conn, ws, forge.EXO, CHANCE, exo_value=15, exact=True)
+    assert pick(exact15, "Anneau") == 400_000 and pd_isna(pick(exact15, "Bouclier"))
+    # Sans valeur, « exact » ne change rien : n'importe quelle valeur de l'exo.
+    assert pick(forge.ranking(conn, ws, forge.EXO, CHANCE, exact=True), "Anneau") == 400_000
+    # Over Vitalité : l'annonce à 260 est pile 10 au-dessus du jet parfait (250).
+    assert pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 10), exact=True), "Anneau") == 600_000
+    assert pd_isna(pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 5), exact=True), "Anneau"))
+    assert pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 5)), "Anneau") == 600_000  # au moins 5 : toujours trouvé
+
+
+def test_filter_exact():
+    from dofustool.analysis.forgemagie import classify
+
+    template = {VITA: (201, 250)}
+    one, two = classify([(VITA, 250), (CHANCE, 1)], template), classify([(VITA, 250), (CHANCE, 2)], template)
+    assert Filter({}, exo=CHANCE, exo_min=1, exact=True).matches(one)
+    assert not Filter({}, exo=CHANCE, exo_min=1, exact=True).matches(two)
+    assert Filter({}, exo=CHANCE, exo_min=1).matches(two)
+    assert Filter({VITA: 250}, exact=True).matches(one) and not Filter({VITA: 240}, exact=True).matches(one)
+    assert "exact" not in Filter({VITA: 250}, exact=True).to_config()  # jamais enregistré dans les critères par objet

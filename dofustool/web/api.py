@@ -1626,9 +1626,17 @@ class Api:
             conn.close()
 
     def forge_ranking(
-        self, criterion: str, exo: int | None = None, effect: int | None = None, amount: int | None = None
+        self,
+        criterion: str,
+        exo: int | None = None,
+        effect: int | None = None,
+        amount: int | None = None,
+        exo_value: int | None = None,
+        exact: bool = False,
     ) -> dict:
-        """criterion : « saved » (critères de chaque objet), « exo », ou « over » (effect + amount).
+        """criterion : « saved » (critères de chaque objet), « exo » (+ exo_value), ou « over » (effect + amount).
+
+        exact : la valeur de l'exo ou de l'over doit être pile celle demandée.
 
         Le classement relit toutes les annonces de tous les équipements : il est gardé en mémoire tant que
         ni les données, ni la configuration, ni les critères enregistrés n'ont changé.
@@ -1644,9 +1652,9 @@ class Api:
             conn.close()
         if stamp != self._ranking_stamp:
             self._ranking_stamp, self._ranking_cache, self._ranking_loaded = stamp, {}, None
-        cache, key = self._ranking_cache, (criterion, exo, effect, amount)
+        cache, key = self._ranking_cache, (criterion, exo, effect, amount, exo_value, exact)
         if key not in cache:
-            cache[key] = self._forge_ranking(criterion, exo, effect, amount)
+            cache[key] = self._forge_ranking(criterion, exo, effect, amount, exo_value, exact)
         # Les objets ignorés sont retirés à la sortie : en ignorer un ne fait pas recalculer le classement.
         conn = self.connect()
         try:
@@ -1656,7 +1664,9 @@ class Api:
         found = cache[key]
         return {**found, "rows": [row for row in found["rows"] if not hidden(row["item_id"])]}
 
-    def _forge_ranking(self, criterion: str, exo: int | None, effect: int | None, amount: int | None) -> dict:
+    def _forge_ranking(
+        self, criterion: str, exo: int | None, effect: int | None, amount: int | None, exo_value: int | None, exact: bool
+    ) -> dict:
         conn = self.connect()
         try:
             state = self._load(conn)
@@ -1667,7 +1677,7 @@ class Api:
             if self._ranking_loaded is None:
                 self._ranking_loaded = forge.load_all(conn)
             loaded = self._ranking_loaded
-            frame = forge.ranking(conn, state["ws"], mode, exo, over, loaded)
+            frame = forge.ranking(conn, state["ws"], mode, exo, over, loaded, exo_value, exact)
             rows = records(frame) if not frame.empty else []
             # Métier de forgemagie de chaque objet : celui de son métier de fabrication ; pour un objet
             # sans recette, celui qui fabrique d'ordinaire ce type d'objet.

@@ -241,7 +241,7 @@ function ageLabel(hours) {
 
 // ---------------------------------------------------------------- état et navigation
 
-const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, effect: null, amount: 1, start: 'base', type: '' } }, status: null, stamp: null };
+const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, exoValue: null, effect: null, amount: 1, exact: true, start: 'base', type: '' } }, status: null, stamp: null };
 
 // Page, libellé, tracé de l'icône, groupe du menu (« pied » : les trois liens discrets du bas).
 const NAV = [
@@ -1609,13 +1609,15 @@ async function forgeRanking() {
     ui.exo = preferred.id;
   }
   if (ui.effect === null && first.lines.length) ui.effect = (first.lines.find((x) => x.name === '% Critique') || first.lines[0]).id;
-  const query = ui.criterion === 'exo' ? `criterion=exo&exo=${ui.exo}`
-    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}` : 'criterion=saved';
+  const exact = ui.exact ? '&exact=1' : '';
+  const query = ui.criterion === 'exo' ? `criterion=exo&exo=${ui.exo}` + (ui.exoValue ? `&exo_value=${ui.exoValue}${exact}` : '')
+    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}${exact}` : 'criterion=saved';
   const data = await cached(`ranking-${query}`, `/api/forge/ranking?${query}`);
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
   const exoName = (first.exos.find((x) => x.id === ui.exo) || {}).name || 'exo';
   const lineName = (first.lines.find((x) => x.id === ui.effect) || {}).name || 'caractéristique';
-  const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` : ui.criterion === 'over' ? `${lineName} à +${ui.amount} ou plus` : 'Selon mes critères';
+  const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` + (ui.exoValue ? ` à ${ui.exoValue}${ui.exact ? '' : ' ou plus'}` : '')
+    : ui.criterion === 'over' ? `${lineName} à +${ui.amount}${ui.exact ? '' : ' ou plus'}` : 'Selon mes critères';
   const key = ui.start === 'base' ? 'Prime sur la base' : 'Gain sur le craft';
 
   const typeCounts = new Map();
@@ -1642,11 +1644,16 @@ async function forgeRanking() {
     ui.criterion === 'exo' && h('div', { class: 'field', style: 'flex: 0 1 280px' }, h('label', { for: 'rank-exo' }, 'Exo'),
       h('select', { id: 'rank-exo', class: 'exo-set', onchange: (e) => set({ exo: Number(e.target.value) }) },
         first.exos.map((x) => h('option', { value: x.id, selected: x.id === ui.exo }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
+    ui.criterion === 'exo' && h('div', { class: 'field', style: 'flex: 0 1 130px' }, h('label', { for: 'rank-exo-value' }, 'Valeur'),
+      h('input', { id: 'rank-exo-value', type: 'number', min: 1, placeholder: 'toutes', value: ui.exoValue || '', class: ui.exoValue ? 'set' : '',
+        onchange: (e) => set({ exoValue: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : null }) })),
     ui.criterion === 'over' && h('div', { class: 'field', style: 'flex: 0 1 240px' }, h('label', { for: 'rank-line' }, 'Caractéristique'),
       h('select', { id: 'rank-line', class: 'set', onchange: (e) => set({ effect: Number(e.target.value) }) },
         first.lines.map((x) => h('option', { value: x.id, selected: x.id === ui.effect }, `${x.name} · ${x.count} objet${x.count > 1 ? 's' : ''}`)))),
     ui.criterion === 'over' && h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 'rank-amount' }, 'Au-dessus du jet parfait'),
       h('input', { id: 'rank-amount', type: 'number', min: 1, value: ui.amount, class: 'set', onchange: (e) => set({ amount: Math.max(1, Number(e.target.value) || 1) }) })),
+    ((ui.criterion === 'exo' && ui.exoValue) || ui.criterion === 'over') && h('label', { class: 'check', title: 'Coché : seulement la valeur demandée. Décoché : cette valeur ou plus.' },
+      h('input', { type: 'checkbox', checked: !!ui.exact, onchange: (e) => set({ exact: e.target.checked }) }), 'Valeur exacte'),
     h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'rank-type' }, "Type d'objet"),
       h('select', { id: 'rank-type', class: ui.type ? 'set' : '', onchange: (e) => set({ type: e.target.value }) },
         h('option', { value: '' }, 'Tous les types'),

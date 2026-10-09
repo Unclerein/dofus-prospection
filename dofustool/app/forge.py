@@ -235,11 +235,15 @@ def ranking(
     exo: int | None = None,
     over: tuple[int, int] | None = None,
     loaded: dict | None = None,
+    exo_value: int | None = None,
+    exact: bool = False,
 ) -> pd.DataFrame:
     """Une ligne par équipement dont on connaît les annonces et les caractéristiques de base.
 
     over : (caractéristique, valeur au-dessus du jet parfait). Les objets qui n'ont pas cette
     caractéristique de base sont écartés : ce serait un exo, pas un over.
+    exo_value : valeur voulue de l'exo (None : n'importe laquelle).
+    exact : la valeur de l'exo ou de l'over doit être celle demandée, pas seulement l'atteindre.
     """
     names = effect_names(conn)
     rows = []
@@ -252,11 +256,11 @@ def ranking(
             lines = base_lines(template)
             if over is None or over[0] not in lines:
                 continue
-            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]})
+            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]}, exact=exact)
         elif criterion == PERFECT:
             flt: Filter | None = perfect_filter(template)
         elif criterion == EXO:
-            flt = Filter({}, exo=exo) if exo else None
+            flt = Filter({}, exo=exo, exo_min=exo_value or 1, exact=exact and exo_value is not None) if exo else None
         else:
             saved = db.load_fm_filter(conn, item_id)
             flt = Filter.from_config(saved) if saved else None

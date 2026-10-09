@@ -90,12 +90,14 @@ class Filter:
     minimums : valeur minimale exigée par caractéristique de base.
     exo      : None = peu importe ; 0 = aucun exo accepté ; sinon l'identifiant de l'exo exigé.
     exo_min  : valeur minimale de l'exo exigé.
+    exact    : les valeurs (minimums et exo_min) doivent être atteintes pile, pas seulement dépassées.
     """
 
     minimums: dict[int, int]
     exo: int | None = None
     exo_min: int = 1
     transcended: bool | None = None  # None = peu importe ; True = transcendés seulement ; False = sans transcendance
+    exact: bool = False  # classement : « 1 % de dommages aux sorts » ne doit pas montrer ceux à 2 %
 
     @classmethod
     def from_config(cls, config: dict) -> "Filter":
@@ -113,14 +115,19 @@ class Filter:
         return config
 
     def matches(self, item: Classification) -> bool:
-        if any(item.values.get(effect_id, 0) < minimum for effect_id, minimum in self.minimums.items()):
+        if any(
+            (value != minimum) if self.exact else (value < minimum)
+            for value, minimum in ((item.values.get(effect_id, 0), minimum) for effect_id, minimum in self.minimums.items())
+        ):
             return False
         if self.transcended is not None and item.transcended != self.transcended:
             return False
         if self.exo == 0:
             return not item.exo
         if self.exo is not None:
-            return self.exo in item.exo and item.values[self.exo] >= self.exo_min
+            if self.exo not in item.exo:
+                return False
+            return item.values[self.exo] == self.exo_min if self.exact else item.values[self.exo] >= self.exo_min
         return True
 
 
