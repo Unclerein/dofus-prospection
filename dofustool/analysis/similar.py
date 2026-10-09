@@ -37,8 +37,8 @@ def _slack(low: int, high: int, tolerance: float) -> float:
 
 def is_similar(mine: Classification, other: Classification, template: Template, tolerance: float | None) -> bool:
     """other vaut-elle au moins mine ? tolerance None : seuls les exos et les overs sont comparés."""
-    if set(other.exo) != set(mine.exo):
-        return False
+    if set(other.exo) != set(mine.exo) or other.hunting != mine.hunting:
+        return False  # une arme de chasse ne se compare qu'à une arme de chasse
     if any(other.values.get(effect_id, 0) < mine.values.get(effect_id, 0) for effect_id in mine.exo):
         return False
     if not set(mine.over) <= set(other.over):

@@ -241,7 +241,7 @@ function ageLabel(hours) {
 
 // ---------------------------------------------------------------- état et navigation
 
-const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, exoValue: null, effect: null, amount: 1, exact: true, start: 'base', type: '' } }, status: null, stamp: null };
+const S = { cache: {}, ui: { crafts: null, forge: {}, ranking: { criterion: 'exo', exo: null, exoValue: null, effect: null, amount: 1, exact: true, hunting: false, start: 'base', type: '' } }, status: null, stamp: null };
 
 // Page, libellé, tracé de l'icône, groupe du menu (« pied » : les trois liens discrets du bas).
 const NAV = [
@@ -512,11 +512,17 @@ async function pageWorkshop(r) {
   // Guides de l'application Ganymède installée sur ce PC : ce qu'il reste à réunir pour finir un guide.
   const guideChoice = ganymede.guides.find((g) => g.id === ui.guide) || ganymede.guides[0] || null;
   const guideLabel = (g) => `${g.name}${g.done ? ' · terminé' : g.started ? ` · étape ${g.current_step + 1} sur ${g.steps}` : ''}`;
-  const guideImport = !guideChoice ? h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède')),
+  let guideHidden = false;
+  try { guideHidden = localStorage.getItem('dofustool.hideGanymede') === '1'; } catch (error) { /* stockage indisponible */ }
+  const showGuide = (shown) => { try { localStorage.setItem('dofustool.hideGanymede', shown ? '0' : '1'); } catch (error) { /* stockage indisponible */ } refresh(); };
+  const guideHead = h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède'),
+    h('button', { class: 'icon-btn', title: 'Masquer ce panneau (pour qui n\u2019utilise pas Ganymède)', 'aria-label': 'Masquer l\u2019import Ganymède', onclick: () => showGuide(false) }, '×'));
+  const guideImport = guideHidden ? h('button', { class: 'btn quiet', style: 'align-self: flex-start', onclick: () => showGuide(true) }, 'Afficher l\u2019import Ganymède')
+    : !guideChoice ? h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
+    guideHead,
     h('div', { class: 'source' }, 'Il faut l\u2019application Ganymède installée sur ce PC, avec au moins un guide téléchargé dedans. Prospection y lit la liste des ressources que le guide demande de prévoir.'))
     : h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède')),
+    guideHead,
     h('div', { class: 'guide-import' },
       h('select', { 'aria-label': 'Guide', onchange: (e) => { ui.guide = Number(e.target.value); refresh(); } },
         ganymede.guides.map((g) => h('option', { value: g.id, selected: g.id === guideChoice.id }, guideLabel(g)))),
@@ -549,7 +555,7 @@ async function pageWorkshop(r) {
       h('button', { class: 'btn', onclick: create }, 'Créer')));
 
   if (!current) {
-    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, guideImport, importHelp), h('div', { class: 'panel empty' },
+    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...(guideHidden ? [importHelp, guideImport] : [guideImport, importHelp])), h('div', { class: 'panel empty' },
       'Aucune liste pour l\u2019instant. Crée-en une à gauche, ou pars d\u2019une liste toute faite : les offrandes de l\u2019almanax depuis la page Aujourd\u2019hui, ou un plan de métier depuis la page Métiers.'))];
   }
 
@@ -644,7 +650,7 @@ async function pageWorkshop(r) {
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
           h('tbody', {}, shown))));
 
-  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, guideImport, importHelp), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
+  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...(guideHidden ? [importHelp, guideImport] : [guideImport, importHelp])), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés
@@ -1440,6 +1446,8 @@ function matches(listing, f) {
   for (const [effect, minimum] of Object.entries(f.minimums)) if ((listing.values[effect] || 0) < minimum) return false;
   if (f.transcended === true && !listing.transcended) return false;
   if (f.transcended === false && listing.transcended) return false;
+  if (f.hunting === true && !listing.hunting) return false;
+  if (f.hunting === false && listing.hunting) return false;
   if (f.exo === 0) return listing.exo.length === 0;
   if (f.exo) return listing.exo.includes(f.exo) && (listing.values[f.exo] || 0) >= f.exo_min;
   return true;
@@ -1480,8 +1488,9 @@ async function forgeItem(id, options) {
     minimums: Object.fromEntries(Object.entries(saved.minimums || {}).map(([k, v]) => [k, Number(v)])),
     exo: saved.exo === undefined ? null : saved.exo, exo_min: saved.exo_min || 1, showAll: false,
     transcended: typeof saved.transcended === 'boolean' ? saved.transcended : null,
+    hunting: typeof saved.hunting === 'boolean' ? saved.hunting : null,
   });
-  const change = (mutate) => { mutate(f); saveFilter(id, { minimums: f.minimums, exo: f.exo, exo_min: f.exo_min, transcended: f.transcended });
+  const change = (mutate) => { mutate(f); saveFilter(id, { minimums: f.minimums, exo: f.exo, exo_min: f.exo_min, transcended: f.transcended, hunting: f.hunting });
     for (const key of Object.keys(S.cache)) if (key.startsWith('ranking')) delete S.cache[key]; // le classement dépend des critères
     refresh();
   };
@@ -1496,6 +1505,7 @@ async function forgeItem(id, options) {
   const focused = (l) => {
     if (!focus) return false;
     const v = l.values[focus.effect] || 0;
+    if (typeof focus.hunting === 'boolean' && !!l.hunting !== focus.hunting) return false;
     if (focus.kind === 'exo') return l.exo.includes(focus.effect) && (!focus.value || (focus.exact ? v === focus.value : v >= focus.value));
     return baseMax[focus.effect] !== undefined && v >= baseMax[focus.effect] + focus.value;
   };
@@ -1509,7 +1519,7 @@ async function forgeItem(id, options) {
   const matching = focus && focus.only ? d.listings.filter(focused) : d.listings.filter((l) => matches(l, f));
   const best = matching[0] || null;
   const median = matching.length ? matching[Math.floor((matching.length - 1) / 2)].price : null;
-  const hasCriteria = Object.keys(f.minimums).length > 0 || f.exo !== null || f.transcended !== null;
+  const hasCriteria = Object.keys(f.minimums).length > 0 || f.exo !== null || f.transcended !== null || f.hunting !== null;
 
   const base = h('section', { class: 'kpis', 'aria-label': 'Craft contre hôtel de vente' },
     kpi('Coût de craft', fmt(d.craft_cost), d.craft_cost === null ? 'prix manquant' : null),
@@ -1533,7 +1543,7 @@ async function forgeItem(id, options) {
     h('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 12px' }, h('h2', {}, 'Critères'),
       h('div', { style: 'display: flex; gap: 8px' },
         h('button', { class: 'btn', onclick: () => change((x) => { x.minimums = Object.fromEntries(d.lines.map((l) => [l.id, l.max])); x.exo = 0; }) }, 'Jets parfaits'),
-        h('button', { class: 'btn quiet', onclick: () => change((x) => { x.minimums = {}; x.exo = null; x.exo_min = 1; x.transcended = null; }) }, 'Réinitialiser'))),
+        h('button', { class: 'btn quiet', onclick: () => change((x) => { x.minimums = {}; x.exo = null; x.exo_min = 1; x.transcended = null; x.hunting = null; }) }, 'Réinitialiser'))),
     h('div', {},
       h('div', { class: 'line-row head cap' }, h('span', {}, 'Ligne de base'), h('span', { style: 'text-align: right' }, 'De base'), h('span', { style: 'text-align: right' }, 'Minimum')),
       lineRows.length ? lineRows : h('div', { class: 'muted small' }, "Cet objet n'a pas de caractéristique de base à régler.")),
@@ -1546,6 +1556,8 @@ async function forgeItem(id, options) {
         h('input', { id: 'exo-min', type: 'number', min: 1, value: f.exo_min, disabled: !f.exo, class: f.exo ? 'exo-set' : '', onchange: (e) => change((x) => { x.exo_min = Math.max(1, Number(e.target.value) || 1); }) }))),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Rune de transcendance'),
       segmented('Rune de transcendance', [[null, 'Peu importe'], [false, 'Sans'], [true, 'Seulement']], f.transcended, (value) => change((x) => { x.transcended = value; }))),
+    d.weapon && h('div', { class: 'field', title: 'Rune de chasse : ne se pose que sur une arme, et se cumule avec un exo' }, h('span', { class: 'label' }, 'Rune de chasse'),
+      segmented('Rune de chasse', [[null, 'Peu importe'], [false, 'Sans'], [true, 'Seulement']], f.hunting, (value) => change((x) => { x.hunting = value; }))),
     null);
 
   const result = h('div', { class: 'kpis strong' },
@@ -1568,7 +1580,8 @@ async function forgeItem(id, options) {
     h('span', { class: 'tag exo' }, `${count((l) => l.exo.length && !l.missing.length)} exo`),
     h('span', { class: 'tag over' }, `${count((l) => l.over.length && !l.exo.length && !l.missing.length)} over`),
     h('span', { class: 'tag bad' }, `${count((l) => l.missing.length)} avec une ligne perdue`),
-    h('span', { class: 'tag trans' }, `${count((l) => l.transcended)} transcendés`));
+    h('span', { class: 'tag trans' }, `${count((l) => l.transcended)} transcendés`),
+    d.weapon && h('span', { class: 'tag' }, `${count((l) => l.hunting)} avec rune de chasse`));
 
   const gone = h('details', { class: 'panel' },
     h('summary', {}, `Annonces disparues depuis une visite précédente · ${d.gone.length || "aucune pour l'instant"}`),
@@ -1676,14 +1689,16 @@ async function forgeRanking() {
   }
   if (ui.effect === null && first.lines.length) ui.effect = (first.lines.find((x) => x.name === '% Critique') || first.lines[0]).id;
   const exact = ui.exact ? '&exact=1' : '';
-  const query = ui.criterion === 'exo' ? `criterion=exo&exo=${ui.exo}` + (ui.exoValue ? `&exo_value=${ui.exoValue}${exact}` : '')
-    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}` : 'criterion=saved';
+  const hunt = ui.hunting === true ? '&hunting=1' : ui.hunting === false ? '&hunting=0' : '';
+  const query = ui.criterion === 'exo' ? `criterion=exo&exo=${ui.exo}` + (ui.exoValue ? `&exo_value=${ui.exoValue}${exact}` : '') + hunt
+    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}` + hunt : 'criterion=saved';
   const data = await cached(`ranking-${query}`, `/api/forge/ranking?${query}`);
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
   const exoName = (first.exos.find((x) => x.id === ui.exo) || {}).name || 'exo';
   const lineName = (first.lines.find((x) => x.id === ui.effect) || {}).name || 'caractéristique';
-  const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` + (ui.exoValue ? ` à ${ui.exoValue}${ui.exact ? '' : ' ou plus'}` : '')
-    : ui.criterion === 'over' ? `${lineName} à +${ui.amount} ou plus` : 'Selon mes critères';
+  const huntLabel = ui.hunting === true ? ' + rune de chasse' : ui.hunting === false ? ', sans rune de chasse' : '';
+  const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` + (ui.exoValue ? ` à ${ui.exoValue}${ui.exact ? '' : ' ou plus'}` : '') + huntLabel
+    : ui.criterion === 'over' ? `${lineName} à +${ui.amount} ou plus` + huntLabel : 'Selon mes critères';
   const key = ui.start === 'base' ? 'Prime sur la base' : 'Gain sur le craft';
 
   const typeCounts = new Map();
@@ -1720,6 +1735,8 @@ async function forgeRanking() {
       h('input', { id: 'rank-amount', type: 'number', min: 1, value: ui.amount, class: 'set', onchange: (e) => set({ amount: Math.max(1, Number(e.target.value) || 1) }) })),
     ui.criterion === 'exo' && ui.exoValue && h('label', { class: 'check', title: 'Coché : seulement la valeur demandée. Décoché : cette valeur ou plus.' },
       h('input', { type: 'checkbox', checked: !!ui.exact, onchange: (e) => set({ exact: e.target.checked }) }), 'Valeur exacte'),
+    ui.criterion !== 'saved' && h('div', { class: 'field', title: 'Rune de chasse : ne se pose que sur une arme, et se cumule avec un exo. « Avec » ne garde que les armes.' }, h('span', { class: 'label' }, 'Rune de chasse'),
+      segmented('Rune de chasse', [[null, 'Peu importe'], [false, 'Sans'], [true, 'Avec']], ui.hunting, (value) => set({ hunting: value }))),
     h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'rank-type' }, "Type d'objet"),
       h('select', { id: 'rank-type', class: ui.type ? 'set' : '', onchange: (e) => set({ type: e.target.value }) },
         h('option', { value: '' }, 'Tous les types'),
@@ -1740,8 +1757,8 @@ async function forgeRanking() {
     const value = r[key];
     return h('tr', { class: 'link', onclick: () => {
       // Le critère cherché suit le clic : la page de l'objet met en avant les annonces qui y répondent.
-      S.ui.forgeFocus = ui.criterion === 'exo' ? { item: r.item_id, kind: 'exo', effect: ui.exo, value: ui.exoValue, exact: !!ui.exact, label, only: true }
-        : ui.criterion === 'over' ? { item: r.item_id, kind: 'over', effect: ui.effect, value: ui.amount, label, only: true } : null;
+      S.ui.forgeFocus = ui.criterion === 'exo' ? { item: r.item_id, kind: 'exo', effect: ui.exo, value: ui.exoValue, exact: !!ui.exact, hunting: ui.hunting, label, only: true }
+        : ui.criterion === 'over' ? { item: r.item_id, kind: 'over', effect: ui.effect, value: ui.amount, hunting: ui.hunting, label, only: true } : null;
       location.hash = `#/forge/item/${r.item_id}`;
     } },
       h('td', { class: 'muted' }, index + 1),

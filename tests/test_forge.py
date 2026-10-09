@@ -79,19 +79,45 @@ def test_weapon_damage_lines_are_not_forgemagie(conn):
     conn.executemany(
         "INSERT INTO hdv_listings VALUES (800, ?, ?, 0, 0, 0, ?, ?, ?)",
         [
-            # La ligne de dégâts arrive sans valeur numérique, « Arme de chasse » avec une valeur : ni l'une ni
-            # l'autre ne doit faire croire à une ligne perdue ou à un exo.
-            (1, 90_000, f"[[{DAMAGE}, null], [{HUNT}, 1], [{VITA}, 120]]", NOW, NOW),
+            # La ligne de dégâts arrive sans valeur numérique : ce n'est ni une ligne perdue ni un exo.
+            (1, 90_000, f"[[{DAMAGE}, null], [{VITA}, 120]]", NOW, NOW),
             (2, 300_000, f"[[{DAMAGE}, null], [{VITA}, 150], [{CHANCE}, 12], [{LOCK}, null]]", NOW, NOW),
+            # « Arme de chasse », posée par une rune : ni exo ni ligne perdue, mais plus un exemplaire de base.
+            (3, 70_000, f"[[{DAMAGE}, null], [{HUNT}, 1], [{VITA}, 120]]", NOW, NOW),
+            (4, 400_000, f"[[{DAMAGE}, null], [{HUNT}, 1], [{VITA}, 150], [{CHANCE}, 12]]", NOW, NOW),
         ],
     )
     assert forge.load_template(conn, 800) == {VITA: (101, 150)}
     assert forge.load_fixed_lines(conn, 800) == {DAMAGE: (21, 30)}
-    plain, trans = (entry[1] for entry in forge.read_listings(conn, 800, forge.load_template(conn, 800)))
+    hunt, plain, trans, both = (entry[1] for entry in forge.read_listings(conn, 800, forge.load_template(conn, 800)))
     assert plain.plain and plain.label == "de base" and not plain.transcended and plain.values == {VITA: 120}
-    assert trans.exo == (CHANCE,) and trans.transcended and not trans.missing
-    # Le prix de référence retient bien l'exemplaire de base de l'arme.
+    assert trans.exo == (CHANCE,) and trans.transcended and not trans.missing and not trans.hunting
+    assert hunt.hunting and not hunt.plain and hunt.label == "chasse" and not hunt.exo and not hunt.missing and hunt.values == {VITA: 120}
+    assert both.hunting and both.exo == (CHANCE,) and both.label == "exo + chasse"
+    # Le prix de référence retient l'exemplaire de base de l'arme, pas l'arme de chasse moins chère.
     assert data.build_workspace(conn, Config(), NOW).prices.get(800).price == 90_000
+
+    # Chercher un exo : avec, sans, ou peu importe la rune de chasse.
+    assert Filter({}, exo=CHANCE).matches(trans) and Filter({}, exo=CHANCE).matches(both)
+    assert Filter({}, exo=CHANCE, hunting=False).matches(trans) and not Filter({}, exo=CHANCE, hunting=False).matches(both)
+    assert Filter({}, exo=CHANCE, hunting=True).matches(both) and not Filter({}, exo=CHANCE, hunting=True).matches(trans)
+    assert Filter.from_config(Filter({}, hunting=True).to_config()).hunting is True and "hunting" not in Filter({}).to_config()
+    ws = data.build_workspace(conn, Config(), NOW)
+    pick = lambda frame: frame.set_index("item_id").loc[800, "Moins cher selon critère"]  # noqa: E731
+    assert pick(forge.ranking(conn, ws, forge.EXO, CHANCE)) == 300_000
+    assert pick(forge.ranking(conn, ws, forge.EXO, CHANCE, hunting=True)) == 400_000
+    assert pick(forge.ranking(conn, ws, forge.EXO, CHANCE, hunting=False)) == 300_000
+
+    # Une arme de chasse d'origine (la propriété est dans sa fiche) ne doit rien à une rune : elle reste « de base ».
+    conn.execute("INSERT INTO items VALUES (801, 'Arc de chasse', 1, 'Arc', 100, 1, 1, 0)")
+    conn.executemany("INSERT INTO item_effects VALUES (801, ?, ?, ?)", [(HUNT, 1, 1), (VITA, 101, 150)])
+    conn.execute("INSERT INTO item_effects_fetched VALUES (801, ?)", (NOW,))
+    conn.execute(f"INSERT INTO hdv_listings VALUES (801, 1, 50000, 0, 0, 0, '[[{HUNT}, 1], [{VITA}, 130]]', ?, ?)", (NOW, NOW))
+    template = forge.load_template(conn, 801)
+    assert template == {HUNT: (1, 1), VITA: (101, 150)} and list(forge.base_lines(template)) == [VITA]
+    (native,) = (entry[1] for entry in forge.read_listings(conn, 801, template))
+    assert native.plain and not native.hunting and native.label == "de base"
+    assert data.build_workspace(conn, Config(), NOW).prices.get(801).price == 50_000
 
     assert Filter({}, transcended=True).matches(trans) and not Filter({}, transcended=True).matches(plain)
     assert Filter({}, transcended=False).matches(plain) and not Filter({}, transcended=False).matches(trans)

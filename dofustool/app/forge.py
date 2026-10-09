@@ -9,7 +9,7 @@ import statistics
 import pandas as pd
 
 from .. import db
-from ..analysis.forgemagie import MARKERS, Classification, Filter, Template, base_lines, classify, perfect_filter
+from ..analysis.forgemagie import HUNTING, MARKERS, Classification, Filter, Template, base_lines, classify, perfect_filter
 from ..analysis.prices import EQUIPMENT
 from .data import Workspace, _local_dates
 
@@ -73,8 +73,11 @@ def _template_lines(conn: sqlite3.Connection, item_id: int, stat: bool) -> Templ
         for effect_id, low, high in conn.execute(
             "SELECT e.effect_id, e.min_value, e.max_value FROM item_effects e "
             "LEFT JOIN effect_meta m ON m.effect_id = e.effect_id "
-            "WHERE e.item_id = ? AND COALESCE(m.is_stat, 1) = ? ORDER BY COALESCE(m.priority, 1000000), e.effect_id",
-            (item_id, int(stat)),
+            # Avec les caractéristiques vient « Arme de chasse » quand l'arme l'a d'origine : c'est ce qui la
+            # distingue d'une arme qui la doit à une rune.
+            "WHERE e.item_id = ? AND (COALESCE(m.is_stat, 1) = ? OR (? AND e.effect_id = ?)) "
+            "ORDER BY COALESCE(m.priority, 1000000), e.effect_id",
+            (item_id, int(stat), int(stat), HUNTING),
         )
     }
 
@@ -86,7 +89,8 @@ def load_fixed_lines(conn: sqlite3.Connection, item_id: int) -> Template:
 
 def non_stat_effects(conn: sqlite3.Connection) -> frozenset[int]:
     """Effets à ne jamais lire comme un exo, un over ou une ligne perdue. Les marqueurs restent lus à part."""
-    return frozenset(row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0")) - MARKERS
+    found = frozenset(row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0"))
+    return found - MARKERS - {HUNTING}  # « Arme de chasse » est lue à part, comme les marqueurs
 
 
 def effect_assets(conn: sqlite3.Connection) -> dict[int, str]:
@@ -237,6 +241,7 @@ def ranking(
     loaded: dict | None = None,
     exo_value: int | None = None,
     exact: bool = False,
+    hunting: bool | None = None,
 ) -> pd.DataFrame:
     """Une ligne par équipement dont on connaît les annonces et les caractéristiques de base.
 
@@ -244,6 +249,7 @@ def ranking(
     caractéristique de base sont écartés : ce serait un exo, pas un over.
     exo_value : valeur voulue de l'exo (None : n'importe laquelle).
     exact : l'exo doit avoir pile la valeur demandée, pas seulement l'atteindre.
+    hunting : pour un exo ou un over, avec (True) ou sans (False) rune de chasse ; None : peu importe.
     """
     names = effect_names(conn)
     rows = []
@@ -256,11 +262,11 @@ def ranking(
             lines = base_lines(template)
             if over is None or over[0] not in lines:
                 continue
-            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]})
+            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]}, hunting=hunting)
         elif criterion == PERFECT:
             flt: Filter | None = perfect_filter(template)
         elif criterion == EXO:
-            flt = Filter({}, exo=exo, exo_min=exo_value or 1, exact=exact and exo_value is not None) if exo else None
+            flt = Filter({}, exo=exo, exo_min=exo_value or 1, exact=exact and exo_value is not None, hunting=hunting) if exo else None
         else:
             saved = db.load_fm_filter(conn, item_id)
             flt = Filter.from_config(saved) if saved else None

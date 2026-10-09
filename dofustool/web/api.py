@@ -17,7 +17,7 @@ import pandas as pd
 
 from .. import ankama, config, db, ganymede
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
-from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
+from ..analysis.forgemagie import MARKERS, WEAPON_TYPES, Filter, base_lines, classify
 from ..analysis import jobxp
 from ..analysis.prices import PriceRef
 from ..analysis.stock import Stock, stock_crafts
@@ -265,7 +265,7 @@ class Api:
         return {
             "price": price, "label": c.label, "plain": c.plain,
             "quality": round(c.quality * 100) if c.quality is not None else None,
-            "transcended": c.transcended,
+            "transcended": c.transcended, "hunting": c.hunting,
             "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
         }  # fmt: skip
 
@@ -1562,7 +1562,7 @@ class Api:
                     "mine": mine,
                     "price": price, "label": c.label, "plain": c.plain,
                     "quality": round(c.quality * 100) if c.quality is not None else None,
-                    "transcended": c.transcended,
+                    "transcended": c.transcended, "hunting": c.hunting,
                     "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
                     "first_seen": first_seen, "last_seen": last_seen,
                 }  # fmt: skip
@@ -1603,6 +1603,8 @@ class Api:
                     ],
                     "gone": [listing(entry) for entry in everything if latest is not None and entry[3] < latest],
                     "filter": db.load_fm_filter(conn, item_id),
+                    # Une rune de chasse ne se pose que sur une arme : le critère n'est proposé que là.
+                    "weapon": state["meta"].get(item_id, (None, None))[0] in WEAPON_TYPES,
                 }
             )
         finally:
@@ -1741,10 +1743,12 @@ class Api:
         amount: int | None = None,
         exo_value: int | None = None,
         exact: bool = False,
+        hunting: bool | None = None,
     ) -> dict:
         """criterion : « saved » (critères de chaque objet), « exo » (+ exo_value), ou « over » (effect + amount).
 
         exact : l'exo doit avoir pile la valeur demandée.
+        hunting : avec ou sans rune de chasse (None : peu importe). « Avec » ne garde que les armes.
 
         Le classement relit toutes les annonces de tous les équipements : il est gardé en mémoire tant que
         ni les données, ni la configuration, ni les critères enregistrés n'ont changé.
@@ -1760,9 +1764,9 @@ class Api:
             conn.close()
         if stamp != self._ranking_stamp:
             self._ranking_stamp, self._ranking_cache, self._ranking_loaded = stamp, {}, None
-        cache, key = self._ranking_cache, (criterion, exo, effect, amount, exo_value, exact)
+        cache, key = self._ranking_cache, (criterion, exo, effect, amount, exo_value, exact, hunting)
         if key not in cache:
-            cache[key] = self._forge_ranking(criterion, exo, effect, amount, exo_value, exact)
+            cache[key] = self._forge_ranking(criterion, exo, effect, amount, exo_value, exact, hunting)
         # Les objets ignorés sont retirés à la sortie : en ignorer un ne fait pas recalculer le classement.
         conn = self.connect()
         try:
@@ -1770,11 +1774,15 @@ class Api:
         finally:
             conn.close()
         found = cache[key]
-        return {**found, "rows": [row for row in found["rows"] if not hidden(row["item_id"])]}
+        rows = [row for row in found["rows"] if not hidden(row["item_id"])]
+        if hunting is True and criterion != "saved":
+            rows = [row for row in rows if row.get("type") in WEAPON_TYPES]
+        return {**found, "rows": rows}
 
     def _forge_ranking(
-        self, criterion: str, exo: int | None, effect: int | None, amount: int | None, exo_value: int | None, exact: bool
-    ) -> dict:
+        self, criterion: str, exo: int | None, effect: int | None, amount: int | None, exo_value: int | None, exact: bool,
+        hunting: bool | None = None,
+    ) -> dict:  # fmt: skip
         conn = self.connect()
         try:
             state = self._load(conn)
@@ -1785,7 +1793,7 @@ class Api:
             if self._ranking_loaded is None:
                 self._ranking_loaded = forge.load_all(conn)
             loaded = self._ranking_loaded
-            frame = forge.ranking(conn, state["ws"], mode, exo, over, loaded, exo_value, exact)
+            frame = forge.ranking(conn, state["ws"], mode, exo, over, loaded, exo_value, exact, hunting)
             rows = records(frame) if not frame.empty else []
             # Métier de forgemagie de chaque objet : celui de son métier de fabrication ; pour un objet
             # sans recette, celui qui fabrique d'ordinaire ce type d'objet.

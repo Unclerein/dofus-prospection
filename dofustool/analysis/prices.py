@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from . import DAY, GRAIN_DAY, GRAIN_HOUR, HOUR
 from . import cours
 from . import estimate as estimation
-from .forgemagie import MARKERS, classify
+from .forgemagie import HUNTING, MARKERS, classify
 
 HDV = "HDV, annonce la moins chère"
 HDV_PLAIN = "HDV, moins cher sans exo ni over"
@@ -154,7 +154,8 @@ class PriceBook:
             row[0]: {} for row in conn.execute("SELECT item_id FROM item_effects_fetched")
         }
         # Les lignes qui ne se forgemagent pas (dégâts d'arme, propriétés) ne comptent ni comme exo ni comme ligne perdue.
-        non_stats = {row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0")} - MARKERS
+        # « Arme de chasse » reste lue : une arme qui la doit à une rune n'est pas un exemplaire de base.
+        non_stats = {row[0] for row in conn.execute("SELECT effect_id FROM effect_meta WHERE is_stat = 0")} - MARKERS - {HUNTING}
         for item_id, effect_id, low, high in conn.execute("SELECT * FROM item_effects"):
             if effect_id not in non_stats:
                 templates.setdefault(item_id, {})[effect_id] = (low, high)

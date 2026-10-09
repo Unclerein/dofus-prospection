@@ -169,6 +169,7 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                             to_int(query.get("amount")),
                             to_int(query.get("exo_value")),
                             query.get("exact") == "1",
+                            {"1": True, "0": False}.get(query.get("hunting", "")),
                         )
                     )
                 if match := re.fullmatch(r"/icons/effects/([A-Za-z0-9_]{1,64})\.png", path):
