@@ -496,21 +496,17 @@ async function pageWorkshop(r) {
     const params = new URLSearchParams(incoming[1]);
     const ids = (params.get('i') || '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 60);
     const name = (params.get('n') || 'Stuff importé').trim().slice(0, 80) || 'Stuff importé';
-    const byId = new Map(catalogue.items.map((it) => [it[0], it]));
-    return [head, h('section', { class: 'panel', 'aria-label': 'Import' },
-      h('div', { class: 'panel-head' }, h('h2', {}, `Importer « ${name} »`), h('span', { class: 'muted' }, plural(ids.length, 'objet', 'objets'))),
-      ids.length === 0 ? h('div', { class: 'empty' }, 'Ce lien ne contient aucun objet.')
-        : ids.map((id) => h('div', { class: 'list-row' }, byId.has(id) ? itemCell(byId.get(id)[3], byId.get(id)[1], `niv. ${byId.get(id)[2]}`, id) : h('span', { class: 'muted' }, `Objet n° ${id}`))),
-      h('div', { class: 'panel-foot' },
-        h('span', {}, 'Un exemplaire de chaque objet. Rien n\u2019est créé tant que tu n\u2019as pas confirmé.'),
-        h('span', { style: 'display: flex; gap: 8px' },
-          h('a', { class: 'btn quiet', href: '#/workshop', style: 'display: inline-flex; align-items: center' }, 'Annuler'),
-          ids.length > 0 && h('button', { class: 'btn', onclick: async () => {
-            const done = await workshopAct({ action: 'import', name, items: ids });
-            if (!done) return;
-            if (done.skipped) notify(`${plural(done.skipped, 'objet inconnu de Prospection a été laissé', 'objets inconnus de Prospection ont été laissés')} de côté.`);
-            location.hash = `#/workshop/${done.list}`;
-          } }, 'Créer la liste'))))];
+    // La liste est créée tout de suite. L'adresse d'import est remplacée dans l'historique : revenir en arrière
+    // ou recharger la page ne la crée pas une seconde fois.
+    if (S.ui.importing !== incoming[1]) {
+      S.ui.importing = incoming[1];
+      const done = ids.length ? await workshopAct({ action: 'import', name, items: ids }) : null;
+      if (!ids.length) notify('Ce lien ne contient aucun objet.');
+      else if (done && done.skipped) notify(`${plural(done.skipped, 'objet inconnu de Prospection a été laissé', 'objets inconnus de Prospection ont été laissés')} de côté.`);
+      history.replaceState(null, '', done ? `#/workshop/${done.list}` : '#/workshop');
+      return pageWorkshop(route());
+    }
+    return [head, h('div', { class: 'panel empty' }, 'Import du stuff…')];
   }
   const bookmarklet = `javascript:(async()=>{const m=location.pathname.match(/equipement\\/(\\d+)/);if(!/dofusbook/.test(location.hostname)||!m){alert('Ouvre d\u2019abord la page d\u2019un stuff Dofusbook, puis clique ce favori.');return;}const w=window.open('','_blank');try{const d=await fetch('/api/stuffs/dofus/public/'+m[1]).then(r=>r.json());const ids=d.items.map(i=>i.official).filter(Number.isInteger).join(',');const u='${location.origin}/#/workshop/import?n='+encodeURIComponent(d.stuff.name)+'&i='+ids;if(w)w.location=u;else location.href=u;}catch(e){if(w)w.close();alert('Stuff illisible : il doit être public ou partagé par lien.');}})()`;
   const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
@@ -518,7 +514,7 @@ async function pageWorkshop(r) {
     h('ol', {},
       h('li', {}, 'Glisse ce bouton dans ta barre de favoris : ', h('a', { class: 'btn', href: bookmarklet, title: 'À glisser dans la barre de favoris', onclick: (e) => { e.preventDefault(); notify('Glisse ce bouton dans ta barre de favoris, puis clique-le depuis la page d\u2019un stuff Dofusbook.'); } }, '→ Atelier Prospection')),
       h('li', {}, 'Ouvre la page d\u2019un stuff sur Dofusbook (public ou partagé par lien).'),
-      h('li', {}, 'Clique le favori : l\u2019Atelier s\u2019ouvre avec les objets du stuff, à confirmer.')),
+      h('li', {}, 'Clique le favori : la liste est créée dans l\u2019Atelier, qui s\u2019ouvre dessus.')),
     h('div', { class: 'source' }, 'Dofusbook ne se laisse pas lire par un programme : c\u2019est ton navigateur qui lit la page que tu regardes. Rien n\u2019est envoyé à Dofusbook.'));
   const side = h('section', { class: 'panel workshop-lists', 'aria-label': 'Listes' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Mes listes')),
