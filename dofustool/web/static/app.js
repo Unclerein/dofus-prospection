@@ -480,7 +480,7 @@ async function workshopAct(payload) {
 }
 
 async function pageWorkshop(r) {
-  const [data, catalogue] = await Promise.all([cached('workshop', '/api/workshop'), cached('items', '/api/items')]);
+  const [data, catalogue, ganymede] = await Promise.all([cached('workshop', '/api/workshop'), cached('items', '/api/items'), cached('ganymede', '/api/ganymede').catch(() => ({ guides: [] }))]);
   const ui = S.ui.workshop || (S.ui.workshop = { name: '', confirm: null });
   const current = data.lists.find((l) => l.id === r.id) || data.lists[0] || null;
   const run = async (payload, then) => { const done = await workshopAct(payload); if (done) { if (then) then(done); refresh(); } };
@@ -509,6 +509,23 @@ async function pageWorkshop(r) {
     return [head, h('div', { class: 'panel empty' }, 'Import du stuff…')];
   }
   const bookmarklet = `javascript:(async()=>{const m=location.pathname.match(/equipement\\/(\\d+)/);if(!/dofusbook/.test(location.hostname)||!m){alert('Ouvre d\u2019abord la page d\u2019un stuff Dofusbook, puis clique ce favori.');return;}const w=window.open('','_blank');try{const d=await fetch('/api/stuffs/dofus/public/'+m[1]).then(r=>r.json());const ids=d.items.map(i=>i.official).filter(Number.isInteger).join(',');const u='${location.origin}/#/workshop/import?n='+encodeURIComponent(d.stuff.name)+'&i='+ids;if(w)w.location=u;else location.href=u;}catch(e){if(w)w.close();alert('Stuff illisible : il doit être public ou partagé par lien.');}})()`;
+  // Guides de l'application Ganymède installée sur ce PC : ce qu'il reste à réunir pour finir un guide.
+  const guideChoice = ganymede.guides.find((g) => g.id === ui.guide) || ganymede.guides[0] || null;
+  const guideLabel = (g) => `${g.name}${g.done ? ' · terminé' : g.started ? ` · étape ${g.current_step + 1} sur ${g.steps}` : ''}`;
+  const guideImport = guideChoice && h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède')),
+    h('div', { class: 'guide-import' },
+      h('select', { 'aria-label': 'Guide', onchange: (e) => { ui.guide = Number(e.target.value); refresh(); } },
+        ganymede.guides.map((g) => h('option', { value: g.id, selected: g.id === guideChoice.id }, guideLabel(g)))),
+      h('label', { class: 'check', title: 'Décoché : seulement à partir de l\u2019étape où tu en es' },
+        h('input', { type: 'checkbox', checked: !!ui.guideWhole, onchange: (e) => { ui.guideWhole = e.target.checked; } }), 'Depuis le début du guide'),
+      h('button', { class: 'btn', onclick: async () => {
+        const done = await workshopAct({ action: 'ganymede', guide: guideChoice.id, whole: !!ui.guideWhole });
+        if (!done) return;
+        if (done.skipped) notify(`${plural(done.skipped, 'objet de quête laissé', 'objets de quête laissés')} de côté : ils ne s\u2019achètent pas.`);
+        location.hash = `#/workshop/${done.list}`;
+      } }, 'Créer la liste')),
+    h('div', { class: 'source' }, 'Les objets que le guide demande à partir de ton étape. Quantités lues dans le texte du guide : à vérifier avant d\u2019acheter.'));
   const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook')),
     h('ol', {},
@@ -529,7 +546,7 @@ async function pageWorkshop(r) {
       h('button', { class: 'btn', onclick: create }, 'Créer')));
 
   if (!current) {
-    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, importHelp), h('div', { class: 'panel empty' },
+    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, guideImport, importHelp), h('div', { class: 'panel empty' },
       'Aucune liste pour l\u2019instant. Crée-en une à gauche, ou pars d\u2019une liste toute faite : les offrandes de l\u2019almanax depuis la page Aujourd\u2019hui, ou un plan de métier depuis la page Métiers.'))];
   }
 
@@ -624,7 +641,7 @@ async function pageWorkshop(r) {
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
           h('tbody', {}, shown))));
 
-  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, importHelp), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
+  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, guideImport, importHelp), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés

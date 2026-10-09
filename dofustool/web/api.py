@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .. import ankama, config, db
+from .. import ankama, config, db, ganymede
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
@@ -124,6 +124,7 @@ class Api:
         self._stamp: list | None = None
         self._state: dict | None = None
         self._fetching = threading.Lock()
+        self.ganymede_dir: Path | None = None  # None : le dossier de données de Ganymède sur ce PC ; remplacé dans les tests
         self._templates_checked = 0.0  # dernier passage en arrière-plan sur les fiches des équipements
         self._ranking_stamp: tuple | None = None
         self._ranking_cache: dict[tuple, dict] = {}
@@ -919,6 +920,15 @@ class Api:
         finally:
             conn.close()
 
+    def ganymede_guides(self) -> dict:
+        """Guides de l'application Ganymède installée sur ce PC, ceux en cours d'abord. Lecture seule, rien n'en sort."""
+        return {
+            "guides": [
+                {"id": g.id, "name": g.name, "steps": g.steps, "current_step": g.current_step, "started": g.started, "done": g.done}
+                for g in ganymede.guides(self.ganymede_dir)
+            ]
+        }
+
     def workshop_action(self, payload: dict) -> dict:
         """Modifie les listes de l'atelier. Lève ValueError si la demande est mal formée."""
 
@@ -954,6 +964,20 @@ class Api:
                         raise ValueError("objectif inconnu")
                     rows.append((entry[0], entry[1], workshop.CRAFT, ""))
                 return {"list": db.workshop_create(conn, text("name"), rows, now)}
+            if action == "ganymede":
+                # Ce qu'il reste à réunir pour finir un guide Ganymède : les objets échangeables seulement
+                # (un objet de quête ne s'achète pas), chacun à acheter ou fabriquer au moins cher.
+                guide_id = number("guide")
+                found = next((g for g in ganymede.guides(self.ganymede_dir) if g.id == guide_id), None)
+                wanted = ganymede.needs(guide_id, self.ganymede_dir, from_start=payload.get("whole") is True)
+                if found is None or wanted is None:
+                    raise ValueError("guide introuvable")
+                tradable = {row[0] for row in conn.execute("SELECT id FROM items WHERE exchangeable")}
+                rows = [(item_id, min(quantity, 10**6), None, "") for item_id, quantity in sorted(wanted.items()) if item_id in tradable][:200]
+                if not rows:
+                    raise ValueError("aucun objet à acheter dans ce qu'il reste de ce guide")
+                name = " ".join(found.name.split())[:80]
+                return {"list": db.workshop_create(conn, name, rows, now), "skipped": len(wanted) - len(rows)}
             if action == "import":
                 # Liste venue d'ailleurs (un stuff Dofusbook) : des identifiants d'objets du jeu, un exemplaire
                 # de chaque. Ceux que cette base ne connaît pas sont laissés de côté, et comptés.
