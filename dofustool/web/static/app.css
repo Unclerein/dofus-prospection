@@ -604,3 +604,10 @@ table.dense td.act.two { width: 80px; }
 .list-menu button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 4px 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
 .list-menu button:hover, .list-menu button:focus-visible { background: #26333A; }
 .list-menu button.new { color: var(--accent); font-weight: 600; }
+
+/* Forgemagie › Par objet, en venant du classement : le critère cherché là-bas. */
+.focus-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.focus-bar > span { flex: 1 1 auto; }
+tr.focus td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.focus td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+tr.mine.focus td { background: color-mix(in srgb, var(--accent) 12%, transparent); }  /* la mienne reste reconnaissable */

@@ -1440,7 +1440,23 @@ async function forgeItem(id, options) {
   const net = (price) => price * (1 - tax);
   const cheapest = d.listings[0] || null;
   const plain = d.listings.find((l) => l.plain) || null;
-  const matching = d.listings.filter((l) => matches(l, f));
+  // Arrivée depuis le classement général : le critère cherché là-bas (exo ou over), en plus des critères de l'objet.
+  const focus = S.ui.forgeFocus && S.ui.forgeFocus.item === id ? S.ui.forgeFocus : null;
+  const baseMax = Object.fromEntries(d.lines.map((line) => [line.id, line.max]));
+  const focused = (l) => {
+    if (!focus) return false;
+    const v = l.values[focus.effect] || 0;
+    if (focus.kind === 'exo') return l.exo.includes(focus.effect) && (!focus.value || (focus.exact ? v === focus.value : v >= focus.value));
+    return baseMax[focus.effect] !== undefined && v >= baseMax[focus.effect] + focus.value;
+  };
+  const focusCount = focus ? d.listings.filter(focused).length : 0;
+  const focusBar = focus && h('div', { class: 'note focus-bar' },
+    h('span', {}, 'Depuis le classement : ', h('strong', {}, focus.label), ` · ${focusCount} annonce${focusCount > 1 ? 's' : ''}`),
+    h('button', { class: 'btn', onclick: () => { focus.only = !focus.only; refresh(); } }, focus.only ? 'Voir toutes les annonces' : 'Seulement celles-ci'),
+    h('button', { class: 'btn quiet', onclick: () => { S.ui.forgeFocus = null; refresh(); } }, 'Retirer'));
+
+  // Le critère du classement, tant qu'on n'a pas demandé à tout revoir, remplace ceux de l'objet pour les chiffres.
+  const matching = focus && focus.only ? d.listings.filter(focused) : d.listings.filter((l) => matches(l, f));
   const best = matching[0] || null;
   const median = matching.length ? matching[Math.floor((matching.length - 1) / 2)].price : null;
   const hasCriteria = Object.keys(f.minimums).length > 0 || f.exo !== null || f.transcended !== null;
@@ -1488,11 +1504,11 @@ async function forgeItem(id, options) {
     kpi('Prime sur la base', best && plain ? signed(best.price - plain.price) : '—', 'avant runes', 'accent'),
     kpi('Gain sur un craft', best && d.craft_cost !== null ? signed(net(best.price) - d.craft_cost) : '—', 'net de taxe, avant runes', 'gain'));
 
-  const shown = f.showAll ? d.listings : matching;
+  const shown = focus && focus.only ? d.listings.filter(focused) : f.showAll ? d.listings : matching;
   const table = h('div', { class: 'panel' },
-    h('div', { class: 'panel-head' }, h('h2', {}, f.showAll ? 'Toutes les annonces' : hasCriteria ? 'Annonces qui correspondent' : 'Annonces'),
+    h('div', { class: 'panel-head' }, h('h2', {}, focus && focus.only ? focus.label : f.showAll ? 'Toutes les annonces' : hasCriteria ? 'Annonces qui correspondent' : 'Annonces'),
       h('div', { class: 'legend' }, h('span', {}, h('span', { class: 'swatch', style: 'background: var(--accent)' }), 'jet au maximum'), h('span', {}, h('span', { class: 'swatch', style: 'background: var(--warn)' }), 'sous le minimum de base'))),
-    shown.length === 0 ? h('div', { class: 'empty' }, 'Aucune annonce ne correspond à ces critères.') : listingsTable(shown, d, f),
+    shown.length === 0 ? h('div', { class: 'empty' }, 'Aucune annonce ne correspond à ces critères.') : listingsTable(shown, d, f, false, focused),
     h('div', { class: 'panel-foot' }, h('span', {}, 'Prix demandés.'),
       hasCriteria && h('button', { class: 'btn', onclick: () => { f.showAll = !f.showAll; refresh(); } }, f.showAll ? 'Seulement celles qui correspondent' : `Voir les ${d.listings.length} annonces`)));
 
@@ -1509,7 +1525,7 @@ async function forgeItem(id, options) {
     d.gone.length ? listingsTable(d.gone, d, f, true)
       : h('div', { class: 'empty' }, 'Aucune pour l\'instant.'));
 
-  return [header, base, lostWarning, h('div', { class: 'split' }, criteria, h('section', { class: 'results', 'aria-label': 'Résultat' }, result, table, breakdown, gone))];
+  return [header, base, lostWarning, focusBar, h('div', { class: 'split' }, criteria, h('section', { class: 'results', 'aria-label': 'Résultat' }, result, table, breakdown, gone))];
 }
 
 function sortValue(l, key, d) {
@@ -1570,7 +1586,7 @@ function placeTip(event) {
   $tip.style.top = `${y}px`;
 }
 
-function listingsTable(listings, d, f, withDates) {
+function listingsTable(listings, d, f, withDates, focused = () => false) {
   const sort = f.sort || (f.sort = { key: 'price', dir: 1 });
   listings = listings.slice().sort((a, b) => {
     const x = sortValue(a, sort.key, d), y = sortValue(b, sort.key, d);
@@ -1587,7 +1603,7 @@ function listingsTable(listings, d, f, withDates) {
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
       d.lines.map((line) => head(line.id, d.assets[line.id] ? statIcon(d.assets[line.id]) : short(line.name), false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
-      class: l.mine ? 'mine' : '',
+      class: [l.mine && 'mine', focused(l) && 'focus'].filter(Boolean).join(' '),
       onmouseenter: (event) => showTip(event, itemTooltip(l, d)),
       onmousemove: placeTip,
       onmouseleave: () => { $tip.hidden = true; },
@@ -1672,7 +1688,12 @@ async function forgeRanking() {
 
   const body = rows.map((r, index) => {
     const value = r[key];
-    return h('tr', { class: 'link', onclick: () => { location.hash = `#/forge/item/${r.item_id}`; } },
+    return h('tr', { class: 'link', onclick: () => {
+      // Le critère cherché suit le clic : la page de l'objet met en avant les annonces qui y répondent.
+      S.ui.forgeFocus = ui.criterion === 'exo' ? { item: r.item_id, kind: 'exo', effect: ui.exo, value: ui.exoValue, exact: !!ui.exact, label, only: true }
+        : ui.criterion === 'over' ? { item: r.item_id, kind: 'over', effect: ui.effect, value: ui.amount, label, only: true } : null;
+      location.hash = `#/forge/item/${r.item_id}`;
+    } },
       h('td', { class: 'muted' }, index + 1),
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}niv. ${r['Niveau']}${r.mage ? ' · ' + r.mage : ''} · ${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
