@@ -158,3 +158,24 @@ def test_a_list_is_imported_from_item_ids(app_db):  # noqa: F811
     for bad in ([], [999_999], ["3"], [True], list(range(1, 80))):
         with pytest.raises(ValueError):
             api.workshop_action({"action": "import", "name": "x", "items": bad})
+
+
+def test_equipment_is_priced_at_its_cheapest_recent_listing(app_db):  # noqa: F811
+    """Dans l'atelier, un équipement s'achète au prix de l'annonce la moins chère de l'HDV, tant que le relevé est récent."""
+    api = Api(app_db)
+    done = api.workshop_action({"action": "import", "name": "stuff", "items": [500]})
+    conn = api.connect()
+    prices = api._load(conn)["ws"].prices
+    cheapest, usual = prices.hdv_any(500)[0], prices.get(500)
+    (goal,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]][0]["goals"]
+    assert goal["buy_cost"] == cheapest
+    # Relevé de trois jours : trop vieux, le prix de référence habituel reprend la main.
+    conn.execute("UPDATE hdv_listings SET captured_at = captured_at - 3 * 86400, first_seen = first_seen - 3 * 86400 WHERE item_id = 500")
+    conn.commit()
+    conn.close()
+    api = Api(app_db)
+    conn = api.connect()
+    usual = api._load(conn)["ws"].prices.get(500)
+    conn.close()
+    (goal,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]][0]["goals"]
+    assert goal["buy_cost"] == (usual.price if usual is not None else None)

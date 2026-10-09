@@ -504,7 +504,7 @@ async function pageWorkshop(r) {
       h('div', { class: 'panel-foot' },
         h('span', {}, 'Un exemplaire de chaque objet. Rien n\u2019est créé tant que tu n\u2019as pas confirmé.'),
         h('span', { style: 'display: flex; gap: 8px' },
-          h('a', { class: 'btn quiet', href: '#/workshop' }, 'Annuler'),
+          h('a', { class: 'btn quiet', href: '#/workshop', style: 'display: inline-flex; align-items: center' }, 'Annuler'),
           ids.length > 0 && h('button', { class: 'btn', onclick: async () => {
             const done = await workshopAct({ action: 'import', name, items: ids });
             if (!done) return;
@@ -513,10 +513,10 @@ async function pageWorkshop(r) {
           } }, 'Créer la liste'))))];
   }
   const bookmarklet = `javascript:(async()=>{const m=location.pathname.match(/equipement\\/(\\d+)/);if(!/dofusbook/.test(location.hostname)||!m){alert('Ouvre d\u2019abord la page d\u2019un stuff Dofusbook, puis clique ce favori.');return;}const w=window.open('','_blank');try{const d=await fetch('/api/stuffs/dofus/public/'+m[1]).then(r=>r.json());const ids=d.items.map(i=>i.official).filter(Number.isInteger).join(',');const u='${location.origin}/#/workshop/import?n='+encodeURIComponent(d.stuff.name)+'&i='+ids;if(w)w.location=u;else location.href=u;}catch(e){if(w)w.close();alert('Stuff illisible : il doit être public ou partagé par lien.');}})()`;
-  const importHelp = h('details', { class: 'panel pad import-help' },
-    h('summary', {}, 'Importer un stuff Dofusbook'),
+  const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook')),
     h('ol', {},
-      h('li', {}, 'Glisse ce bouton dans la barre de favoris de ton navigateur : ', h('a', { class: 'btn', href: bookmarklet, title: 'À glisser dans la barre de favoris', onclick: (e) => { e.preventDefault(); notify('Glisse ce bouton dans ta barre de favoris, puis clique-le depuis la page d\u2019un stuff Dofusbook.'); } }, '→ Atelier Prospection')),
+      h('li', {}, 'Glisse ce bouton dans ta barre de favoris : ', h('a', { class: 'btn', href: bookmarklet, title: 'À glisser dans la barre de favoris', onclick: (e) => { e.preventDefault(); notify('Glisse ce bouton dans ta barre de favoris, puis clique-le depuis la page d\u2019un stuff Dofusbook.'); } }, '→ Atelier Prospection')),
       h('li', {}, 'Ouvre la page d\u2019un stuff sur Dofusbook (public ou partagé par lien).'),
       h('li', {}, 'Clique le favori : l\u2019Atelier s\u2019ouvre avec les objets du stuff, à confirmer.')),
     h('div', { class: 'source' }, 'Dofusbook ne se laisse pas lire par un programme : c\u2019est ton navigateur qui lit la page que tu regardes. Rien n\u2019est envoyé à Dofusbook.'));
@@ -533,7 +533,7 @@ async function pageWorkshop(r) {
       h('button', { class: 'btn', onclick: create }, 'Créer')));
 
   if (!current) {
-    return [head, importHelp, h('div', { class: 'workshop' }, side, h('div', { class: 'panel empty' },
+    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, importHelp), h('div', { class: 'panel empty' },
       'Aucune liste pour l\u2019instant. Crée-en une à gauche, ou pars d\u2019une liste toute faite : les offrandes de l\u2019almanax depuis la page Aujourd\u2019hui, ou un plan de métier depuis la page Métiers.'))];
   }
 
@@ -561,7 +561,7 @@ async function pageWorkshop(r) {
     h('div', { class: 'panel-head' }, h('h2', {}, 'Objectifs'), h('span', { class: 'muted small' }, 'Ce que tu veux obtenir')),
     l.goals.length === 0 ? h('div', { class: 'empty' }, 'Liste vide : ajoute un objet avec la recherche ci-dessus.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', { class: 'l' }, 'Obtention'), h('th', {}, 'Tout acheter'), h('th', { title: 'En achetant chaque ingrédient de la recette' }, 'Fabriquer'), h('th', {}, 'En stock'), h('th', {}, ''))),
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', { class: 'l' }, 'Obtention'), h('th', { title: 'Équipement : annonce la moins chère de l\u2019HDV si son relevé a moins de 48 h, sinon le prix de référence' }, 'Tout acheter'), h('th', { title: 'En achetant chaque ingrédient de la recette' }, 'Fabriquer'), h('th', {}, 'En stock'), h('th', {}, ''))),
         h('tbody', {}, l.goals.map((g) => h('tr', {},
           h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${g.item_id}`, title: 'Ouvrir la fiche de l\u2019objet' }, itemCell(g.icon, g.name, [g.note, g.mode === 'craft' ? (g.to_make < g.quantity ? `${fmt(g.to_make)} à fabriquer, le reste en stock` : 'à fabriquer') : 'à acheter'].filter(Boolean).join(' · '), g.item_id))),
           h('td', {}, h('input', { type: 'number', min: 1, max: 1000000, value: g.quantity, class: 'qty-input', 'aria-label': `Quantité de ${g.name}`,
@@ -628,7 +628,7 @@ async function pageWorkshop(r) {
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
           h('tbody', {}, shown))));
 
-  return [head, h('div', { class: 'workshop' }, side, h('div', { class: 'workshop-main' }, kpis, title, goals, lines)), importHelp];
+  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, importHelp), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés

@@ -19,6 +19,7 @@ from .. import ankama, config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
+from ..analysis.prices import PriceRef
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
 from ..share import client as share_client
@@ -106,6 +107,8 @@ def clean(value):
 
 # Intervalle entre deux passages en arrière-plan sur les fiches des équipements (périmées, contredites).
 TEMPLATES_EVERY_S = 600.0
+# Atelier : au-delà, l'annonce la moins chère d'un équipement est trop vieille pour servir de prix d'achat.
+WORKSHOP_LISTING_MAX_AGE_S = 48 * 3600.0
 TEMPLATES_BATCH = 100  # fiches rafraîchies avant de faire recalculer les pages
 
 
@@ -799,7 +802,23 @@ class Api:
             state = self._load(conn)
             ws, stock, icons = state["ws"], state["stock"], state["icons"]
             recipes = ws.calculator.recipes
-            price = ws.calculator._buy_price
+            now = time.time()
+
+            def reference(item_id: int) -> PriceRef | None:
+                """Prix auquel l'objet s'achète. Un équipement se paie au prix de l'annonce la moins chère de l'HDV,
+                pas au prix moyen, qui mêle les exemplaires forgemagés : tant que le relevé est assez récent."""
+                item = ws.items.get(item_id)
+                if item is None or not item.exchangeable:
+                    return None
+                cheapest = ws.prices.hdv_any(item_id)
+                if cheapest is not None and now - cheapest[2] <= WORKSHOP_LISTING_MAX_AGE_S:
+                    return PriceRef(*cheapest)
+                return ws.prices.get(item_id)
+
+            def price(item_id: int) -> float | None:
+                ref = reference(item_id)
+                return ref.price if ref is not None else None
+
             owned = lambda item_id: stock.get(item_id).total  # noqa: E731
 
             def named(item_id: int) -> dict:
@@ -829,7 +848,7 @@ class Api:
                 for item_id, quantity in found.lines.items():
                     have = stock.get(item_id)
                     unit = price(item_id)
-                    ref = ws.prices.get(item_id) if unit is not None else None
+                    ref = reference(item_id) if unit is not None else None
                     to_buy = max(0, quantity - have.total)
                     others = everywhere[item_id]
                     need_all = sum(q for _, _, q in others)
