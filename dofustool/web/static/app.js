@@ -1626,7 +1626,10 @@ function itemTooltip(l, d) {
   const byRank = (a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9);
   lines.sort(byRank);
   exos.sort(byRank);
-  const all = [...fixed, ...exos.map((entry) => entry[1]), ...lines.map((entry) => entry[1])];
+  // « Arme de chasse » posée par une rune : juste sous l'exo s'il y en a un, sinon tout en haut.
+  const hunting = l.hunting ? [h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, ''), h('span', { class: 'n' }, 'Arme de chasse'), h('span', { class: 'r' }, 'rune de chasse'))] : [];
+  const all = exos.length ? [...fixed, ...exos.map((entry) => entry[1]), ...hunting, ...lines.map((entry) => entry[1])]
+    : [...hunting, ...fixed, ...lines.map((entry) => entry[1])];
   return [
     h('div', { class: 'tip-head' }, tile(d.icon, false, d.id), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niv. ${d.level}${l.quality !== null ? ` · jets ${l.quality} %` : ''}`)), typeTag(l)),
     h('div', { class: 'tip-lines' }, all.length ? all : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
