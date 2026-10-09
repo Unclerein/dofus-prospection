@@ -512,7 +512,10 @@ async function pageWorkshop(r) {
   // Guides de l'application Ganymède installée sur ce PC : ce qu'il reste à réunir pour finir un guide.
   const guideChoice = ganymede.guides.find((g) => g.id === ui.guide) || ganymede.guides[0] || null;
   const guideLabel = (g) => `${g.name}${g.done ? ' · terminé' : g.started ? ` · étape ${g.current_step + 1} sur ${g.steps}` : ''}`;
-  const guideImport = guideChoice && h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
+  const guideImport = !guideChoice ? h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède')),
+    h('div', { class: 'source' }, 'Il faut l\u2019application Ganymède installée sur ce PC, avec au moins un guide téléchargé dedans. Prospection y lit la liste des ressources que le guide demande de prévoir.'))
+    : h('section', { class: 'panel import-help', 'aria-label': 'Importer un guide Ganymède' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un guide Ganymède')),
     h('div', { class: 'guide-import' },
       h('select', { 'aria-label': 'Guide', onchange: (e) => { ui.guide = Number(e.target.value); refresh(); } },
@@ -525,7 +528,7 @@ async function pageWorkshop(r) {
         if (done.skipped) notify(`${plural(done.skipped, 'objet de quête laissé', 'objets de quête laissés')} de côté : ils ne s\u2019achètent pas.`);
         location.hash = `#/workshop/${done.list}`;
       } }, 'Créer la liste')),
-    h('div', { class: 'source' }, 'La liste des ressources donnée au début du guide, sans les quêtes que tu as déjà terminées. Quantités lues dans le texte : à vérifier avant d\u2019acheter.'));
+    h('div', { class: 'source' }, 'Guides téléchargés dans l\u2019application Ganymède de ce PC (elle doit y être installée). La liste des ressources donnée au début du guide, sans les quêtes que tu as déjà terminées. Quantités lues dans le texte : à vérifier avant d\u2019acheter.'));
   const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook')),
     h('ol', {},
@@ -2795,6 +2798,15 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 13, date: '9 octobre 2026', title: 'Imports dans l\u2019atelier, données du jeu à jour', hash: '#/workshop', go: 'Voir l\u2019atelier', points: [
+    ['Importer un stuff Dofusbook :', 'dans l\u2019Atelier, glisse le bouton « → Atelier Prospection » dans ta barre de favoris. Sur la page d\u2019un stuff Dofusbook, un clic sur ce favori crée la liste de ses objets.'],
+    ['Importer un guide Ganymède :', 'la liste des ressources qu\u2019un guide demande de prévoir, sans les quêtes que tu as déjà terminées. Il faut l\u2019application Ganymède installée sur ce PC, avec le guide téléchargé dedans.'],
+    ['Prix des équipements dans l\u2019Atelier :', 'un équipement s\u2019achète au prix de l\u2019annonce la moins chère de l\u2019HDV (relevée depuis moins de 48 h), plus au prix moyen, qui mêle les objets forgemagés.'],
+    ['Données du jeu à jour :', 'objets, recettes et caractéristiques des équipements sont rafraîchis tout seuls après une mise à jour du jeu. Au premier lancement, les fiches des équipements sont relues en arrière-plan (quelques minutes).'],
+    ['Classement de forgemagie :', 'un champ « Valeur » pour l\u2019exo, avec une case « Valeur exacte » : chercher 1 % de dommages ne montre plus ceux à 2 %. En cliquant un objet, sa page met en avant les annonces qui répondent au critère.'],
+    ['Quantités vendues :', 'un « ≈ » devant le chiffre signale une quantité en partie déduite des prix moyens, donc un ordre de grandeur. Rouvrir le cours en jeu donne le chiffre exact, et la page État mesure peu à peu ce que valent ces déductions.'],
+    ['Launcher Ankama :', 'retrouvé tout seul s\u2019il n\u2019est pas à l\u2019endroit prévu. Sinon, bouton « Détecter » dans Config.'],
+  ] },
   { id: 12, date: '9 octobre 2026', title: 'Page Aujourd\u2019hui, atelier, stock en direct', hash: '#/today', go: 'Voir la page Aujourd\u2019hui', points: [
     ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, tes derniers objets forgemagés, les crafts faisables avec ton stock et les signaux du marché.'],
     ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours, et un bouton prépare la liste de courses des prochains jours.'],
