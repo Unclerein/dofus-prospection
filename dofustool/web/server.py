@@ -105,6 +105,8 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.trends())
                 if path == "/api/config":
                     return self._json(api.config())
+                if path == "/api/launcher":
+                    return self._json(api.find_launcher(query.get("current", "")))
                 if path == "/api/jobs":
                     return self._json(api.jobs())
                 if path == "/api/jobs/plan":

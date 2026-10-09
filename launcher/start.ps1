@@ -29,6 +29,15 @@ if ($updated -contains 'updated') {
 $cfg = & $python -c "import json, dataclasses; from dofustool import config; print(json.dumps(dataclasses.asdict(config.load())))" | ConvertFrom-Json
 $gameName = $cfg.dofus_process
 
+# Chemin du launcher Ankama introuvable (installé ailleurs que prévu) : on le cherche, et on l'enregistre.
+if (-not $NoLauncher -and -not (Test-Path $cfg.ankama_path)) {
+    $found = & $python -m dofustool.ankama --save | Select-Object -Last 1
+    if ($LASTEXITCODE -eq 0 -and $found) {
+        $cfg.ankama_path = $found
+        Say "Launcher Ankama trouvé : $found (enregistré dans la configuration)."
+    }
+}
+
 # 1. Capture en arrière-plan.
 #    Une capture déjà en cours n'est gardée que si un autre lanceur la surveille encore. Sinon elle est
 #    restée orpheline (fenêtre du lanceur fermée, plantage) : on l'arrête proprement et on repart.
@@ -64,7 +73,7 @@ try {
             Start-Process -FilePath $cfg.ankama_path
             Say "Launcher Ankama lancé."
         } else {
-            Say "Launcher Ankama introuvable ($($cfg.ankama_path)) : corrige ankama_path dans dofustool\config.toml, et lance le jeu à la main."
+            Say "Launcher Ankama introuvable, même en le cherchant ($($cfg.ankama_path)) : indique son chemin dans l'onglet Config de l'interface, et lance le jeu à la main."
         }
     }
 

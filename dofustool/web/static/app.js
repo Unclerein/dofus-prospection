@@ -2570,6 +2570,13 @@ async function pageConfig() {
         text('c-process', 'Processus du jeu', 'dofus_process', 140)),
       h('div', { class: 'filters' },
         text('c-ankama', 'Launcher Ankama', 'ankama_path', 520),
+        h('button', { class: 'btn', style: 'align-self: flex-end', title: 'Chercher le launcher Ankama sur ce PC', onclick: async (e) => {
+          const button = e.currentTarget; button.disabled = true; button.textContent = 'Recherche…';
+          const found = await api(`/api/launcher?current=${encodeURIComponent(d.ankama_path || '')}`).catch(() => ({ path: null }));
+          button.disabled = false; button.textContent = 'Détecter';
+          if (found.path) { d.ankama_path = found.path; document.getElementById('c-ankama').value = found.path; sync(); }
+          else notify('Launcher Ankama introuvable sur ce PC : indique son chemin à la main.');
+        } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'))));
 
   return [

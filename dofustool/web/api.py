@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .. import config, db
+from .. import ankama, config, db
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, Filter, base_lines, classify
 from ..analysis import jobxp
@@ -466,6 +466,11 @@ class Api:
             conn.close()
 
     # --- configuration -------------------------------------------------------
+
+    def find_launcher(self, configured: str = "") -> dict:
+        """Cherche le launcher Ankama sur ce PC (registre, dossiers habituels, disques). Rien n'est enregistré."""
+        found = ankama.find(configured)
+        return {"path": str(found) if found else None}
 
     def config(self) -> dict:
         """Contenu de config.toml, et de quoi le remplir : métiers du jeu, personnages vus par la capture."""

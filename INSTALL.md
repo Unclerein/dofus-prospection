@@ -82,6 +82,7 @@ jamais ton PC.
 |---|---|
 | `winget` n'est pas reconnu | Installer « Programme d'installation d'application » depuis le Microsoft Store, ou télécharger Git (<https://git-scm.com/download/win>) et Python (<https://www.python.org/downloads/>) à la main, en cochant « Add python.exe to PATH ». |
 | Le raccourci ne fait rien | Ouvrir `C:\prospection\data\capture.log` : la dernière ligne dit ce qui bloque. |
+| Le launcher Ankama ne s'ouvre pas | Le raccourci le cherche tout seul. S'il ne le trouve pas : onglet Config, bouton « Détecter » à côté de « Launcher Ankama », ou coller son chemin à la main, puis Enregistrer. |
 | L'onglet État affiche « Capture arrêtée » en jeu | Le jeu a été lancé sans le raccourci : le fermer et le relancer par « Dofus + Prospection ». |
 | Aucun prix après le choix du personnage | VPN actif ? Désigner la bonne interface réseau dans Config. Sinon, attendre une minute : après une mise à jour du jeu, l'outil retrouve seul ses repères. |
 | Partage : « hub injoignable » | Vérifier l'adresse du hub (elle commence par `https://`) et sa connexion Internet. Si ça dure, prévenir celui qui gère le hub. |

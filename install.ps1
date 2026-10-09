@@ -33,6 +33,9 @@ $venv = Join-Path $root '.venv\Scripts\python.exe'
 & $venv -m pip install --quiet -e .
 if ($LASTEXITCODE -ne 0) { Fail "L'installation des dépendances a échoué : copie le message ci-dessus à celui qui t'a donné l'outil." }
 Write-Host "Dépendances installées."
+$launcher = & $venv -m dofustool.ankama --save | Select-Object -Last 1
+if ($LASTEXITCODE -eq 0 -and $launcher) { Write-Host "Launcher Ankama trouvé : $launcher" }
+else { Write-Host "Launcher Ankama non trouvé : indique son chemin plus tard dans l'onglet Config." }
 
 Step "4/5  Données du jeu : objets, recettes, métiers (environ 360 Mo à télécharger)"
 & $venv -m dofustool.staticdata.update
