@@ -79,6 +79,14 @@ function tile(iconId, big, itemId) {
 }
 
 /** Petite image d'une caractéristique (vitalité, force…), ou rien si elle n'en a pas. */
+/** Icône d'un objet à la taille d'une icône de caractéristique (la rune de chasse à côté de « Arme de chasse »). */
+function itemIcon(iconId) {
+  if (!iconId) return null;
+  const img = h('img', { class: 'stat-ico', src: `/icons/${iconId}.png`, alt: '', loading: 'lazy' });
+  img.addEventListener('error', () => img.remove());
+  return img;
+}
+
 function statIcon(asset) {
   if (!asset) return null;
   const img = h('img', { class: 'stat-ico', src: `/icons/effects/${asset}.png`, alt: '', loading: 'lazy' });
@@ -1626,10 +1634,9 @@ function itemTooltip(l, d) {
   const byRank = (a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9);
   lines.sort(byRank);
   exos.sort(byRank);
-  // « Arme de chasse » posée par une rune : juste sous l'exo s'il y en a un, sinon tout en haut.
-  const hunting = l.hunting ? [h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, ''), h('span', { class: 'n' }, 'Arme de chasse'), h('span', { class: 'r' }, 'rune de chasse'))] : [];
-  const all = exos.length ? [...fixed, ...exos.map((entry) => entry[1]), ...hunting, ...lines.map((entry) => entry[1])]
-    : [...hunting, ...fixed, ...lines.map((entry) => entry[1])];
+  // « Arme de chasse » posée par une rune : sous les dégâts de l'arme, et sous l'exo s'il y en a un.
+  const hunting = l.hunting ? [h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, ''), h('span', { class: 'n with-ico' }, itemIcon(d.hunting_icon), 'Arme de chasse'), h('span', { class: 'r' }, 'rune'))] : [];
+  const all = [...fixed, ...exos.map((entry) => entry[1]), ...hunting, ...lines.map((entry) => entry[1])];
   return [
     h('div', { class: 'tip-head' }, tile(d.icon, false, d.id), h('div', {}, h('div', { class: 'tip-name' }, d.name), h('div', { class: 'muted small' }, `Niv. ${d.level}${l.quality !== null ? ` · jets ${l.quality} %` : ''}`)), typeTag(l)),
     h('div', { class: 'tip-lines' }, all.length ? all : h('div', { class: 'muted' }, 'Aucune caractéristique transmise.')),
