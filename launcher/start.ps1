@@ -30,7 +30,7 @@ $cfg = & $python -c "import json, dataclasses; from dofustool import config; pri
 $gameName = $cfg.dofus_process
 
 # Chemin du launcher Ankama introuvable (installé ailleurs que prévu) : on le cherche, et on l'enregistre.
-if (-not $NoLauncher -and -not (Test-Path $cfg.ankama_path)) {
+if (-not $NoLauncher -and (-not $cfg.ankama_path -or -not (Test-Path $cfg.ankama_path))) {
     $found = & $python -m dofustool.ankama --save | Select-Object -Last 1
     if ($LASTEXITCODE -eq 0 -and $found) {
         $cfg.ankama_path = $found
@@ -47,7 +47,7 @@ $others = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
 if (Get-Captures) {
     if ($others) {
         Say "Un lanceur surveille déjà une capture : rien à relancer."
-        if (-not $NoLauncher -and (Test-Path $cfg.ankama_path)) { Start-Process -FilePath $cfg.ankama_path }
+        if (-not $NoLauncher -and $cfg.ankama_path -and (Test-Path $cfg.ankama_path)) { Start-Process -FilePath $cfg.ankama_path }
         exit 0
     }
     Say "Une capture tournait sans lanceur : arrêt, puis redémarrage."
@@ -69,7 +69,7 @@ Say "Capture prête (processus $($capture.Id))."
 try {
     # 2. Launcher Ankama.
     if (-not $NoLauncher) {
-        if (Test-Path $cfg.ankama_path) {
+        if ($cfg.ankama_path -and (Test-Path $cfg.ankama_path)) {
             Start-Process -FilePath $cfg.ankama_path
             Say "Launcher Ankama lancé."
         } else {
@@ -132,6 +132,9 @@ finally {
         }
     }
     Say "Capture arrêtée."
+    # Objets, recettes et métiers : une nouvelle version sort à chaque mise à jour du jeu. Rien n'est fait
+    # si la version locale est déjà la dernière ; sinon téléchargement (environ 360 Mo) puis import.
+    try { & $python -m dofustool.staticdata.update --if-new | ForEach-Object { Say $_ } } catch { Say "Données du jeu non vérifiées (hors ligne ?) : ce sera refait à la prochaine partie." }
     # Caractéristiques de base des équipements vus à l'HDV (DofusDB) : après la capture, jamais pendant.
     try { & $python -m dofustool.staticdata.effects | ForEach-Object { Say $_ } } catch { Say "DofusDB injoignable : à relancer plus tard." }
 }

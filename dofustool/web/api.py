@@ -44,7 +44,9 @@ def data_stamp(conn: sqlite3.Connection, config_path: Path = config.CONFIG_PATH)
     stamp = conn.execute(
         "SELECT (SELECT COUNT(*) FROM snapshots), (SELECT MAX(captured_at) FROM market_history), "
         "(SELECT MAX(captured_at) FROM hdv_listings), (SELECT COUNT(*) FROM hdv_listings), "
-        "(SELECT COUNT(*) FROM item_effects_fetched), (SELECT value FROM static_meta WHERE key = 'imported_at'), "
+        # Nombre de fiches, et date du dernier lot de fiches rafraîchies (qui change les calculs, pas leur nombre).
+        "(SELECT COUNT(*) || ':' || COALESCE((SELECT value FROM template_meta WHERE key = 'refreshed_at'), '') FROM item_effects_fetched), "
+        "(SELECT value FROM static_meta WHERE key = 'imported_at'), "
         "(SELECT MAX(captured_at) FROM holdings_meta), "
         # Somme des niveaux, pas la date du relevé : un gain d'expérience ne doit pas tout recalculer.
         "(SELECT COUNT(*) FROM characters), (SELECT SUM(level) FROM character_jobs), "
@@ -102,7 +104,14 @@ def clean(value):
     return value
 
 
+# Intervalle entre deux passages en arrière-plan sur les fiches des équipements (périmées, contredites).
+TEMPLATES_EVERY_S = 600.0
+TEMPLATES_BATCH = 100  # fiches rafraîchies avant de faire recalculer les pages
+
+
 class Api:
+    background_refresh = True  # coupé dans les tests : pas de fil en arrière-plan ni d'appel réseau
+
     """Un objet par serveur. Les calculs lourds sont refaits seulement quand les données changent."""
 
     def __init__(self, db_path: Path | str = db.MARKET_PATH, config_path: Path = config.CONFIG_PATH) -> None:
@@ -112,15 +121,19 @@ class Api:
         self._stamp: list | None = None
         self._state: dict | None = None
         self._fetching = threading.Lock()
+        self._templates_checked = 0.0  # dernier passage en arrière-plan sur les fiches des équipements
         self._ranking_stamp: tuple | None = None
         self._ranking_cache: dict[tuple, dict] = {}
         self._ranking_loaded: dict | None = None  # annonces lues de tous les équipements, pour la même empreinte
         self.fetch_effects = base_effects.fetch  # remplaçable dans les tests
         self.fetch_almanax = almanax_source.fetch
 
-    def ensure_template(self, conn: sqlite3.Connection, item_id: int) -> bool:
-        """Récupère sur DofusDB les caractéristiques de base d'un item si elles manquent. Renvoie True si connues."""
-        if forge.load_template(conn, item_id) is not None:
+    def ensure_template(self, conn: sqlite3.Connection, item_id: int, refresh: bool = False) -> bool:
+        """Récupère sur DofusDB les caractéristiques de base d'un item si elles manquent. Renvoie True si connues.
+
+        refresh : les redemander même si elles sont connues (fiche périmée) ; renvoie alors False en cas d'échec.
+        """
+        if not refresh and forge.load_template(conn, item_id) is not None:
             return True
         try:
             base_effects.store(conn, item_id, self.fetch_effects(item_id))
@@ -129,19 +142,45 @@ class Api:
             log.warning("Caractéristiques de base de l'item %s non récupérées : %s", item_id, exc)
             return False
 
+    def refresh_templates(self, conn: sqlite3.Connection, pause: float = 0.2) -> int:
+        """Demande à DofusDB les fiches manquantes, contredites par les annonces ou périmées. Renvoie leur nombre.
+
+        La version du jeu connue de DofusDB est vérifiée de temps en temps : si elle a changé, toutes les
+        fiches sont à relire. Une fiche périmée continue de servir tant que la nouvelle n'est pas arrivée.
+        """
+        now = time.time()
+        if base_effects.version_check_due(conn, now):
+            try:
+                if base_effects.note_version(conn, base_effects.fetch_version(), now):
+                    log.info("Version du jeu connue de DofusDB changée : les fiches des équipements sont rafraîchies.")
+            except Exception as exc:  # DofusDB injoignable : les fiches manquantes sont quand même tentées
+                log.warning("Version de DofusDB non lue : %s", exc)
+        missing = set(base_effects.missing_items(conn))
+        done = refreshed = 0
+        for item_id in base_effects.pending_items(conn, now):
+            if not self.ensure_template(conn, item_id, refresh=item_id not in missing):
+                break  # inutile d'insister si le service ne répond pas
+            done += 1
+            refreshed += item_id not in missing
+            # Les pages ne sont recalculées qu'une fois par lot de fiches rafraîchies, pas à chacune.
+            if refreshed and refreshed % TEMPLATES_BATCH == 0:
+                base_effects.mark_refreshed(conn)
+            time.sleep(pause)
+        if refreshed % TEMPLATES_BATCH:
+            base_effects.mark_refreshed(conn)
+        return done
+
     def fetch_missing_templates(self) -> None:
-        """En arrière-plan : complète les équipements vus à l'HDV. Un seul passage à la fois."""
+        """En arrière-plan : complète et rafraîchit les fiches des équipements vus à l'HDV. Un seul passage à la fois."""
         if not self._fetching.acquire(blocking=False):
             return
+        self._templates_checked = time.time()
 
         def work() -> None:
             try:
                 conn = self.connect()
                 try:
-                    for item_id in base_effects.missing_items(conn):
-                        if not self.ensure_template(conn, item_id):
-                            break  # inutile d'insister si le service ne répond pas
-                        time.sleep(0.2)
+                    self.refresh_templates(conn)
                 finally:
                     conn.close()
             finally:
@@ -1418,7 +1457,7 @@ class Api:
         conn = self.connect()
         try:
             state = self._load(conn)
-            if base_effects.missing_items(conn):
+            if base_effects.missing_items(conn) or (self.background_refresh and time.time() - self._templates_checked >= TEMPLATES_EVERY_S):
                 self.fetch_missing_templates()
             fetched = {row[0] for row in conn.execute("SELECT item_id FROM item_effects_fetched")}
             rows = conn.execute(

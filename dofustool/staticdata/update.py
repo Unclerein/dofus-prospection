@@ -1,6 +1,7 @@
 """Télécharge la dernière release de ledouxm/dofus-sqlite si elle a changé, puis réimporte.
 
-Usage : python -m dofustool.staticdata.update [--force] [--import-only]
+Usage : python -m dofustool.staticdata.update [--force] [--import-only] [--if-new]
+  --if-new : ne rien faire si la release locale est déjà la dernière (appel du lanceur, après chaque partie).
 """
 import argparse
 import json
@@ -47,6 +48,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--force", action="store_true", help="retélécharger même si la version est la même")
     parser.add_argument("--import-only", action="store_true", help="réimporter le fichier local sans rien télécharger")
+    parser.add_argument("--if-new", action="store_true", help="ne rien faire si la release locale est déjà la dernière")
     args = parser.parse_args()
 
     directory = source.DOFUS_SQLITE.parent
@@ -56,6 +58,8 @@ def main() -> int:
         current = read_version()
         if tag == current and source.DOFUS_SQLITE.exists() and not args.force:
             print(f"Données statiques déjà à jour ({tag}).")
+            if args.if_new:
+                return 0
         else:
             print(f"Téléchargement de la release {tag} (version locale : {current})…")
             for name in ASSETS:

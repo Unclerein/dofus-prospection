@@ -398,3 +398,27 @@ def test_own_listings_are_marked(api):
     pain = api.item(3)["hdv"]
     assert pain["mine"] == {"1": 400, "10": 2500}
     json.dumps(api.item(3), allow_nan=False)
+
+
+def test_stale_templates_are_fetched_again(api, monkeypatch):
+    from dofustool.staticdata import effects
+
+    conn = api.connect()
+    conn.execute("INSERT INTO items VALUES (501, 'Cape neuve', 1, 'Cape', 100, 1, 0, 0)")
+    conn.execute("INSERT INTO hdv_listings VALUES (501, 1, 80000, 0, 0, 0, '[[125, 120]]', 5.0, 5.0)")
+    conn.commit()
+    api.fetch_effects = lambda item_id: [(125, 101, 150)]
+    assert api.refresh_templates(conn, pause=0) >= 1  # la fiche manquante ; la version n'a pas pu être lue (hors ligne)
+    assert api.forge_item(501)["lines"][0]["max"] == 150
+    stamp = api.version()["stamp"]
+    # Le jeu est mis à jour : DofusDB annonce une autre version, et la fiche a changé.
+    monkeypatch.setattr(effects, "fetch_version", lambda: "9.9.9")
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = fetched_at - 600")
+    conn.commit()
+    api.fetch_effects = lambda item_id: [(125, 41, 60), (123, 41, 60)]
+    assert api.refresh_templates(conn, pause=0) >= 1
+    lines = api.forge_item(501)["lines"]
+    assert sorted((line["id"], line["max"]) for line in lines) == [(123, 60), (125, 60)]
+    assert api.version()["stamp"] != stamp  # les pages calculées avec l'ancienne fiche sont refaites
+    assert api.refresh_templates(conn, pause=0) == 0  # tout est à jour : plus rien à demander
+    conn.close()

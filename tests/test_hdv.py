@@ -337,3 +337,45 @@ def test_a_sale_more_recent_than_the_hdv_reading_wins(conn):
     save(conn, message(2469, listing(2469, 2, [59_000, 0, 0, 0], [(PA, 1)])))
     db.save_last_sale(conn, 2469, 900_000, NOW, NOW)
     assert book(conn).get(2469).source == HDV_PLAIN
+
+
+def test_templates_are_refreshed_when_the_game_changes(conn):
+    """Une fiche lue avant un changement de version du jeu, ou contredite par les annonces, est à redemander."""
+    from dofustool.staticdata import effects
+
+    day = 86_400.0
+    store(conn, 2469, [(VITA, 101, 150)])
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 10 * day,))
+    save(conn, message(2469, *[listing(2469, uid, [50_000 + uid, 0, 0, 0], [(VITA, 120)]) for uid in range(1, 6)]))
+    conn.execute("UPDATE hdv_listings SET captured_at = ?, first_seen = ?", (NOW - day, NOW - day))
+    assert effects.version_check_due(conn, NOW) and effects.pending_items(conn, NOW) == []
+
+    # Première vérification : on ne sait pas de quelle version datent les fiches, elles sont toutes à relire.
+    assert effects.note_version(conn, "3.7.4.4", NOW - 5 * day)
+    assert effects.stale_items(conn) == [2469] and not effects.version_check_due(conn, NOW - 5 * day)
+    store(conn, 2469, [(VITA, 101, 150)])  # relue : à jour
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 4 * day,))
+    assert effects.pending_items(conn, NOW) == [] and effects.version_check_due(conn, NOW)
+    assert not effects.note_version(conn, "3.7.4.4", NOW)  # même version : rien à refaire
+    assert effects.stale_items(conn) == []
+    assert effects.note_version(conn, "3.7.5.5", NOW) and effects.pending_items(conn, NOW) == [2469]
+    store(conn, 2469, [(VITA, 101, 150)])
+    assert effects.pending_items(conn, NOW) == []
+
+    # Les annonces portent toutes une ligne que la fiche ignore : le jeu a changé l'objet.
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 4 * day,))
+    save(conn, message(2469, *[listing(2469, uid, [50_000 + uid, 0, 0, 0], [(VITA, 120), (PA, 1)]) for uid in range(1, 6)]))
+    conn.execute("UPDATE hdv_listings SET captured_at = ?", (NOW - day,))
+    assert effects.contradicted_items(conn, NOW) == [2469]
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 3_600,))
+    assert effects.contradicted_items(conn, NOW) == []  # relue il y a une heure : pas redemandée avant demain
+    # Un exo posé sur une annonce sur cinq ne contredit rien ; une ligne de la fiche que plus personne ne porte, si.
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 4 * day,))
+    save(conn, message(2469, *[listing(2469, uid, [50_000 + uid, 0, 0, 0], [(VITA, 120)] + ([(PA, 1)] if uid == 1 else [])) for uid in range(1, 6)]))
+    conn.execute("UPDATE hdv_listings SET captured_at = ?", (NOW - day,))
+    assert effects.contradicted_items(conn, NOW) == []
+    store(conn, 2469, [(VITA, 101, 150), (PA, 1, 1)])
+    conn.execute("UPDATE item_effects_fetched SET fetched_at = ?", (NOW - 4 * day,))
+    save(conn, message(2469, *[listing(2469, uid, [50_000 + uid, 0, 0, 0], [(VITA, 120)]) for uid in range(1, 6)]))
+    conn.execute("UPDATE hdv_listings SET captured_at = ?", (NOW - day,))
+    assert effects.contradicted_items(conn, NOW) == [2469]

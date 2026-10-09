@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS item_effects_fetched (
     item_id    INTEGER PRIMARY KEY,
     fetched_at REAL NOT NULL
 );
+-- Suivi des fiches ci-dessus : version du jeu connue de DofusDB (version), date de sa dernière vérification
+-- (checked_at), et date avant laquelle une fiche est à redemander (stale_before : une mise à jour du jeu
+-- peut changer les caractéristiques de n'importe quel équipement).
+CREATE TABLE IF NOT EXISTS template_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS jobs (
     id   INTEGER PRIMARY KEY,
     name TEXT NOT NULL

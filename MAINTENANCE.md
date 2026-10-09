@@ -62,6 +62,12 @@ Si la commande répond « déjà à jour » alors que le jeu vient de changer, l
 dofus-sqlite n'a pas encore suivi. La ré-identification des prix moyens reste faisable (elle
 repose sur la structure), mais `identify.py` signalera des `[désaccord schéma]`.
 
+Le lanceur fait cette vérification tout seul après chaque partie (`--if-new` : rien n'est téléchargé
+si la release locale est la dernière). Les caractéristiques de base des équipements, elles, viennent
+de DofusDB et sont gardées en cache : elles sont redemandées quand la version du jeu annoncée par
+DofusDB change (`template_meta`), ou quand les annonces relevées contredisent une fiche. Pour forcer :
+`.\.venv\Scripts\python.exe -m dofustool.staticdata.effects`.
+
 ### 1. Faire une capture avec le nouveau build
 
 Si une capture a déjà tourné depuis la mise à jour (via le lanceur), les messages sont dans
