@@ -2695,15 +2695,15 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
-  { id: 11, date: '9 octobre 2026', title: 'Page Aujourd\u2019hui, atelier, stock en direct', hash: '#/today', go: 'Voir la page Aujourd\u2019hui', points: [
+  { id: 12, date: '9 octobre 2026', title: 'Page Aujourd\u2019hui, atelier, stock en direct', hash: '#/today', go: 'Voir la page Aujourd\u2019hui', points: [
     ['Aujourd\u2019hui :', 'la nouvelle page d\u2019accueil. Ce qui demande un geste (lots sous-enchéris, lots qui expirent), ce qui s\u2019est passé depuis ta dernière visite, tes derniers objets forgemagés, les crafts faisables avec ton stock et les signaux du marché.'],
     ['Almanax :', 'le bonus du jour et son offrande, avec son coût et ce que tu en possèdes. Les flèches font défiler les jours, et un bouton prépare la liste de courses des prochains jours.'],
     ['Atelier :', 'des listes d\u2019objets à obtenir (un stuff, les offrandes de la semaine, un plan de métier). Chaque liste dit ce qu\u2019il faut réunir, ce que tu as déjà et ce qu\u2019il reste à acheter. La flèche d\u2019un ingrédient déplie sa recette ; les ressources se regroupent par type et se trient.'],
     ['Ajouter à une liste :', 'un bouton à côté de l\u2019œil barré, dans Crafts, Mon stock, Tendances, Aujourd\u2019hui et la forgemagie. Un clic propose tes listes, la dernière utilisée en premier.'],
     ['Stock en direct :', 'achats, crafts, échanges et runes consommées mettent Mon stock à jour dans les secondes qui suivent. Inventaire, banque et havre-sac sont suivis séparément : ouvre un HDV ou un atelier avec les deux boutons cochés pour tout relever d\u2019un coup.'],
-    ['Mes ventes :', 'deux onglets de plus, Échanges (ce que tu as donné et reçu) et Fabrications (valeur et coût de chaque objet fabriqué). Un lot invendu rentré en banque quitte tes lots en vente.'],
+    ['Mes ventes :', 'deux onglets de plus, Échanges (ce que tu as donné et reçu) et Fabrications (valeur et coût de chaque objet fabriqué). Un lot invendu rentré en banque quitte tes lots en vente, et un changement de prix remplace le lot sur-le-champ, sans rouvrir l\u2019onglet Vendre.'],
     ['Ventes hors ligne :', 'un dépôt de kamas en banque n\u2019est plus compté comme un gain, et les lots vendus sont retrouvés même s\u2019ils viennent de plusieurs HDV : rouvre l\u2019onglet Vendre de chacun.'],
-    ['Forgemagie :', 'on peut ignorer un équipement depuis le classement ou sa page ; il sort alors du classement.'],
+    ['Forgemagie :', 'on peut ignorer un équipement depuis le classement ou sa page ; il sort alors du classement. Un objet forgemagé mis en vente est reconnu à ses jets : le journal le suit jusqu\u2019à sa vente, même si tu changes son prix.'],
     ['Plus rapide :', 'un achat ou un craft en jeu ne fait plus recalculer toutes les pages, et le classement de forgemagie s\u2019ouvre trois fois plus vite.'],
     ['La capture tient la session :', 'elle reste active tant que le launcher Ankama est ouvert. Relancer le jeu depuis lui ne laisse plus la partie sans capture.'],
     ['Menu :', 'les pages sont rangées par usage : gagner des kamas, mon compte, outils. État, Aide et Config sont en bas.'],
