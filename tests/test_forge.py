@@ -178,7 +178,7 @@ def pd_isna(value) -> bool:
 
 
 def test_ranking_exact_value(conn):
-    """« 1 % de dommages aux sorts » ne doit pas montrer ceux à 2 % ; « +10 Vitalité » : pile 10 au-dessus du jet parfait."""
+    """« 1 % de dommages aux sorts » ne doit pas montrer ceux à 2 %."""
     ws = workspace(conn)
     pick = lambda frame, name: frame.set_index("Objet").loc[name, "Moins cher selon critère"]  # noqa: E731
     # Exo Chance : l'anneau l'a à 15, le bouclier à 5.
@@ -190,10 +190,8 @@ def test_ranking_exact_value(conn):
     assert pick(exact15, "Anneau") == 400_000 and pd_isna(pick(exact15, "Bouclier"))
     # Sans valeur, « exact » ne change rien : n'importe quelle valeur de l'exo.
     assert pick(forge.ranking(conn, ws, forge.EXO, CHANCE, exact=True), "Anneau") == 400_000
-    # Over Vitalité : l'annonce à 260 est pile 10 au-dessus du jet parfait (250).
-    assert pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 10), exact=True), "Anneau") == 600_000
-    assert pd_isna(pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 5), exact=True), "Anneau"))
-    assert pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 5)), "Anneau") == 600_000  # au moins 5 : toujours trouvé
+    # L'over reste « au moins N au-dessus du jet parfait », même si exact est demandé : l'annonce à 260 passe pour +5.
+    assert pick(forge.ranking(conn, ws, forge.OVER, over=(VITA, 5), exact=True), "Anneau") == 600_000
 
 
 def test_filter_exact():

@@ -1611,13 +1611,13 @@ async function forgeRanking() {
   if (ui.effect === null && first.lines.length) ui.effect = (first.lines.find((x) => x.name === '% Critique') || first.lines[0]).id;
   const exact = ui.exact ? '&exact=1' : '';
   const query = ui.criterion === 'exo' ? `criterion=exo&exo=${ui.exo}` + (ui.exoValue ? `&exo_value=${ui.exoValue}${exact}` : '')
-    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}${exact}` : 'criterion=saved';
+    : ui.criterion === 'over' ? `criterion=over&effect=${ui.effect}&amount=${ui.amount}` : 'criterion=saved';
   const data = await cached(`ranking-${query}`, `/api/forge/ranking?${query}`);
   const set = (patch) => { Object.assign(ui, patch); refresh(); };
   const exoName = (first.exos.find((x) => x.id === ui.exo) || {}).name || 'exo';
   const lineName = (first.lines.find((x) => x.id === ui.effect) || {}).name || 'caractéristique';
   const label = ui.criterion === 'exo' ? `Avec exo ${exoName}` + (ui.exoValue ? ` à ${ui.exoValue}${ui.exact ? '' : ' ou plus'}` : '')
-    : ui.criterion === 'over' ? `${lineName} à +${ui.amount}${ui.exact ? '' : ' ou plus'}` : 'Selon mes critères';
+    : ui.criterion === 'over' ? `${lineName} à +${ui.amount} ou plus` : 'Selon mes critères';
   const key = ui.start === 'base' ? 'Prime sur la base' : 'Gain sur le craft';
 
   const typeCounts = new Map();
@@ -1652,7 +1652,7 @@ async function forgeRanking() {
         first.lines.map((x) => h('option', { value: x.id, selected: x.id === ui.effect }, `${x.name} · ${x.count} objet${x.count > 1 ? 's' : ''}`)))),
     ui.criterion === 'over' && h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 'rank-amount' }, 'Au-dessus du jet parfait'),
       h('input', { id: 'rank-amount', type: 'number', min: 1, value: ui.amount, class: 'set', onchange: (e) => set({ amount: Math.max(1, Number(e.target.value) || 1) }) })),
-    ((ui.criterion === 'exo' && ui.exoValue) || ui.criterion === 'over') && h('label', { class: 'check', title: 'Coché : seulement la valeur demandée. Décoché : cette valeur ou plus.' },
+    ui.criterion === 'exo' && ui.exoValue && h('label', { class: 'check', title: 'Coché : seulement la valeur demandée. Décoché : cette valeur ou plus.' },
       h('input', { type: 'checkbox', checked: !!ui.exact, onchange: (e) => set({ exact: e.target.checked }) }), 'Valeur exacte'),
     h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'rank-type' }, "Type d'objet"),
       h('select', { id: 'rank-type', class: ui.type ? 'set' : '', onchange: (e) => set({ type: e.target.value }) },

@@ -1636,7 +1636,7 @@ class Api:
     ) -> dict:
         """criterion : « saved » (critères de chaque objet), « exo » (+ exo_value), ou « over » (effect + amount).
 
-        exact : la valeur de l'exo ou de l'over doit être pile celle demandée.
+        exact : l'exo doit avoir pile la valeur demandée.
 
         Le classement relit toutes les annonces de tous les équipements : il est gardé en mémoire tant que
         ni les données, ni la configuration, ni les critères enregistrés n'ont changé.

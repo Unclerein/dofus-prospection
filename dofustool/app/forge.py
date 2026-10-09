@@ -243,7 +243,7 @@ def ranking(
     over : (caractéristique, valeur au-dessus du jet parfait). Les objets qui n'ont pas cette
     caractéristique de base sont écartés : ce serait un exo, pas un over.
     exo_value : valeur voulue de l'exo (None : n'importe laquelle).
-    exact : la valeur de l'exo ou de l'over doit être celle demandée, pas seulement l'atteindre.
+    exact : l'exo doit avoir pile la valeur demandée, pas seulement l'atteindre.
     """
     names = effect_names(conn)
     rows = []
@@ -256,7 +256,7 @@ def ranking(
             lines = base_lines(template)
             if over is None or over[0] not in lines:
                 continue
-            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]}, exact=exact)
+            flt: Filter | None = Filter({over[0]: lines[over[0]][1] + over[1]})
         elif criterion == PERFECT:
             flt: Filter | None = perfect_filter(template)
         elif criterion == EXO:
