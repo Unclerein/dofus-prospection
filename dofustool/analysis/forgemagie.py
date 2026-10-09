@@ -18,7 +18,6 @@ MARKERS = frozenset({MODIFIED_BY, CRAFTED_BY, NO_MORE_FM})
 # « Arme de chasse » : posée par une rune de chasse, sur une arme seulement, et en plus d'un éventuel exo.
 # Ce n'est donc ni une caractéristique ni un exo comme les autres : une propriété à part, lue comme telle.
 HUNTING = 795
-HUNTING_RUNE = 10057  # l'objet « Rune de chasse », pour son icône
 WEAPON_TYPES = frozenset({"Arc", "Baguette", "Bâton", "Dague", "Épée", "Faux", "Hache", "Lance", "Marteau", "Pelle"})
 
 Template = dict[int, tuple[int, int]]

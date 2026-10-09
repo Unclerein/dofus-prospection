@@ -41,10 +41,15 @@ EFFECT_ICON_ALIASES = {
 DEFAULT_PORT = 8600
 
 
+# Effets sans caractéristique, dont le jeu montre pourtant une icône (le couteau rouge d'« Arme de chasse »).
+OTHER_EFFECT_ICONS = {"armeChasse": "https://dofusdb.fr/icons/effects/armeChasse.png"}
+
+
 def fetch_effect_icon(asset: str, directory: Path = ICON_DIR) -> bytes | None:
     """Image d'une caractéristique (vitalité, force…), avec le même cache que les images d'items."""
     remote = EFFECT_ICON_ALIASES.get(asset, asset)
-    return fetch_icon(asset, directory / "effects", EFFECT_ICON_URL.format(asset=remote))
+    url = OTHER_EFFECT_ICONS.get(asset) or EFFECT_ICON_URL.format(asset=remote)
+    return fetch_icon(asset, directory / "effects", url)
 
 
 def fetch_icon(icon_id: int | str, directory: Path = ICON_DIR, url: str | None = None) -> bytes | None:

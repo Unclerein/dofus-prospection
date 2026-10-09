@@ -17,7 +17,7 @@ import pandas as pd
 
 from .. import ankama, config, db, ganymede
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
-from ..analysis.forgemagie import HUNTING_RUNE, MARKERS, WEAPON_TYPES, Filter, base_lines, classify
+from ..analysis.forgemagie import MARKERS, WEAPON_TYPES, Filter, base_lines, classify
 from ..analysis import jobxp
 from ..analysis.prices import PriceRef
 from ..analysis.stock import Stock, stock_crafts
@@ -1605,7 +1605,6 @@ class Api:
                     "filter": db.load_fm_filter(conn, item_id),
                     # Une rune de chasse ne se pose que sur une arme : le critère n'est proposé que là.
                     "weapon": state["meta"].get(item_id, (None, None))[0] in WEAPON_TYPES,
-                    "hunting_icon": state["icons"].get(HUNTING_RUNE),
                 }
             )
         finally:
