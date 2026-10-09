@@ -48,21 +48,16 @@ def root(tmp_path):
 
 def test_guides_put_the_ones_in_progress_first(root, tmp_path):
     found = ganymede.guides(root)
-    assert [(g.id, g.name, g.steps, g.current_step, g.started, g.done) for g in found] == [
-        (7, "[GP7]  Guide  test", 4, 1, True, False),
-        (8, "Autre guide", 1, 0, False, False),  # avancé par un autre profil : pas commencé pour celui-ci
+    assert [(g.id, g.name, g.steps, g.current_step, g.started, g.done, g.listed) for g in found] == [
+        (7, "[GP7]  Guide  test", 4, 1, True, False, False),
+        (8, "Autre guide", 1, 0, False, False, False),  # avancé par un autre profil : pas commencé pour celui-ci
     ]
     assert ganymede.guides(tmp_path / "absent") == []
 
 
-def test_needs_without_an_opening_list_read_the_whole_text(root):
-    """Guide sans liste de ressources au début : tout le texte est lu, chaque besoin compté une fois."""
-    # Tout le guide : 15 du 3 (le texte en demande plus que la liste), 1 du 2 (annoncé puis donné), 1 000 du 1.
-    whole = ganymede.needs(7, root, from_start=True)
-    assert whole.items == {1: 1_000, 2: 1, 3: 15, 500: 4, 999_999: 1} and not whole.listed
-    # À partir de l'étape en cours : la liste à cocher est passée, la balise de quête n'est pas un objet.
-    assert ganymede.needs(7, root).items == {2: 1, 3: 15, 500: 4, 999_999: 1}
-    assert ganymede.needs(8, root).items == {1: 1_000, 2: 1, 3: 10}
+def test_a_guide_without_an_opening_list_asks_for_nothing(root):
+    """Pas de liste de ressources au début : rien à réunir, même si le texte cite des objets."""
+    assert ganymede.needs(7, root) is None and ganymede.needs(7, root, from_start=True) is None
     assert ganymede.needs(9, root) is None and ganymede.needs(404, root) is None
 
 
@@ -85,7 +80,7 @@ def test_the_opening_list_is_the_only_source(root):
     (root / "guides" / "7.json").write_text(json.dumps({"id": 7, "name": "Guide à liste", "steps": steps}), encoding="utf-8")
     (root / "guides" / "gp" / "7.json").unlink()
     whole = ganymede.needs(7, root, from_start=True)
-    assert whole.listed and whole.items == {1: 15, 2: 1, 3: 5}  # ni le Dofus, ni l'objet ramassé, ni la liste de l'étape 5
+    assert whole.items == {1: 15, 2: 1, 3: 5} and whole.peak == {1: 10, 2: 1, 3: 3}  # ni le Dofus, ni l'objet ramassé, ni la liste de l'étape 5
     assert ganymede.needs(7, root).items == {1: 15, 2: 1, 3: 5}  # étape 1 : aucune quête finie
     conf = json.loads((root / "conf.json").read_text(encoding="utf-8"))
     conf["profiles"][1]["progresses"][0]["currentStep"] = 5  # la fin de la première quête est derrière
@@ -96,14 +91,22 @@ def test_the_opening_list_is_the_only_source(root):
 def test_a_guide_becomes_a_workshop_list(app_db, root):  # noqa: F811
     api = Api(app_db)
     api.ganymede_dir = root
-    assert [g["id"] for g in api.ganymede_guides()["guides"]] == [7, 8]
+    assert api.ganymede_guides()["guides"] == []  # aucun des deux guides n'a de liste de ressources
+    with pytest.raises(ValueError):
+        api.workshop_action({"action": "ganymede", "guide": 7})
+    steps = [
+        {"web_text": "<p>Liste des ressources :</p>"
+                     f'<p>Première quête :</p><ul data-type="taskList">{box("15 " + tag(3))}{box(tag(500))}{box(tag(999_999))}</ul>'
+                     f'<p>Seconde quête :</p><ul data-type="taskList">{box("2 " + tag(3))}{box(tag(500))}</ul>'},
+        *STEPS,
+    ]
+    (root / "guides" / "gp" / "7.json").write_text(json.dumps({"id": 7, "name": "[GP7]  Guide  test", "steps": steps}), encoding="utf-8")
+    assert [g["id"] for g in api.ganymede_guides()["guides"]] == [7]
     done = api.workshop_action({"action": "ganymede", "guide": 7})
-    assert done["skipped"] == 1 and done["listed"] is False  # l'objet inconnu de la base ; guide sans liste au début
+    assert done["skipped"] == 1  # l'objet inconnu de la base
     (imported,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]]
     assert imported["name"] == "[GP7] Guide test"
-    assert sorted((goal["item_id"], goal["quantity"]) for goal in imported["goals"]) == [(2, 1), (3, 15), (500, 4)]
-    whole = api.workshop_action({"action": "ganymede", "guide": 7, "whole": True})
-    (imported,) = [entry for entry in api.workshop()["lists"] if entry["id"] == whole["list"]]
-    assert (1, 1_000) in {(goal["item_id"], goal["quantity"]) for goal in imported["goals"]}
+    # L'équipement 500, demandé par les deux quêtes, est le même exemplaire ; la ressource 3 s'additionne.
+    assert sorted((goal["item_id"], goal["quantity"]) for goal in imported["goals"]) == [(3, 17), (500, 1)]
     with pytest.raises(ValueError):
         api.workshop_action({"action": "ganymede", "guide": 404})

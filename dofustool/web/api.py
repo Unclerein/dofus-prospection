@@ -926,6 +926,7 @@ class Api:
             "guides": [
                 {"id": g.id, "name": g.name, "steps": g.steps, "current_step": g.current_step, "started": g.started, "done": g.done}
                 for g in ganymede.guides(self.ganymede_dir)
+                if g.listed  # sans liste de ressources au début, un guide ne demande rien à réunir
             ]
         }
 
@@ -980,10 +981,9 @@ class Api:
                     if item_id in tradable
                 ][:200]
                 if not rows:
-                    raise ValueError("aucun objet à acheter dans ce qu'il reste de ce guide")
+                    raise ValueError("plus rien à réunir pour ce guide")
                 name = " ".join(found.name.split())[:80]
-                # listed : faux si le guide n'a pas de liste de ressources au début (objets lus dans tout son texte).
-                return {"list": db.workshop_create(conn, name, rows, now), "skipped": len(wanted.items) - len(rows), "listed": wanted.listed}
+                return {"list": db.workshop_create(conn, name, rows, now), "skipped": len(wanted.items) - len(rows)}
             if action == "import":
                 # Liste venue d'ailleurs (un stuff Dofusbook) : des identifiants d'objets du jeu, un exemplaire
                 # de chaque. Ceux que cette base ne connaît pas sont laissés de côté, et comptés.

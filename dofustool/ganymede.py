@@ -10,8 +10,7 @@ quantité quand il en faut plusieurs (« 10 [Dagues de Boisaille] »).
 La plupart des guides s'ouvrent sur la liste des ressources à prévoir, quête par quête : c'est elle qui
 fait foi, et rien d'autre n'est retenu (le reste du texte cite aussi des récompenses, des objets de
 quête, des prérequis). Une quête que le joueur a déjà terminée n'est plus comptée. Un guide sans cette
-liste est lu en entier, faute de mieux : un même besoin y est souvent écrit deux fois (à préparer, puis
-à l'étape où l'objet sert), et l'on retient pour chaque objet le plus grand des deux totaux.
+liste ne demande rien à réunir : il n'est pas proposé.
 
 C'est une lecture du texte d'un guide, pas une donnée exacte : à relire avant d'acheter.
 """
@@ -45,6 +44,7 @@ class Guide:
     steps: int
     current_step: int  # étape où en est le joueur (0 : pas commencé)
     updated_at: str  # dernière progression, texte ISO ou ""
+    listed: bool = True  # le guide s'ouvre sur une liste de ressources à prévoir
 
     @property
     def started(self) -> bool:
@@ -95,7 +95,9 @@ def guides(root: Path | None = None) -> list[Guide]:
             continue
         state = progress.get(guide_id, {})
         current = state.get("currentStep") if isinstance(state.get("currentStep"), int) else 0
-        out.append(Guide(guide_id, str(content.get("name") or f"Guide {guide_id}"), len(content["steps"]), current, str(state.get("updatedAt") or "")))
+        name = str(content.get("name") or f"Guide {guide_id}")
+        listed = _opening_sections(content["steps"]) is not None
+        out.append(Guide(guide_id, name, len(content["steps"]), current, str(state.get("updatedAt") or ""), listed))
     out.sort(key=lambda g: g.name.lower())
     out.sort(key=lambda g: g.updated_at, reverse=True)
     out.sort(key=lambda g: not (g.started and not g.done))
@@ -155,14 +157,13 @@ def _finished_quests(steps: list, current: int) -> set[str]:
 @dataclass(frozen=True, slots=True)
 class Needs:
     items: dict[int, int]  # objet -> quantité, les demandes de toutes les quêtes ajoutées
-    listed: bool  # vrai : tiré de la liste des ressources du début ; faux : guide sans liste, lu en entier
     # objet -> plus grosse demande d'une seule quête. Pour ce qu'une quête demande d'avoir sur soi sans le
     # consommer (un Dofus, un équipement), c'est le vrai besoin : le même exemplaire sert d'une quête à l'autre.
     peak: dict[int, int] = field(default_factory=dict)
 
 
 def needs(guide_id: int, root: Path | None = None, from_start: bool = False) -> Needs | None:
-    """Ce que demande ce qu'il reste du guide, ou None s'il est introuvable.
+    """Ce que demande ce qu'il reste du guide, ou None s'il est introuvable ou sans liste de ressources.
 
     from_start : tout le guide, sans tenir compte de la progression. Les cases cochées ne sont pas lues : leur
     numérotation ne correspond pas toujours au texte du guide téléchargé, et l'atelier déduit de toute façon le stock.
@@ -191,16 +192,5 @@ def needs(guide_id: int, root: Path | None = None, from_start: bool = False) -> 
             for item_id, quantity in asked.items():
                 items[item_id] = items.get(item_id, 0) + quantity
                 peak[item_id] = max(peak.get(item_id, 0), quantity)
-        return Needs(items, True, peak)
-    listed: dict[int, int] = {}
-    told: dict[int, int] = {}
-    for index, step in enumerate(steps):
-        if index < current or not isinstance(step, dict):
-            continue
-        text = step.get("web_text") or ""
-        for task in TASK.findall(text):
-            for item_id, quantity in _mentions(task):
-                listed[item_id] = listed.get(item_id, 0) + quantity
-        for item_id, quantity in _mentions(TASK.sub("", text)):
-            told[item_id] = told.get(item_id, 0) + quantity
-    return Needs({item_id: max(listed.get(item_id, 0), told.get(item_id, 0)) for item_id in listed.keys() | told.keys()}, False)
+        return Needs(items, peak)
+    return None  # pas de liste de ressources au début : ce guide ne demande rien à réunir
