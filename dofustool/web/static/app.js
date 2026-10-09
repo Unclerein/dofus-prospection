@@ -763,11 +763,13 @@ async function pageIgnored() {
 // ---------------------------------------------------------------- page Crafts
 
 const SOLD_TITLE = 'Quantité vendue, lue dans le cours du marché de l\u2019objet. Connue seulement si toi ou un ami du groupe avez ouvert ce cours en jeu.';
+const SOLD_ESTIMATED = 'Ordre de grandeur : le cours a été relevé une fois, et les ventes faites depuis sont déduites des prix moyens. Le vrai chiffre peut s’en écarter du simple au double. Rouvre le cours en jeu pour un chiffre exact.';
 
 /** Quantités vendues sur 7 jours, et sur 30 jours en dessous. */
 function soldCell(r) {
   if (r['Vendus 7 j'] === null || r['Vendus 7 j'] === undefined) return h('td', { class: 'muted small', title: SOLD_TITLE }, 'non consulté');
-  return h('td', { title: SOLD_TITLE }, h('div', { class: 'soft' }, fmt(r['Vendus 7 j'])), r['Vendus 30 j'] !== null && r['Vendus 30 j'] !== undefined && h('div', { class: 'source' }, `${fmt(r['Vendus 30 j'])} sur 30 j`));
+  const estimated = !!r['Vendus estimés'];
+  return h('td', { title: estimated ? SOLD_ESTIMATED : SOLD_TITLE }, h('div', { class: 'soft' }, (estimated ? '≈ ' : '') + fmt(r['Vendus 7 j'])), r['Vendus 30 j'] !== null && r['Vendus 30 j'] !== undefined && h('div', { class: 'source' }, `${fmt(r['Vendus 30 j'])} sur 30 j`));
 }
 
 async function pageCrafts() {

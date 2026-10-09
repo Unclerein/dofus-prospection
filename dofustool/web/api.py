@@ -1779,6 +1779,7 @@ class Api:
                 row["mage"] = job_names.get(MAGE_OF.get(maker))
                 row["Vendus 7 j"] = ws.prices.liquidity(item_id).qty_7d
                 row["Vendus 30 j"] = ws.prices.sold_30d(item_id)
+                row["Vendus estimés"] = ws.prices.rebuilt_at(item_id) is not None
             mine = state["cfg"].jobs
             return {
                 "rows": rows,

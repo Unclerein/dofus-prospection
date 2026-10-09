@@ -39,7 +39,7 @@ def build_workspace(conn: sqlite3.Connection, cfg: Config, now: float) -> Worksp
     return Workspace(items, prices, calculator, dict(conn.execute("SELECT id, name FROM jobs")), unknown, now)
 
 
-def _craft_row(r: CraftResult, now: float, sold_30d: int | None = None) -> dict:
+def _craft_row(r: CraftResult, now: float, sold_30d: int | None = None, sold_rebuilt: bool = False) -> dict:
     notes = list(r.flags)
     if r.crafted_ingredients:
         notes.append(f"{len(r.crafted_ingredients)} sous-craft(s)")
@@ -56,6 +56,8 @@ def _craft_row(r: CraftResult, now: float, sold_30d: int | None = None) -> dict:
         "Vendus 7 j": r.liquidity.qty_7d,
         "Vendus 24 h": r.liquidity.qty_24h,
         "Vendus 30 j": sold_30d,
+        # Quantités en partie déduites des prix moyens depuis le dernier relevé du cours : un ordre de grandeur.
+        "Vendus estimés": sold_rebuilt,
         "Source du prix": r.sell.source if r.sell else None,
         "Lot du prix": r.sell.lot if r.sell else None,
         "Âge du prix (h)": round(r.sell.age_hours(now), 1) if r.sell else None,
@@ -67,7 +69,12 @@ def _craft_row(r: CraftResult, now: float, sold_30d: int | None = None) -> dict:
 
 def crafts_frame(conn: sqlite3.Connection, ws: Workspace) -> pd.DataFrame:
     """Une ligne par recette, déjà classée par marge pondérée par la liquidité."""
-    return pd.DataFrame([_craft_row(r, ws.now, ws.prices.sold_30d(r.item.id)) for r in rank_crafts(conn, ws.calculator)])
+    return pd.DataFrame(
+        [
+            _craft_row(r, ws.now, ws.prices.sold_30d(r.item.id), ws.prices.rebuilt_at(r.item.id) is not None)
+            for r in rank_crafts(conn, ws.calculator)
+        ]
+    )
 
 
 def filter_crafts(
