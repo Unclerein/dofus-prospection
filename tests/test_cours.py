@@ -268,3 +268,34 @@ def test_reference_too_close_or_absurd_quantity_is_not_a_sale(conn):
     # Une vraie vente, à bonne distance du prix moyen, reste lue.
     point = cours.step(window, D + 3 * HOUR, D + 4 * HOUR, 12_185_000, 16_200_000)
     assert point.qty == 3 and point.price == pytest.approx(16_150_000, rel=0.01)
+
+
+def test_a_new_capture_checks_what_was_deduced(conn):
+    """Le cours est relevé à nouveau : ce qui avait été déduit depuis le relevé précédent est comparé au réel."""
+    sales = history()
+    capture(conn, sales, D + 1 * HOUR)
+    hdv(conn, ITEM, 410_000, D + 1 * HOUR)
+    assert cours.check(conn)["points"] == 0
+    sales.append((D + 2.5 * HOUR, 410_000, 3))
+    snapshots(conn, {ITEM: sales}, [D + 2 * HOUR, D + 3 * HOUR])
+    cours.update(conn)
+    sales.append((D + 3.2 * HOUR, 410_000, 2))  # vendu après le dernier prix moyen traité : pas encore déduit
+    capture(conn, sales, D + 3.5 * HOUR)
+    cours.update(conn)
+    assert conn.execute("SELECT base_at, checked_at, real_qty, deduced_qty, shown FROM cours_checks").fetchall() == [
+        (D + 1 * HOUR, D + 3.5 * HOUR, 5, 3, 1)
+    ]
+    found = cours.check(conn)
+    assert (found["points"], found["sold"], found["quiet"], found["measured"]) == (1, 1, 0, False)
+    assert found["exact"] == 0 and found["double"] == 1 and found["missed"] == 0 and found["ratio"] == pytest.approx(0.6)
+    # Lendemain : le jour le plus ancien (4 ventes) est sorti de la fenêtre. Seule la vente de midi (3) est nouvelle.
+    snapshots(conn, {ITEM: sales}, [D + DAY + 1 * HOUR])
+    cours.update(conn)
+    capture(conn, sales, D + DAY + 2 * HOUR)
+    cours.update(conn)
+    assert conn.execute("SELECT real_qty FROM cours_checks WHERE checked_at = ?", (D + DAY + 2 * HOUR,)).fetchone() == (3,)
+    # Un intervalle presque jamais suivi (aucun prix moyen traité) est noté mais écarté de la mesure.
+    capture(conn, sales, D + DAY + 9 * HOUR)
+    cours.update(conn)
+    assert conn.execute("SELECT COUNT(*) FROM cours_checks").fetchone() == (3,)
+    assert cours.check(conn)["set_aside"] >= 1

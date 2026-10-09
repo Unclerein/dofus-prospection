@@ -2242,6 +2242,23 @@ function estimatePanel(s) {
         h('tbody', {}, row('fiable'), row('indicatif')))));
 }
 
+/** Ce que valent les quantités vendues déduites des prix moyens : comparées au réel à chaque cours rouvert. */
+function coursCheckPanel(s) {
+  const c = s.cours_check;
+  if (!c) return null;
+  const share = (value) => (value === null ? '—' : pct(value));
+  return h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Quantités vendues déduites'),
+      h('span', { class: 'muted small' }, c.points ? `${plural(c.points, 'contrôle', 'contrôles')}${c.measured ? '' : ' · trop peu pour conclure'}` : 'aucun contrôle pour l\u2019instant')),
+    c.points === 0 ? h('div', { class: 'empty' }, 'Entre deux ouvertures du cours d\u2019un objet, ses ventes sont déduites des prix moyens (affichées « ≈ »). Rouvre en jeu le cours d\u2019objets déjà consultés : chaque réouverture compare ce qui avait été déduit au réel, et la mesure apparaîtra ici.')
+      : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 640px' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Compte exact'), h('th', { title: `Parmi les ${c.sold} objets vendus entre les deux relevés` }, 'Du simple au double'), h('th', { title: 'Objets vendus dont aucune vente n\u2019a été vue' }, 'Ventes ratées'),
+          h('th', { title: `Parmi les ${c.quiet} objets sans aucune vente` }, 'Fausses ventes'), h('th', { title: 'Total déduit rapporté au total réellement vendu' }, 'Déduit / réel'))),
+        h('tbody', {}, h('tr', {}, h('td', {}, share(c.exact)), h('td', {}, share(c.double)), h('td', {}, share(c.missed)), h('td', {}, share(c.false_sales)),
+          h('td', {}, c.ratio === null ? '—' : `× ${c.ratio.toFixed(2).replace('.', ',')}`))))),
+    c.set_aside > 0 && h('div', { class: 'panel-foot' }, h('span', {}, `${plural(c.set_aside, 'contrôle écarté', 'contrôles écartés')} : intervalle trop peu suivi, ou quantités qui n\u2019étaient pas affichées.`)));
+}
+
 async function pageStatus() {
   S.status = await api('/api/status');
   renderCapture();
@@ -2267,6 +2284,7 @@ async function pageStatus() {
       h('table', {}, h('tbody', {}, rows.map(([label, value]) => h('tr', {}, h('td', { class: 'l soft' }, label), h('td', { style: 'font-weight: 500' }, value)))))),
     sharePanelStatus(s),
     estimatePanel(s),
+    coursCheckPanel(s),
     h('section', { class: 'panel pad' }, h('h2', { style: 'margin-bottom: 12px' }, 'Limites à garder en tête'),
       h('ul', { class: 'list' },
         h('li', {}, 'Les prix moyens sont théoriques : lissés, en retard sur le marché, sans distinction de lot ni de forgemagie.'),

@@ -25,6 +25,9 @@ Limites, à afficher : un objet bon marché et très échangé ne fait pas bouge
 arrondi (aucun signal) ; les heures sans relevé se fondent en un seul intervalle ; sans annonce HDV
 récente, le partage entre prix et quantité est incertain ; la sortie du jour le plus ancien est
 supposée à minuit UTC, ce qui n'a été observé qu'indirectement.
+
+Contrôle : chaque fois que le cours d'un objet est relevé à nouveau, ce qui avait été déduit depuis le
+relevé précédent est comparé au réel et noté (cours_checks). `check` en tire ce que vaut la méthode.
 """
 import sqlite3
 from dataclasses import dataclass
@@ -41,6 +44,8 @@ MAX_PACE = 15.0  # une vente déduite à plus de 15 fois le rythme moyen du mois
 MIN_BURST = 10.0  # … sauf petite quantité : dix exemplaires d'un coup restent plausibles pour un objet rare
 HDV_FRESH_HOURS = 24.0  # une annonce HDV sert de p0 si elle a été vue à moins de 24 h du relevé
 LOOKBACK_HOURS = 48.0  # temps 1 : relevés pris en compte, en remontant depuis le plus récent
+MIN_COVERED = 0.8  # contrôle : part de l'intervalle entre deux relevés qui doit avoir été suivie
+MIN_CHECKS = 20  # contrôle : en dessous, trop peu de comparaisons pour parler de mesure
 
 
 # --- temps 1 : cours relatif -------------------------------------------------
@@ -223,7 +228,7 @@ def update(conn: sqlite3.Connection, fresh_hours: float = HDV_FRESH_HOURS) -> in
     bases = dict(
         conn.execute("SELECT item_id, MAX(captured_at) FROM market_history WHERE period = ? GROUP BY item_id", (GRAIN_DAY,))
     )
-    states = {row[0]: row[1:] for row in conn.execute("SELECT item_id, base_at, processed_ts, last_price FROM cours_state")}
+    states = {row[0]: row[1:4] for row in conn.execute("SELECT item_id, base_at, processed_ts, last_price FROM cours_state")}
     asks = _asks(conn)
     added = 0
     with conn:
@@ -233,9 +238,16 @@ def update(conn: sqlite3.Connection, fresh_hours: float = HDV_FRESH_HOURS) -> in
         for item_id, base_at in bases.items():
             state = states.get(item_id)
             fresh = state is None or state[0] != base_at
+            base_qty = None
             if fresh:
+                if state is not None:
+                    _record_check(conn, item_id, state[0], state[1], base_at)
                 conn.execute("DELETE FROM cours_points WHERE item_id = ?", (item_id,))
                 state = (base_at, base_at, _first_price(conn, item_id, base_at))
+                base_qty = conn.execute(
+                    "SELECT COALESCE(SUM(COALESCE(qty_sold, 0)), 0) FROM market_history WHERE item_id = ? AND period = ? AND captured_at = ?",
+                    (item_id, GRAIN_DAY, base_at),
+                ).fetchone()[0]
             _, processed, last_price = state
             rows = conn.execute(
                 "SELECT s.ts, p.price FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
@@ -263,13 +275,73 @@ def update(conn: sqlite3.Connection, fresh_hours: float = HDV_FRESH_HOURS) -> in
                     min_qty = sensitivity(window, avg, ref)
                 processed = ts
             conn.execute(
-                "INSERT INTO cours_state VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (item_id) DO UPDATE SET "
+                "INSERT INTO cours_state (item_id, base_at, processed_ts, last_price, month_qty, min_qty, base_qty) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (item_id) DO UPDATE SET "
                 "base_at = excluded.base_at, processed_ts = excluded.processed_ts, last_price = excluded.last_price, "
                 "month_qty = COALESCE(excluded.month_qty, month_qty), min_qty = CASE WHEN excluded.month_qty IS NULL "
-                "THEN min_qty ELSE excluded.min_qty END",
-                (item_id, base_at, processed, last_price, month_qty, min_qty),
+                "THEN min_qty ELSE excluded.min_qty END, base_qty = COALESCE(excluded.base_qty, base_qty)",
+                (item_id, base_at, processed, last_price, month_qty, min_qty, base_qty),
             )
     return added
+
+
+def _record_check(conn: sqlite3.Connection, item_id: int, old_base: float, processed: float, new_base: float) -> None:
+    """Un nouveau relevé du cours arrive : note ce qui avait été déduit depuis le précédent, face au réel.
+
+    Réel = quantité de la fenêtre au nouveau relevé, moins celle du relevé précédent, plus ce que contenaient
+    les jours sortis de la fenêtre entre-temps (ils restent enregistrés : le nouveau relevé ne les réécrit pas).
+    """
+    row = conn.execute("SELECT base_qty, month_qty, min_qty FROM cours_state WHERE item_id = ?", (item_id,)).fetchone()
+    if row is None or row[0] is None or new_base <= old_base:
+        return
+    base_qty, month_qty, min_qty = row
+    first_old = (int(old_base // DAY) - WINDOW_DAYS + 1) * int(DAY)
+    first_new = (int(new_base // DAY) - WINDOW_DAYS + 1) * int(DAY)
+    total = lambda where, *args: conn.execute(  # noqa: E731
+        f"SELECT COALESCE(SUM(COALESCE(qty_sold, 0)), 0) FROM market_history WHERE item_id = ? AND period = ? AND {where}", (item_id, GRAIN_DAY, *args)
+    ).fetchone()[0]
+    dropped = total("bucket_ts >= ? AND bucket_ts < ?", first_old, first_new)
+    real = total("captured_at = ?", new_base) - (base_qty - dropped)
+    if real < 0:
+        return  # relevés incohérents entre eux (série incomplète) : rien à en tirer
+    deduced, read, lost = conn.execute(
+        "SELECT COALESCE(SUM(qty), 0), COALESCE(SUM(qty > 0), 0), COALESCE(SUM(qty = 0), 0) FROM cours_points WHERE item_id = ? AND end_ts <= ?",
+        (item_id, new_base),
+    ).fetchone()
+    covered = max(0.0, min(processed, new_base) - old_base) / (new_base - old_base)
+    shown = processed > old_base and not Rebuilt(old_base, processed, month_qty, min_qty, ()).blind and lost <= read
+    conn.execute(
+        "INSERT OR REPLACE INTO cours_checks VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (item_id, old_base, new_base, covered, int(real), int(deduced), int(shown)),
+    )
+
+
+def check(conn: sqlite3.Connection) -> dict:
+    """Ce que valent les quantités déduites, d'après les contrôles notés : seulement celles qui étaient affichées
+    et dont l'intervalle a été suivi presque en entier.
+
+    points : comparaisons ; exact : part où le compte est le bon ; double : parmi les objets vendus, part estimée
+    du simple au double ; missed : parmi eux, part où rien n'a été vu ; false_sales : parmi les objets non vendus,
+    part où des ventes ont été déduites ; ratio : total déduit sur total réel.
+    """
+    rows = conn.execute("SELECT real_qty, deduced_qty FROM cours_checks WHERE shown = 1 AND covered >= ?", (MIN_COVERED,)).fetchall()
+    waiting = conn.execute("SELECT COUNT(*) FROM cours_checks").fetchone()[0] - len(rows)
+    out = {"points": len(rows), "set_aside": waiting, "measured": len(rows) >= MIN_CHECKS,
+           "exact": None, "double": None, "missed": None, "false_sales": None, "ratio": None, "sold": 0, "quiet": 0}  # fmt: skip
+    if not rows:
+        return out
+    sold = [(real, deduced) for real, deduced in rows if real > 0]
+    quiet = [deduced for real, deduced in rows if real == 0]
+    real_total = sum(real for real, _ in rows)
+    out.update(
+        exact=sum(real == deduced for real, deduced in rows) / len(rows),
+        sold=len(sold), quiet=len(quiet),
+        double=sum(real / 2 <= deduced <= real * 2 for real, deduced in sold) / len(sold) if sold else None,
+        missed=sum(deduced == 0 for _, deduced in sold) / len(sold) if sold else None,
+        false_sales=sum(deduced > 0 for deduced in quiet) / len(quiet) if quiet else None,
+        ratio=sum(deduced for _, deduced in rows) / real_total if real_total else None,
+    )  # fmt: skip
+    return out
 
 
 @dataclass(frozen=True, slots=True)

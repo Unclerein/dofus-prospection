@@ -322,6 +322,7 @@ class Api:
                         "reliable": sum(1 for e in state["ws"].prices.estimates.values() if e.confidence == "fiable"),
                         "check": state["ws"].prices.estimate_check,
                     },
+                    "cours_check": cours.check(conn),
                     # Quantités possédées, pour le badge des icônes : {item_id: [inventaire, banque]}.
                     "owned": {item_id: [o.inventory, o.bank, o.havre] for item_id, o in state["stock"].items().items()},
                 }

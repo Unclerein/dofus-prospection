@@ -130,8 +130,21 @@ CREATE TABLE IF NOT EXISTS cours_state (
     processed_ts REAL NOT NULL,  -- dernier relevé de prix moyens traité
     last_price   REAL,           -- dernier prix de vente connu, sert de référence sans annonce HDV
     month_qty    INTEGER,        -- quantité vendue sur 30 j, d'après la reconstitution
-    min_qty      REAL            -- plus petite vente visible dans le prix moyen arrondi
+    min_qty      REAL,           -- plus petite vente visible dans le prix moyen arrondi
+    base_qty     INTEGER         -- quantité vendue sur la fenêtre au relevé de départ, pour le contrôle ci-dessous
 );
+-- Contrôle de la reconstitution : quand le cours d'un objet est relevé à nouveau, ce qui avait été déduit des
+-- prix moyens depuis le relevé précédent est comparé à ce qui s'est réellement vendu.
+CREATE TABLE IF NOT EXISTS cours_checks (
+    item_id     INTEGER NOT NULL,
+    base_at     REAL NOT NULL,     -- relevé précédent
+    checked_at  REAL NOT NULL,     -- nouveau relevé
+    covered     REAL NOT NULL,     -- part de l'intervalle couverte par des prix moyens traités (0 à 1)
+    real_qty    INTEGER NOT NULL,
+    deduced_qty INTEGER NOT NULL,
+    shown       INTEGER NOT NULL,  -- 1 si ces quantités déduites étaient affichées (objet ni aveugle ni décroché)
+    PRIMARY KEY (item_id, checked_at)
+) WITHOUT ROWID;
 -- Un point par intervalle entre deux relevés de prix moyens où une vente a été détectée.
 -- qty = 0 : resynchronisation (signe incohérent ou prix absurde), total est alors l'écart rattrapé.
 CREATE TABLE IF NOT EXISTS cours_points (
@@ -377,6 +390,14 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
     if columns and "ref" not in columns:  # renseignée pour les anciens achats au prochain rejeu de l'archive
         conn.execute("ALTER TABLE trades ADD COLUMN ref INTEGER")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cours_state)")}
+    if columns and "base_qty" not in columns:
+        conn.execute("ALTER TABLE cours_state ADD COLUMN base_qty INTEGER")
+        # Tant que le relevé de départ n'a pas été remplacé, sa quantité se relit dans le cours enregistré.
+        conn.execute(
+            "UPDATE cours_state SET base_qty = (SELECT SUM(COALESCE(qty_sold, 0)) FROM market_history m "
+            "WHERE m.item_id = cours_state.item_id AND m.period = 'day' AND m.captured_at = cours_state.base_at)"
+        )
     columns = {row[1] for row in conn.execute("PRAGMA table_info(fm_items)")}
     if columns and "lot_uid" not in columns:  # renseigné au prochain relevé de l'onglet Vendre
         conn.execute("ALTER TABLE fm_items ADD COLUMN lot_uid INTEGER")
