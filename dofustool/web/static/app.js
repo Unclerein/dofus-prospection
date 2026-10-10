@@ -2817,6 +2817,14 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 14, date: '10 octobre 2026', title: 'Rune de chasse reconnue sur les armes', hash: '#/forge/ranking', go: 'Voir le classement', points: [
+    ['Rune de chasse :', 'une arme qui porte « Arme de chasse » grâce à une rune n\u2019est plus confondue avec une arme de base ni avec un simple exo. Ses annonces s\u2019affichent « chasse » ou « exo + chasse ».'],
+    ['Chercher avec ou sans :', 'dans le classement de forgemagie, un critère « Rune de chasse » à côté de l\u2019exo ou de l\u2019over. Il est sur « Sans » au départ : un exo désigne alors un exo seul. « Avec » ne garde que les armes.'],
+    ['Par objet :', 'le même critère sur la page d\u2019une arme (arc, baguette, bâton, dague, épée, faux, hache, lance, marteau, pelle). Il n\u2019apparaît pas sur les autres objets.'],
+    ['Au survol :', 'la ligne « Arme de chasse » figure dans l\u2019infobulle, sous les dégâts de l\u2019arme et sous l\u2019exo s\u2019il y en a un.'],
+    ['Prix plus justes :', 'une arme de chasse ne sert plus de prix « de base », et l\u2019estimation par annonces similaires ne la compare qu\u2019à d\u2019autres armes de chasse.'],
+    ['Atelier :', 'une croix masque le panneau « Importer un guide Ganymède » pour qui n\u2019utilise pas l\u2019application. Un bouton en bas de la colonne le fait revenir.'],
+  ] },
   { id: 13, date: '9 octobre 2026', title: 'Imports dans l\u2019atelier, données du jeu à jour', hash: '#/workshop', go: 'Voir l\u2019atelier', points: [
     ['Importer un stuff Dofusbook :', 'dans l\u2019Atelier, glisse le bouton « → Atelier Prospection » dans ta barre de favoris. Sur la page d\u2019un stuff Dofusbook, un clic sur ce favori crée la liste de ses objets.'],
     ['Importer un guide Ganymède :', 'la liste des ressources qu\u2019un guide demande de prévoir, sans les quêtes que tu as déjà terminées. Il faut l\u2019application Ganymède installée sur ce PC, avec le guide téléchargé dedans.'],
