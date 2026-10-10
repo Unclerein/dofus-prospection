@@ -620,7 +620,7 @@ tr.mine.focus td { background: color-mix(in srgb, var(--accent) 12%, transparent
 .guide-import { display: grid; gap: 10px; padding: 12px 18px 4px; }
 .guide-import select { width: 100%; min-width: 0; }
 .guide-import .btn { margin-top: 0; justify-content: center; }
-/* En-tête du panneau Ganymède : la croix reste à droite du titre, même dans la colonne étroite. */
+/* En-tête des panneaux d'import : la croix reste à droite du titre, même dans la colonne étroite. */
 .import-help .panel-head { flex-wrap: nowrap; align-items: center; gap: 8px; }
 .import-help .panel-head h2 { flex: 1 1 auto; min-width: 0; }
 .import-help .panel-head .icon-btn { flex: none; margin: 0; }

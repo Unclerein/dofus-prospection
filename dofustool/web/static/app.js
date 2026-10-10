@@ -535,13 +535,21 @@ async function pageWorkshop(r) {
         location.hash = `#/workshop/${done.list}`;
       } }, 'Créer la liste')),
     h('div', { class: 'source' }, 'Guides téléchargés dans l\u2019application Ganymède de ce PC (elle doit y être installée). La liste des ressources donnée au début du guide, sans les quêtes que tu as déjà terminées. Quantités lues dans le texte : à vérifier avant d\u2019acheter.'));
-  const importHelp = h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook')),
+  let bookHidden = false;
+  try { bookHidden = localStorage.getItem('dofustool.hideDofusbook') === '1'; } catch (error) { /* stockage indisponible */ }
+  const showBook = (shown) => { try { localStorage.setItem('dofustool.hideDofusbook', shown ? '0' : '1'); } catch (error) { /* stockage indisponible */ } refresh(); };
+  const importHelp = bookHidden ? h('button', { class: 'btn quiet', style: 'align-self: flex-start', onclick: () => showBook(true) }, 'Afficher l\u2019import Dofusbook')
+    : h('section', { class: 'panel import-help', 'aria-label': 'Importer un stuff Dofusbook' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Importer un stuff Dofusbook'),
+      h('button', { class: 'icon-btn', title: 'Masquer ce panneau (pour qui n\u2019utilise pas Dofusbook)', 'aria-label': 'Masquer l\u2019import Dofusbook', onclick: () => showBook(false) }, '×')),
     h('ol', {},
       h('li', {}, 'Glisse ce bouton dans ta barre de favoris : ', h('a', { class: 'btn', href: bookmarklet, title: 'À glisser dans la barre de favoris', onclick: (e) => { e.preventDefault(); notify('Glisse ce bouton dans ta barre de favoris, puis clique-le depuis la page d\u2019un stuff Dofusbook.'); } }, '→ Atelier Prospection')),
       h('li', {}, 'Ouvre la page d\u2019un stuff sur Dofusbook (public ou partagé par lien).'),
       h('li', {}, 'Clique le favori : la liste est créée dans l\u2019Atelier, qui s\u2019ouvre dessus.')),
     h('div', { class: 'source' }, 'Dofusbook ne se laisse pas lire par un programme : c\u2019est ton navigateur qui lit la page que tu regardes. Rien n\u2019est envoyé à Dofusbook.'));
+  // Sous « Mes listes » : les panneaux d'import affichés, puis les boutons qui font revenir ceux qu'on a masqués.
+  const imports = [[guideHidden, guideImport], [bookHidden, importHelp]];
+  const sideExtras = [...imports.filter(([hidden]) => !hidden), ...imports.filter(([hidden]) => hidden)].map(([, node]) => node);
   const side = h('section', { class: 'panel workshop-lists', 'aria-label': 'Listes' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Mes listes')),
     data.lists.map((l) => h('a', { class: 'list-row link' + (current && l.id === current.id ? ' on' : ''), href: `#/workshop/${l.id}` },
@@ -555,7 +563,7 @@ async function pageWorkshop(r) {
       h('button', { class: 'btn', onclick: create }, 'Créer')));
 
   if (!current) {
-    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...(guideHidden ? [importHelp, guideImport] : [guideImport, importHelp])), h('div', { class: 'panel empty' },
+    return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...sideExtras), h('div', { class: 'panel empty' },
       'Aucune liste pour l\u2019instant. Crée-en une à gauche, ou pars d\u2019une liste toute faite : les offrandes de l\u2019almanax depuis la page Aujourd\u2019hui, ou un plan de métier depuis la page Métiers.'))];
   }
 
@@ -650,7 +658,7 @@ async function pageWorkshop(r) {
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ressource'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
           h('tbody', {}, shown))));
 
-  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...(guideHidden ? [importHelp, guideImport] : [guideImport, importHelp])), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
+  return [head, h('div', { class: 'workshop' }, h('div', { class: 'workshop-side' }, side, ...sideExtras), h('div', { class: 'workshop-main' }, kpis, title, goals, lines))];
 }
 
 // ---------------------------------------------------------------- objets ignorés
