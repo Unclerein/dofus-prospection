@@ -164,3 +164,54 @@ def test_pipeline_stores_inventory_bank_and_merged(caplog):
     assert Stock(market).get(100).inventory == 2
     assert pipeline.archive.count() == 6  # tout reste dans l'archive brute
     market.close()
+
+
+# --- conteneurs de ressources ---------------------------------------------------
+
+def test_containers_are_counted_apart_from_the_real_stock(conn):  # noqa: F811
+    """Un sachet fermé n'est pas du stock : il est compté à part, avec ce qu'il faut ouvrir pour un craft."""
+    from dofustool.analysis.stock import Packed
+    from dofustool.staticdata import contents
+
+    conn.executemany(
+        "INSERT INTO items VALUES (?, ?, 1, ?, 1, 1, 0, 2)",
+        [(900, "Sachet de Blé", "Conteneur"), (901, "Sac de Blé", "Sac de ressources"), (902, "Essence de Blé", "Essence de gardien de donjon")],
+    )
+    # Seuls les deux types de paquets sont gardés ; ni l'essence, ni un conteneur ou un contenu inconnu de la base.
+    from dofustool.staticdata import effects
+
+    assert contents.due(conn)  # jamais lue
+    assert contents.store(conn, [(900, 1, 10), (901, 1, 50), (902, 1, 2), (900_000, 1, 10), (901, 800_000, 10)]) == 2
+    assert conn.execute("SELECT * FROM item_contents ORDER BY container_id").fetchall() == [(900, 1, 10), (901, 1, 50)]
+    assert not contents.due(conn)
+    effects.note_version(conn, "3.7.5.5", NOW)  # le jeu a changé : la liste est à relire
+    assert contents.due(conn)
+    contents.store(conn, [(900, 1, 10), (901, 1, 50)], effects.known_version(conn))
+    assert not contents.due(conn)
+    save(conn, db.INVENTORY, inventory((1, 3), (900, 4), (2, 7)), INV, 100.0)  # 3 Blé, 4 sachets, 7 Farine
+    save(conn, db.BANK, bank((901, 1), (4, 1)), BANK, 100.0)  # 1 sac, 1 Eau
+    stock = Stock(conn)
+    assert stock.get(1).total == 3  # le vrai stock ne bouge pas
+    packed = stock.packed(1)
+    assert packed.units == 4 * 10 + 50 and packed.containers == ((900, 10, 4), (901, 50, 1))
+    assert stock.packed(2) == Packed() and stock.contents[900] == (1, 10)
+    # Ouvrir le moins de conteneurs possible : le sac pour 50, un sachet de plus pour 55, rien si rien ne manque.
+    assert packed.to_open(0) == [] and packed.to_open(-5) == []
+    assert packed.to_open(7) == [(900, 1, 4)]
+    assert packed.to_open(50) == [(901, 1, 1)]
+    assert packed.to_open(55) == [(900, 1, 4), (901, 1, 1)]
+    assert packed.to_open(500) == [(900, 4, 4), (901, 1, 1)]  # tout ouvrir ne suffit pas : le reste s'achète
+
+    calc = CraftCalculator(load_items(conn), load_recipes(conn), PriceBook(conn, NOW, 24), 0.02)
+    farine = {c.result.item.name: c for c in stock_crafts(conn, calc, stock)}["Farine"]  # Farine = 2 Blé
+    assert farine.ingredients == [(1, 2, 3)] and farine.packed == {1: 90} and farine.craftable == 46 and farine.covered == 1
+
+
+def test_contents_parse():
+    from dofustool.staticdata.contents import parse
+
+    gives = lambda value, side: {"effectId": 209, "value": value, "diceNum": 0, "diceSide": side}  # noqa: E731
+    assert parse({"id": 16819, "possibleEffects": [gives(2331, 10)]}) == (16819, 2331, 10)
+    assert parse({"id": 1, "possibleEffects": [gives(2, 1), gives(3, 1)]}) is None  # un lot de plusieurs objets
+    assert parse({"id": 1, "possibleEffects": [{"effectId": 111, "value": 2, "diceSide": 1}]}) is None
+    assert parse({"id": 1, "possibleEffects": [gives(None, 10)]}) is None and parse({"id": 1}) is None

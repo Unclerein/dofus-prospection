@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import ankama, config, db, ganymede
+from ..staticdata import contents as item_contents
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, WEAPON_TYPES, Filter, base_lines, classify
 from ..analysis import jobxp
@@ -159,6 +160,12 @@ class Api:
                     log.info("Version du jeu connue de DofusDB changée : les fiches des équipements sont rafraîchies.")
             except Exception as exc:  # DofusDB injoignable : les fiches manquantes sont quand même tentées
                 log.warning("Version de DofusDB non lue : %s", exc)
+        if item_contents.due(conn):
+            try:
+                log.info("Conteneurs de ressources enregistrés : %d.", item_contents.store(conn, item_contents.fetch_all(), base_effects.known_version(conn)))
+                base_effects.mark_refreshed(conn)
+            except Exception as exc:  # DofusDB injoignable : retenté au prochain passage
+                log.warning("Conteneurs de ressources non lus : %s", exc)
         missing = set(base_effects.missing_items(conn))
         done = refreshed = 0
         for item_id in base_effects.pending_items(conn, now):
@@ -851,7 +858,9 @@ class Api:
                     have = stock.get(item_id)
                     unit = price(item_id)
                     ref = reference(item_id) if unit is not None else None
-                    to_buy = max(0, quantity - have.total)
+                    packed = stock.packed(item_id)
+                    to_open = packed.to_open(quantity - have.total)
+                    to_buy = max(0, quantity - have.total - packed.units)
                     others = everywhere[item_id]
                     need_all = sum(q for _, _, q in others)
                     recipe = recipes.get(item_id)
@@ -867,8 +876,11 @@ class Api:
                             "to_buy": to_buy, "price": unit, "source": ref.source if ref else None, "lot": ref.lot if ref else None,
                             "cost": unit * to_buy if unit is not None else None,
                             "craftable": recipe is not None and bool(recipe.ingredients),
+                            # En conteneurs fermés (sachets, sacs) : à part du vrai stock, avec ceux qu'il faut ouvrir.
+                            "packed": packed.units,
+                            "open": [{**named(container), "count": count, "owned": owned} for container, count, owned in to_open],
                             # Disputée : d'autres listes en veulent aussi, et le stock ne couvre pas tout.
-                            "need_all": need_all, "missing_all": max(0, need_all - have.total),
+                            "need_all": need_all, "missing_all": max(0, need_all - have.total - packed.units),
                             "shared": [{"list": other, "name": label, "need": q} for other, label, q in others] if len(others) > 1 else [],
                         }
                     )  # fmt: skip
@@ -1380,8 +1392,14 @@ class Api:
                         "lot": ref.lot if ref else None,
                         "value": ref.price * owned.total if ref else None,
                         "recipes": state["recipe_uses"].get(item_id, 0),
+                        "packed": stock.packed(item_id).units,
+                        "contains": None,
                     }
                 )
+                content = stock.contents.get(item_id)
+                if content is not None:
+                    inside = ws.items.get(content[0])
+                    rows[-1]["contains"] = {"item_id": content[0], "name": inside.name if inside else f"#{content[0]}", "per": content[1], "units": content[1] * owned.total}
             rows.sort(key=lambda r: -(r["value"] or 0))
             return clean({"rows": rows, "meta": stock.meta, "bank_inferred": stock.bank_inferred, "now": ws.now})
         finally:
@@ -1424,6 +1442,12 @@ class Api:
                                 "icon": state["icons"].get(item_id),
                                 "need": need,
                                 "have": have,
+                                # En conteneurs fermés, et ceux à ouvrir pour un craft.
+                                "packed": c.packed.get(item_id, 0),
+                                "open": [
+                                    {"name": ws.items[container].name if container in ws.items else f"#{container}", "count": count, "owned": owned}
+                                    for container, count, owned in state["stock"].packed(item_id).to_open(need - have)
+                                ],
                             }
                             for item_id, need, have in c.ingredients
                         ],

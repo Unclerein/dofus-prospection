@@ -73,6 +73,11 @@ def _meta(conn: sqlite3.Connection, key: str) -> str | None:
     return row[0] if row else None
 
 
+def known_version(conn: sqlite3.Connection) -> str | None:
+    """Dernière version du jeu annoncée par DofusDB, si elle a déjà été lue."""
+    return _meta(conn, "version")
+
+
 def version_check_due(conn: sqlite3.Connection, now: float) -> bool:
     checked = _meta(conn, "checked_at")
     return checked is None or now - float(checked) >= VERSION_CHECK_S

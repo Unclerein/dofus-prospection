@@ -1,7 +1,7 @@
 """Réglages communs aux tests : aucun appel réseau, aucun fil en arrière-plan."""
 import pytest
 
-from dofustool.staticdata import effects
+from dofustool.staticdata import contents, effects
 from dofustool.web.api import Api
 
 
@@ -11,4 +11,5 @@ def offline(monkeypatch):
         raise OSError("pas de réseau dans les tests")
 
     monkeypatch.setattr(effects, "fetch_version", unreachable)
+    monkeypatch.setattr(contents, "fetch_all", unreachable)
     monkeypatch.setattr(Api, "background_refresh", False)

@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS item_effects_fetched (
     item_id    INTEGER PRIMARY KEY,
     fetched_at REAL NOT NULL
 );
+-- Conteneurs de ressources (staticdata.contents) : ce que donne un sachet, un tonneau ou un sac à l'utilisation.
+CREATE TABLE IF NOT EXISTS item_contents (
+    container_id INTEGER PRIMARY KEY,
+    item_id      INTEGER NOT NULL,  -- l'objet donné
+    quantity     INTEGER NOT NULL   -- par conteneur ouvert
+) WITHOUT ROWID;
 -- Suivi des fiches ci-dessus : version du jeu connue de DofusDB (version), date de sa dernière vérification
 -- (checked_at), et date avant laquelle une fiche est à redemander (stale_before : une mise à jour du jeu
 -- peut changer les caractéristiques de n'importe quel équipement).

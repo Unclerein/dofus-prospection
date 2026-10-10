@@ -179,3 +179,24 @@ def test_equipment_is_priced_at_its_cheapest_recent_listing(app_db):  # noqa: F8
     conn.close()
     (goal,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]][0]["goals"]
     assert goal["buy_cost"] == (usual.price if usual is not None else None)
+
+
+def test_workshop_opens_containers_before_buying(app_db):  # noqa: F811
+    """Dans l'atelier, ce qui manque se prend d'abord dans les sachets possédés : combien ouvrir, puis combien acheter."""
+    from dofustool.messages.storage import Stack, Storage
+    from dofustool.staticdata import contents
+
+    conn = db.connect(app_db)
+    conn.execute("INSERT INTO items VALUES (900, 'Sachet de Blé', 1, 'Conteneur', 1, 1, 0, 2)")
+    contents.store(conn, [(900, 1, 10)])
+    db.save_holdings(conn, db.INVENTORY, Storage(0, (Stack(1, 4, False), Stack(900, 3, False))), 100.0)  # 4 Blé, 3 sachets
+    conn.close()
+    api = Api(app_db)
+    done = api.workshop_action({"action": "import", "name": "blé", "items": [1] * 20})
+    (found,) = [entry for entry in api.workshop()["lists"] if entry["id"] == done["list"]]
+    (line,) = [row for row in found["lines"] if row["item_id"] == 1]
+    assert (line["need"], line["owned"]["total"], line["packed"], line["to_buy"]) == (20, 4, 30, 0)
+    assert [(o["name"], o["count"], o["owned"]) for o in line["open"]] == [("Sachet de Blé", 2, 3)]
+    stock_rows = {row["item_id"]: row for row in api.stock()["rows"]}
+    assert stock_rows[900]["contains"] == {"item_id": 1, "name": line["name"], "per": 10, "units": 30}
+    assert stock_rows[1]["packed"] == 30 and stock_rows[1]["total"] == 4

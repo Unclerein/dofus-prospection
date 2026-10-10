@@ -623,9 +623,11 @@ async function pageWorkshop(r) {
           itemCell(x.icon, x.name, made ? 'à fabriquer · recette ci-dessous' : (where(x.owned) || null), x.item_id)))),
       h('td', {}, h('div', { style: 'font-weight: 600' }, fmt(depth > 0 ? x.share : x.need)), part,
         !made && x.shared.length ? h('div', { class: 'source ' + (x.missing_all ? 'warn' : ''), title: x.shared.map((o) => `${o.name} : ${fmt(o.need)}`).join('\n') }, `${fmt(x.need_all)} toutes listes`) : null),
-      h('td', {}, haveTag(x.owned.total, x.need)),
+      h('td', {}, haveTag(x.owned.total, x.need),
+        !made && x.packed ? h('div', { class: 'source', title: 'En conteneurs fermés (sachets, tonneaux, sacs) : à ouvrir pour s\u2019en servir' }, `+ ${fmt(x.packed)} en conteneurs`) : null),
       made ? h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_make ? `${fmt(x.to_make)} à fabriquer` : h('span', { class: 'gain' }, 'déjà en stock')))
         : h('td', {}, h('div', { style: 'font-weight: 600' }, x.to_buy ? fmt(x.to_buy) : h('span', { class: 'gain' }, '0')),
+          (x.open || []).map((o) => h('div', { class: 'source', title: `Tu en possèdes ${fmt(o.owned)}` }, `ouvrir ${fmt(o.count)} × ${o.name}`)),
           x.shared.length && x.missing_all > x.to_buy ? h('div', { class: 'source warn', title: 'Ce qu\u2019il manque pour satisfaire toutes tes listes à la fois' }, `${fmt(x.missing_all)} au total`) : null),
       made ? h('td', { class: 'muted' }, '—')
         : h('td', {}, x.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, unitLabel(x.price)), h('div', { class: 'source', title: lotTitle(x.lot, x.price) }, h('span', { class: 'dot ' + dotClass(x.source) }), shortSource(x.source, x.lot))]),
@@ -927,7 +929,8 @@ function ingredientTooltip(i, data) {
   const missing = Math.max(0, i.need - i.have);
   const price = hdv !== null ? hdv : avg;
   return [
-    h('div', { class: 'tip-head' }, tile(i.icon, false, i.id), h('div', {}, h('div', { class: 'tip-name' }, i.name), h('div', { class: 'muted small' }, `${fmt(i.have)} / ${fmt(i.need)}`))),
+    h('div', { class: 'tip-head' }, tile(i.icon, false, i.id), h('div', {}, h('div', { class: 'tip-name' }, i.name), h('div', { class: 'muted small' }, `${fmt(i.have)}${i.packed ? ` + ${fmt(i.packed)} en conteneurs` : ''} / ${fmt(i.need)}`))),
+    (i.open || []).length ? h('div', { class: 'tip-note' }, i.open.map((o) => `Ouvrir ${fmt(o.count)} × ${o.name} (tu en as ${fmt(o.owned)})`).join(' · ')) : null,
     h('div', { class: 'tip-lines' },
       h('div', { class: 'tip-price' }, h('span', { class: 'muted' }, 'Prix moyen'), h('b', {}, unit(avg))),
       h('div', { class: 'tip-price' }, h('span', { class: 'muted', title: lotTitle(lot, hdv) }, lot > 1 ? `Prix HDV (lot ${lotLabel(lot)})` : 'Prix HDV'), h('b', {}, unit(hdv)),
@@ -973,11 +976,11 @@ function stockCrafts(data) {
       : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
     h('td', {}, row.craftable > 0 ? h('span', { class: 'tag good', style: 'font-size: 14px; font-weight: 700' }, `× ${fmt(row.craftable)}`) : h('span', { class: 'muted' }, `${row.covered} / ${row.lines} ingr.`)),
     h('td', { class: 'l wrap' }, h('div', { class: 'ingredients' }, row.ingredients.map((i) =>
-      h('a', { class: 'ingredient ' + (i.have >= i.need ? 'ok' : i.have > 0 ? 'part' : 'none'), href: `#/item/${i.id}`,
-        'aria-label': `${i.name}, ${fmt(i.have)} en stock pour ${fmt(i.need)} par craft, ouvrir la fiche`,
+      h('a', { class: 'ingredient ' + (i.have + (i.packed || 0) >= i.need ? 'ok' : i.have + (i.packed || 0) > 0 ? 'part' : 'none'), href: `#/item/${i.id}`,
+        'aria-label': `${i.name}, ${fmt(i.have)} en stock${i.packed ? ` et ${fmt(i.packed)} en conteneurs` : ''} pour ${fmt(i.need)} par craft, ouvrir la fiche`,
         onclick: (event) => event.stopPropagation(), // ne pas ouvrir la fiche de la recette
         onmouseenter: (event) => showTip(event, ingredientTooltip(i, data)), onmousemove: placeTip, onmouseleave: () => { $tip.hidden = true; } },
-        tile(i.icon, false, i.id), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty' }, `${fmt(i.have)} / ${fmt(i.need)}`))))),
+        tile(i.icon, false, i.id), h('span', { class: 'ingredient-name' }, i.name), h('span', { class: 'ingredient-qty', title: i.packed ? `${fmt(i.packed)} en conteneurs fermés` + ((i.open || []).length ? ' · ' + i.open.map((o) => `ouvrir ${fmt(o.count)} × ${o.name}`).join(', ') : '') : null }, `${fmt(i.have)}${i.packed ? ` + ${fmt(i.packed)}` : ''} / ${fmt(i.need)}`))))),
     h('td', { class: 'soft' }, row.craftable > 0 ? '—' : row.missing_cost === null ? h('span', { class: 'warn' }, 'prix manquant') : fmt(row.missing_cost)),
     h('td', { class: row.margin === null ? 'muted' : row.margin >= 0 ? 'soft' : 'warn' }, signed(row.margin)),
     h('td', { class: 'strong ' + (row.total_margin === null || !row.craftable ? 'muted' : row.total_margin >= 0 ? 'gain' : 'warn') }, row.craftable ? signed(row.total_margin) : '—'),
@@ -1037,7 +1040,9 @@ function stockItems(data) {
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', {}, 'Havre-sac'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
           h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
-            h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '), row.item_id)),
+            h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null,
+              row.contains ? `contient ${fmt(row.contains.per)} × ${row.contains.name}, soit ${fmt(row.contains.units)}` : null,
+              row.packed ? `+ ${fmt(row.packed)} en conteneurs fermés` : null].filter(Boolean).join(' · '), row.item_id)),
             h('td', { class: row.inventory ? 'soft' : 'muted' }, row.inventory ? fmt(row.inventory) : '—'),
             h('td', { class: row.bank ? 'soft' : 'muted' }, row.bank ? fmt(row.bank) : '—'),
             h('td', { class: row.havre ? 'soft' : 'muted' }, row.havre ? fmt(row.havre) : '—'),
