@@ -11,6 +11,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 FIGHT_START, FIGHT_END, TURN, ACTION = "jxr", "jwp", "jvj", "jsq"
+SHEET, MY_LIFE = "jwj", "kqo"  # fiche d'un combattant à son entrée ; mes points de vie hors combat
+
+# Les points de vie de départ sont la somme de deux stats de la fiche, toutes parts confondues
+# (base, équipement, bonus) : la vie de base (stat 0, dont l'identifiant n'est donc pas écrit) et la vitalité.
+LIFE_STATS = (0, 11)
+SHEET_STATS, SUMMON_STATS = "1.3.4.7.4.", "12.2.1.2.4."
 
 # Champ 22 d'une action : ce qu'elle fait.
 CAST, DEATH, SUMMON, INVISIBLE = 300, 103, 181, 150
@@ -46,10 +52,28 @@ def number(fields: Fields, path: str) -> int | None:
     return None
 
 
+def life(fields: Fields, prefix: str) -> int | None:
+    """Points de vie que donne une liste de stats (identifiant en « .2 », valeurs dans les champs qui suivent)."""
+    total, stat, found = 0, None, False
+    seen: set[str] = set()  # champs de la stat en cours : un champ qui revient ouvre la stat suivante, sans identifiant
+    for name, value in fields:
+        if not name.startswith(prefix):
+            continue
+        if name == prefix + "2":
+            stat, seen = int(value), set()
+            continue
+        if name in seen:
+            stat, seen = 0, set()
+        seen.add(name)
+        if stat in LIFE_STATS and not value.startswith("LEN"):
+            total, found = total + int(value), True
+    return total if found else None
+
+
 @dataclass
 class Event:
     when: float
-    kind: str  # start, end, turn, cast, damage, heal, death, summon, push, invisible, spent
+    kind: str  # start, end, turn, sheet, life, cast, damage, heal, death, summon, push, invisible, spent
     source: int | None = None
     target: int | None = None
     amount: int | None = None
@@ -69,6 +93,11 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
         return Event(when, "end")
     if key == TURN:
         return Event(when, "turn", source=number(fields, "3"), round=number(fields, "7"))
+    if key == SHEET:
+        return Event(when, "sheet", target=number(fields, "1.1"), amount=life(fields, SHEET_STATS),
+                     spell=number(fields, "1.3.4.6.3.3"), cell=number(fields, "1.2.3"))
+    if key == MY_LIFE:
+        return Event(when, "life", amount=number(fields, "3"))
     if key != ACTION:
         return None
     action, source = number(fields, "22"), number(fields, "36")
@@ -77,7 +106,7 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
     if action == DEATH:
         return Event(when, "death", source, number(fields, "3.2"))
     if action == SUMMON:
-        return Event(when, "summon", number(fields, "12.2.1.2.3"), number(fields, "12.2.1.5.3.1"),
+        return Event(when, "summon", number(fields, "12.2.1.2.3"), number(fields, "12.2.1.5.3.1"), amount=life(fields, SUMMON_STATS),
                      spell=number(fields, "12.2.1.1.3.5"), cell=number(fields, "12.2.1.5.3.2.3"))
     if action == INVISIBLE:
         return Event(when, "invisible", source, number(fields, "14.2"), amount=number(fields, "14.1"))
@@ -99,6 +128,16 @@ class Tally:
     healed: int = 0
     dead: bool = False
     summoner: int | None = None
+    monster: int | None = None  # None pour un personnage ou un compagnon
+    max_life: int | None = None
+    start_life: int | None = None
+
+    @property
+    def life(self) -> int | None:
+        """Points de vie restants, d'après les coups et les soins vus ; l'érosion n'est pas comptée."""
+        if self.start_life is None:
+            return None
+        return 0 if self.dead else max(0, min(self.max_life, self.start_life - self.taken + self.healed))
 
 
 @dataclass
@@ -110,6 +149,11 @@ class Fight:
 
     def add(self, item: Event) -> None:
         self.events.append(item)
+        if item.kind in ("sheet", "summon") and item.target is not None:
+            tally = self.fighters[item.target]
+            tally.max_life = tally.start_life = item.amount
+            if item.kind == "sheet":
+                tally.monster = item.spell
         if item.kind == "turn" and item.round:
             self.rounds = max(self.rounds, item.round)
         elif item.kind == "damage" and item.target is not None:
@@ -130,17 +174,31 @@ def fights(messages) -> list[Fight]:
     """Les combats d'une suite de messages (délai, sens, clé, champs), dans l'ordre."""
     out: list[Fight] = []
     current: Fight | None = None
+    sheets: dict[int, Event] = {}  # fiches reçues pendant le placement, avant le début
+    my_life: int | None = None
     for when, direction, key, fields in messages:
         item = event(when, direction, key, fields)
         if item is None:
             continue
+        if item.kind == "life":
+            my_life = item.amount
+            continue
+        if current is None and item.kind == "sheet" and item.target is not None:
+            sheets[item.target] = item
         if item.kind == "start":
             current = Fight()
             out.append(current)
+            for sheet in sheets.values():
+                current.add(sheet)
+                if sheet.target > 0 and my_life is not None and my_life <= (sheet.amount or 0):
+                    current.fighters[sheet.target].start_life = my_life
+            sheets = {}
+            current.events.append(item)
+            continue
         if current is not None:
             current.add(item)
             if item.kind == "end":
-                current = None
+                current, sheets = None, {}
     return out
 
 
