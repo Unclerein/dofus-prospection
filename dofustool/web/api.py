@@ -824,20 +824,21 @@ class Api:
                 price = fmjournal.fusion_price(rune_id, sources, market)
                 weight = density.get(effect_id, 0.0) * value
                 if price is not None and price > 0 and weight > 0:
-                    runes.append(magexp.Rune(rune_id, effect_id, weight, price))
+                    tier = {3: magexp.PA, 9: magexp.RA}.get(sources.get(rune_id, (0, 1))[1], magexp.SIMPLE)
+                    runes.append(magexp.Rune(rune_id, effect_id, weight, price, tier))
                     rune_gives[rune_id] = (effect_id, value, weight)
 
             # Objets supports : les équipements que ce mage sait travailler (ceux du métier de fabrication associé).
             crafts = [maker for maker, mage in MAGE_OF.items() if mage == job_id]
             marks = ",".join("?" * len(crafts))
-            lines: dict[int, set[int]] = {}
-            for item_id, effect_id in conn.execute(
-                f"SELECT e.item_id, e.effect_id FROM item_effects e JOIN recipes r ON r.result_id = e.item_id "
+            lines: dict[int, dict[int, float]] = {}
+            for item_id, effect_id, high in conn.execute(
+                f"SELECT e.item_id, e.effect_id, e.max_value FROM item_effects e JOIN recipes r ON r.result_id = e.item_id "
                 f"JOIN items i ON i.id = e.item_id LEFT JOIN effect_meta m ON m.effect_id = e.effect_id "
                 f"WHERE r.job_id IN ({marks}) AND i.category_id = 0 AND i.exchangeable AND e.max_value > 0 AND COALESCE(m.is_stat, 1) = 1",
                 crafts,
             ):
-                lines.setdefault(item_id, set()).add(effect_id)
+                lines.setdefault(item_id, {})[effect_id] = high * density.get(effect_id, 0.0)  # poids du maximum de la ligne
             supports, unpriced = [], 0
             for item_id, found in lines.items():
                 item = ws.items.get(item_id)
@@ -848,7 +849,7 @@ class Api:
                 if price is None:
                     unpriced += 1
                     continue
-                supports.append(magexp.Support(item_id, item.level, frozenset(found), price))
+                supports.append(magexp.Support(item_id, item.level, found, price))
 
             plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate)
             pending = len(base_effects.mage_items(conn))

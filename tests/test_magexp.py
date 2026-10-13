@@ -116,3 +116,30 @@ def test_single_line_support_is_a_last_resort():
     alone = magexp.cheapest_path([one], RUNES, 0, 5, pass_rate=1.0)
     twice = magexp.cheapest_path([Support(100, 1, frozenset({FO, SA}), 100.0)], [RUNES[0], Rune(3, SA, 1, 40.0)], 0, 5, pass_rate=1.0)
     assert alone.rune_cost == pytest.approx(2 * twice.rune_cost, rel=0.1)  # même prix au poids, deux fois plus de runes
+
+
+def test_rune_size_follows_the_weight_of_the_line():
+    """Petite ligne : une Ra ne tient presque jamais sous le maximum. Grosse ligne : une rune simple ne passe plus."""
+    from dofustool.analysis.magexp import PA, RA, SIMPLE
+
+    # Ligne dont le maximum pèse 10 : la Ra (10) ne tient qu'à zéro, la Pa (3) le plus souvent.
+    assert magexp.line_rate(RA, 10, 10) == pytest.approx(magexp.OVER_RATE)
+    assert magexp.line_rate(PA, 3, 10) > 0.6 > magexp.line_rate(RA, 10, 10)
+    assert magexp.line_rate(SIMPLE, 1, 10) > magexp.line_rate(PA, 3, 10)
+    # Ligne à 300 de poids : la rune simple s'effondre (17 % au-delà de 100), la Ra tient.
+    assert magexp.line_rate(SIMPLE, 1, 300) < 0.45 < magexp.line_rate(PA, 3, 300) < magexp.line_rate(RA, 10, 300)
+    assert magexp.line_rate(RA, 10, 0) == magexp.OVER_RATE
+
+    small, pa, ra = Rune(1, FO, 1, 40.0, SIMPLE), Rune(2, FO, 3, 120.0, PA), Rune(3, FO, 10, 400.0, RA)  # même prix au poids
+    other = Rune(4, SA, 3, 240.0, PA)
+
+    def chosen(line_weight):
+        _, pair, _ = magexp.best_pair(Support(100, 200, {FO: line_weight, SA: 60}, 1.0), [small, pa, ra, other], 200)
+        return {rune.item_id for rune in pair} - {4}
+
+    assert chosen(10) == {1}  # petite ligne : la rune simple, la Pa perd déjà trop souvent sa place
+    assert chosen(60) == {2}  # la Pa est à moins de 10 % de la simple : trois fois moins de passages
+    assert chosen(300) == {3}  # grosse ligne : la Ra
+    # Maximum inconnu : toutes passent aussi bien, la plus lourde l'emporte.
+    _, pair, _ = magexp.best_pair(Support(100, 200, frozenset({FO, SA}), 1.0), [small, pa, ra, other], 200)
+    assert ra in pair

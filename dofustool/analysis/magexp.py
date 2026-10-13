@@ -28,6 +28,39 @@ PASS_RATE = 0.77  # part des runes qui passent, ligne sous son maximum (mesurée
 # Objet à une seule ligne utilisable : rien à alterner, la ligne bute sur son maximum (un quart de réussite
 # mesuré là) jusqu'à ce qu'un échec la fasse redescendre. Hypothèse : moitié moins de runes qui passent.
 SINGLE_LINE = 0.5
+# Chance de passer selon la taille de la rune et le poids déjà présent sur la ligne (valeur x densité),
+# mesurée sur l'archive, ligne sous son maximum. Une rune simple passe très bien sur une ligne peu chargée
+# et presque plus au-delà de 100 de poids ; une Pa tient mieux ; une Ra reste stable. C'est ce qui fait
+# préférer les Ra sur les grosses lignes. (poids de la ligne jusqu'à, chance de passer)
+SIMPLE, PA, RA = 0, 1, 2
+LINE_RATES = {
+    SIMPLE: ((30, 0.90), (45, 0.82), (60, 0.69), (80, 0.65), (100, 0.48), (math.inf, 0.17)),
+    PA: ((45, 0.82), (100, 0.70), (math.inf, 0.65)),
+    RA: ((80, 0.71), (math.inf, 0.78)),
+}
+# Une rune qui ne tient pas sous le maximum de sa ligne : 31 % (234 passages). Une Ra (+10) sur une ligne dont
+# le maximum est 10 ne tient que si la ligne est à zéro, d'où l'avantage des Pa sur les petites lignes.
+OVER_RATE = 0.31
+CLOSE = 0.10  # à moins de 10 % du meilleur coût, on prend la rune la plus lourde : bien moins de passages
+SAMPLES = 24
+
+
+def line_rate(tier: int, rune_weight: float, line_weight: float) -> float:
+    """Chance moyenne qu'une rune passe sur une ligne dont le maximum pèse line_weight.
+
+    Hypothèse : en montant un métier, la ligne se promène entre zéro et son maximum. À chaque position,
+    la rune tient sous le maximum (chance selon sa taille et le poids déjà là) ou non (OVER_RATE).
+    """
+    if line_weight <= 0:
+        return OVER_RATE
+    total = 0.0
+    for index in range(SAMPLES):
+        at = line_weight * (index + 0.5) / SAMPLES
+        if at + rune_weight > line_weight:
+            total += OVER_RATE
+        else:
+            total += next(rate for limit, rate in LINE_RATES[tier] if at <= limit)
+    return total / SAMPLES
 
 
 def mage_xp(weight: float, item_level: int, job_level: int) -> int:
@@ -43,6 +76,7 @@ class Rune:
     effect_id: int  # caractéristique qu'elle ajoute
     weight: float  # densité x valeur
     price: float
+    tier: int = SIMPLE  # SIMPLE, PA ou RA
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +85,13 @@ class Support:
 
     item_id: int
     level: int
-    lines: frozenset[int]  # caractéristiques de base positives : les lignes où une rune passe sans être un exo
+    # Caractéristiques de base positives, avec le poids de leur maximum (valeur x densité) : les lignes où une
+    # rune passe sans être un exo. Un simple ensemble d'identifiants est accepté (maximum inconnu : toutes les
+    # runes y passent alors aussi bien).
+    lines: dict[int, float] | frozenset[int]
+
+    def line_max(self, effect_id: int) -> float | None:
+        return self.lines.get(effect_id) if isinstance(self.lines, dict) else None
     price: float
 
 
@@ -88,20 +128,27 @@ class Plan:
 def best_pair(support: Support, runes: list[Rune], job_level: int) -> tuple[float, tuple[Rune, ...], float] | None:
     """(kamas par point d'XP si tout passait, les runes à alterner, XP par unité de poids passée sur chaque ligne).
 
-    Pour chaque ligne de l'objet, la rune la moins chère au point d'XP (à coût égal, la plus lourde :
-    moins de passages). Puis les deux lignes les moins chères. Une seule rune si l'objet n'a qu'une ligne
-    où en passer une (voir SINGLE_LINE). None s'il n'en a aucune.
+    Pour chaque ligne de l'objet, la rune la moins chère au point d'XP espéré : sa chance de passer dépend
+    de sa taille et du poids de la ligne (line_rate), rapportée à la réussite ordinaire PASS_RATE. Parmi
+    celles qui sont à moins de CLOSE du meilleur coût, la plus lourde : bien moins de passages. Puis les
+    deux lignes les moins chères. Une seule rune si l'objet n'a qu'une ligne où en passer une (voir
+    SINGLE_LINE). None s'il n'en a aucune.
     """
-    by_line: dict[int, tuple[float, float, Rune, int]] = {}
+    candidates: dict[int, list[tuple[float, float, Rune, float]]] = {}
     for rune in runes:
         if rune.effect_id not in support.lines:
             continue
         gained = mage_xp(rune.weight, support.level, job_level)
         if gained <= 0:
             continue
-        key = (rune.price / gained, -rune.weight, rune, gained)
-        if rune.effect_id not in by_line or key[:2] < by_line[rune.effect_id][:2]:
-            by_line[rune.effect_id] = key
+        line_max = support.line_max(rune.effect_id)
+        if line_max:
+            gained = gained * line_rate(rune.tier, rune.weight, line_max) / PASS_RATE
+        candidates.setdefault(rune.effect_id, []).append((rune.price / gained, -rune.weight, rune, gained))
+    by_line: dict[int, tuple[float, float, Rune, float]] = {}
+    for effect_id, found in candidates.items():
+        cheapest = min(entry[0] for entry in found)
+        by_line[effect_id] = min((entry for entry in found if entry[0] <= cheapest * (1 + CLOSE)), key=lambda entry: entry[1])
     if not by_line:
         return None
     if len(by_line) == 1:
