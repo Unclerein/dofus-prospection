@@ -9,7 +9,7 @@ ouvert déjà en stock), puis des lignes à acheter. Chaque liste est calculée 
 quand plusieurs listes veulent la même ressource, le besoin total est donné à côté.
 
 « Le moins cher » compare ce qu'il reste à payer : un ingrédient cher déjà en stock fait pencher
-vers la fabrication.
+vers la fabrication, y compris dans les sous-recettes ouvertes.
 """
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -50,23 +50,45 @@ class Plan:
     sources: dict[int, dict[int, int]] = field(default_factory=dict)
 
 
-def first_level_cost(
-    recipe: Recipe, price: Callable[[int], float | None], count: int = 1, free: Callable[[int], int] = lambda _: 0
+def craft_cost_left(
+    item_id: int,
+    count: int,
+    recipes: dict[int, Recipe],
+    opened: set[int],
+    price: Callable[[int], float | None],
+    free: Callable[[int], int] = lambda _: 0,
 ) -> float | None:
-    """Coût de count fabrications en achetant les ingrédients qui manquent (free : ce qui est déjà là).
+    """Ce qu'il reste à payer pour fabriquer count fois item_id (free : stock encore disponible).
 
-    None si un ingrédient à acheter n'a pas de prix ; un ingrédient déjà possédé n'a pas besoin d'en avoir.
+    Un ingrédient déjà possédé ne coûte rien. Un ingrédient ouvert se chiffre à son tour par sa
+    recette ; les autres au prix d'achat. Le stock est réparti au fil du calcul : une ressource
+    partagée par deux sous-recettes n'est comptée qu'une fois comme déjà là. None si un objet à
+    acheter n'a pas de prix.
     """
-    total = 0.0
-    for item_id, quantity in recipe.ingredients:
-        missing = max(0, quantity * count - free(item_id))
-        if missing == 0:
-            continue
-        unit = price(item_id)
-        if unit is None:
-            return None
-        total += unit * missing
-    return total
+    taken: dict[int, int] = {}
+
+    def cost(target: int, wanted: int, path: tuple[int, ...]) -> float | None:
+        have = min(wanted, max(0, free(target) - taken.get(target, 0)))
+        taken[target] = taken.get(target, 0) + have
+        wanted -= have
+        if wanted == 0:
+            return 0.0
+        recipe = recipes.get(target)
+        if target in opened and recipe is not None and recipe.ingredients and target not in path and len(path) < MAX_DEPTH:
+            return ingredients(recipe, wanted, (*path, target))
+        unit = price(target)
+        return unit * wanted if unit is not None else None
+
+    def ingredients(recipe: Recipe, made: int, path: tuple[int, ...]) -> float | None:
+        total = 0.0
+        for ingredient_id, per in recipe.ingredients:
+            part = cost(ingredient_id, per * made, path)
+            if part is None:
+                return None
+            total += part
+        return total
+
+    return ingredients(recipes[item_id], count, (item_id,))
 
 
 def plan(
@@ -110,7 +132,7 @@ def plan(
         left = max(0, goal.quantity - free(goal.item_id))
         unit = price(goal.item_id)
         buy_cost = unit * left if unit is not None else (0.0 if left == 0 else None)
-        craft_cost = first_level_cost(recipe, price, left, free) if craftable else None
+        craft_cost = craft_cost_left(goal.item_id, left, recipes, opened, price, free) if craftable else None
         if not craftable:
             mode = BUY
         elif goal.mode in (BUY, CRAFT):

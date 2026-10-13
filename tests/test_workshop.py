@@ -216,3 +216,28 @@ def test_cheapest_counts_what_is_already_owned():
     assert plan([Goal(1, SWORD, 1)], stock={BLADE: 2}, prices={**prices, BLADE: None}).goals[0].craft_cost == 50.0
     owned_sword = plan([Goal(1, SWORD, 2)], stock={SWORD: 1}).goals[0]
     assert owned_sword.buy_cost == 1_000.0 and owned_sword.craft_cost == 450.0  # une seule reste à obtenir
+
+
+def test_opened_sub_recipes_count_their_own_stock():
+    """Sous-recette ouverte : ses ingrédients déjà possédés comptent aussi dans le choix acheter / fabriquer."""
+    prices = {**PRICES, BLADE: 600.0}  # 2 lames achetées + 5 bois = 1 250 : plus cher que l'épée (1 000)
+    assert plan([Goal(1, SWORD, 1)], prices=prices).goals[0].mode == BUY
+    # Lames ouvertes : 6 fers à 50 + 5 bois = 350.
+    opened = plan([Goal(1, SWORD, 1)], opened={BLADE}, prices=prices).goals[0]
+    assert (opened.mode, opened.craft_cost) == (CRAFT, 350.0)
+    # Les 6 fers sont déjà là : il ne reste que le bois.
+    found = plan([Goal(1, SWORD, 1)], opened={BLADE}, stock={IRON: 6}, prices=prices)
+    assert (found.goals[0].mode, found.goals[0].craft_cost) == (CRAFT, 50.0)
+    assert found.lines == {IRON: 6, WOOD: 5} and found.opened == {BLADE: (2, 2)}
+    # Une lame déjà faite : il n'en reste qu'une à fabriquer, donc 3 fers.
+    assert plan([Goal(1, SWORD, 1)], opened={BLADE}, stock={BLADE: 1}, prices=prices).goals[0].craft_cost == 150.0 + 50.0
+
+
+def test_a_resource_shared_by_two_sub_recipes_is_counted_once():
+    hilt = 14
+    recipes = {SWORD: Recipe(SWORD, 1, 1, ((BLADE, 1), (hilt, 1))), BLADE: Recipe(BLADE, 1, 1, ((IRON, 3),)),
+               hilt: Recipe(hilt, 1, 1, ((IRON, 3),))}  # fmt: skip
+    found = workshop.plan([Goal(1, SWORD, 1, None)], {BLADE, hilt}, recipes, PRICES.get, lambda i: {IRON: 3}.get(i, 0))
+    # 3 fers en stock pour 6 demandés (lame et garde) : 3 restent à acheter, 150 — pas 0.
+    assert found.goals[0].craft_cost == 150.0
+    assert workshop.craft_cost_left(SWORD, 1, recipes, {BLADE, hilt}, PRICES.get, lambda i: 0) == 300.0
