@@ -64,5 +64,9 @@ def test_only_the_game_window_and_its_top_right_corner():
     assert overlay.is_game("UnityWndClass", "Perso - Dofus 3.7.5.5")
     assert not overlay.is_game("Chrome_WidgetWin_1", "Prospection - Dofus")  # le tableau de bord dans un navigateur
     assert not overlay.is_game("UnityWndClass", "Un autre jeu")
+    # quand Windows donne le nom du programme, c'est lui qui décide, quel que soit le titre
+    assert overlay.is_game("UnityWndClass", "Perso", program="Dofus.exe")
+    assert not overlay.is_game("UnityWndClass", "Dofus", program="AutreJeu.exe")
+    assert not overlay.is_game("Chrome_WidgetWin_1", "Prospection - Dofus", program="chrome.exe")
     assert overlay.place((100, 50, 1700, 950), width=340, margin_x=24, margin_y=110) == (1336, 160)
     assert overlay.place((0, 0, 300, 200), width=340, margin_x=24, margin_y=10) == (0, 10)  # fenêtre trop étroite : calé à gauche

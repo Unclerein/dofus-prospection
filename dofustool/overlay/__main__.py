@@ -5,12 +5,13 @@ ne prend ni clic ni touche et n'envoie rien au jeu. Elle lit la base locale, en 
 
 Elle se pose dans l'angle haut droit de la fenêtre du jeu, et seulement quand le jeu est la fenêtre
 active : pendant qu'on regarde autre chose, les bandeaux attendent son retour. Du jeu, elle ne lit
-que ce que Windows dit de sa fenêtre (titre et position), jamais le programme lui-même.
+que ce que Windows dit de sa fenêtre (titre, position, nom du programme), comme le fait le
+gestionnaire des tâches ; jamais sa mémoire.
 
 Le jeu doit être en mode fenêtré ou plein écran fenêtré : en plein écran exclusif, Windows ne laisse
 aucune autre fenêtre passer devant.
 
-Usage : python -m dofustool.overlay [--demo] [--anywhere]
+Usage : python -m dofustool.overlay [--demo] [--anywhere] [--probe]
 """
 import argparse
 import ctypes
@@ -53,10 +54,28 @@ class _Point(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
-def game_area(name: str = "Dofus") -> tuple[int, int, int, int] | None:
-    """Zone de jeu à l'écran (gauche, haut, droite, bas) si le jeu est la fenêtre active, sinon None."""
-    if sys.platform != "win32":
-        return None
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def program_of(handle: int) -> str:
+    """Nom du fichier du programme qui possède cette fenêtre (« Dofus.exe »), ou "" si Windows le refuse."""
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    pid = ctypes.c_ulong(0)
+    user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not process:
+        return ""
+    try:
+        path, size = ctypes.create_unicode_buffer(1024), ctypes.c_ulong(1024)
+        found = kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(process), 0, path, ctypes.byref(size))
+        return Path(path.value).name if found else ""
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(process))
+
+
+def front_window() -> tuple[int, str, str, str] | None:
+    """(fenêtre, type, titre, programme) de la fenêtre active ; None s'il n'y en a pas ou qu'elle est réduite."""
     user32 = ctypes.windll.user32
     handle = user32.GetForegroundWindow()
     if not handle or user32.IsIconic(handle):
@@ -64,8 +83,18 @@ def game_area(name: str = "Dofus") -> tuple[int, int, int, int] | None:
     window_class, title = ctypes.create_unicode_buffer(64), ctypes.create_unicode_buffer(256)
     user32.GetClassNameW(handle, window_class, 64)
     user32.GetWindowTextW(handle, title, 256)
-    if not is_game(window_class.value, title.value, name):
+    return handle, window_class.value, title.value, program_of(handle)
+
+
+def game_area(name: str = "Dofus") -> tuple[int, int, int, int] | None:
+    """Zone de jeu à l'écran (gauche, haut, droite, bas) si le jeu est la fenêtre active, sinon None."""
+    if sys.platform != "win32":
         return None
+    user32 = ctypes.windll.user32
+    front = front_window()
+    if front is None or not is_game(front[1], front[2], front[3], name):
+        return None
+    handle = front[0]
     rect, origin = _Rect(), _Point(0, 0)
     if not user32.GetClientRect(handle, ctypes.byref(rect)) or not user32.ClientToScreen(handle, ctypes.byref(origin)):
         return None
@@ -205,30 +234,51 @@ def demo_sales() -> tuple[list[tuple[float, Sale]], dict[int, str]]:
     return script, {wool: "Laine de Bouftou", ring: "Anneau de démonstration"}
 
 
+def probe(name: str, seconds: int = 12) -> None:
+    """Dit, seconde après seconde, ce que la fenêtre active est pour ce programme. Aucun titre n'est affiché."""
+    print(f"Clique sur la fenêtre du jeu. Jeu attendu : {name}.")
+    for _ in range(seconds):
+        front = front_window()
+        if front is None:
+            print("  aucune fenêtre active")
+        else:
+            _, window_class, title, program = front
+            area = game_area(name)
+            print(f"  programme {program or '(inconnu)'} · type {window_class} · titre de {len(title)} caractères, "
+                  f"contient le nom du jeu : {'oui' if name.lower() in title.lower() else 'non'} · "
+                  f"reconnu : {'oui' if area else 'non'}{' · zone ' + str(area) if area else ''}")
+        time.sleep(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--demo", action="store_true", help="affiche des ventes inventées, sans lire la base")
     parser.add_argument("--anywhere", action="store_true", help="dans l'angle de l'écran, même si le jeu n'est pas la fenêtre active")
+    parser.add_argument("--probe", action="store_true", help="dit pendant douze secondes si la fenêtre active est reconnue comme le jeu")
     args = parser.parse_args()
     if sys.platform == "win32":
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)  # texte net sur un écran à 125 % ou 150 %
         except (AttributeError, OSError):
             pass
+    from .. import config
+
+    game = config.load().dofus_process or "Dofus"
+    if args.probe:
+        probe(game)
+        return 0
     icon_dir = db.MARKET_PATH.parent / "icons"
     if args.demo:
         script, names = demo_sales()
         items = Items(None, icon_dir)
         items.demo_names = names
-        Window(None, items, script, anywhere=args.anywhere).run()
+        Window(None, items, script, anywhere=args.anywhere, game=game).run()
         return 0
     if not db.MARKET_PATH.exists():
         print(f"Base absente : {db.MARKET_PATH}")
         return 1
     conn = sqlite3.connect(f"file:{db.MARKET_PATH.as_posix()}?mode=ro", uri=True, timeout=1.0)
-    from .. import config
-
-    Window(Feed(conn), Items(conn, icon_dir), anywhere=args.anywhere, game=config.load().dofus_process).run()
+    Window(Feed(conn), Items(conn, icon_dir), anywhere=args.anywhere, game=game).run()
     return 0
 
 

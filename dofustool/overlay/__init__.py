@@ -80,8 +80,12 @@ class Board:
             banner.until = now + self.shown_s
 
 
-def is_game(window_class: str, title: str, name: str = "Dofus") -> bool:
-    """Vrai pour la fenêtre du jeu : une fenêtre Unity dont le titre porte le nom du jeu."""
+def is_game(window_class: str, title: str, program: str = "", name: str = "Dofus") -> bool:
+    """Vrai pour la fenêtre du jeu : celle du programme du jeu, ou à défaut une fenêtre Unity à son nom.
+
+    program : nom du fichier lancé (« Dofus.exe »), quand Windows a bien voulu le dire."""
+    if program:
+        return program.lower().removesuffix(".exe") == name.lower()
     return window_class == "UnityWndClass" and name.lower() in title.lower()
 
 
