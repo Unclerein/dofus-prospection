@@ -38,3 +38,13 @@ def test_unity_version_is_read_from_the_game_folder(tmp_path):
     (tmp_path / "Dofus_Data" / "globalgamemanagers").write_bytes(b"\x00\x01abc\x006000.3.16f1\x00zz")
     assert maps.unity_version(tmp_path) == "6000.3.16f1"
     assert maps.unity_version(tmp_path / "absent") is None
+
+
+def test_stored_version_is_none_until_maps_are_read():
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(maps.SCHEMA)
+    assert maps.stored_version(conn) is None
+    maps.store(conn, [], "v1", now=1.0)
+    assert maps.stored_version(conn) is None  # version notée mais aucune carte : à relire
+    maps.store(conn, [maps.terrain(1, [cell(5)])], "v2", now=2.0)
+    assert maps.stored_version(conn) == "v2"

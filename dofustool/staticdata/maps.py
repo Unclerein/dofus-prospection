@@ -6,10 +6,10 @@ décrit ses 560 cases : praticable ou non, laisse passer la ligne de vue ou non,
 qui tourne ni à sa mémoire.
 
 Le résultat va dans data/static/maps.sqlite, sur ce PC seulement : ce sont des données du jeu, à ne
-pas mettre dans le dépôt. La lecture demande la bibliothèque UnityPy (pip install UnityPy), dont le
-reste de l'application n'a pas besoin.
+pas mettre dans le dépôt. La lecture passe par la bibliothèque UnityPy et prend deux à trois minutes ;
+avec --if-new, rien n'est fait tant que le jeu installé n'a pas changé depuis la dernière lecture.
 
-Usage : python -m dofustool.staticdata.maps [--game DOSSIER]
+Usage : python -m dofustool.staticdata.maps [--game DOSSIER] [--if-new]
 """
 import argparse
 import os
@@ -147,17 +147,31 @@ def game_version(game: Path) -> str:
         return ""
 
 
+def stored_version(conn: sqlite3.Connection) -> str | None:
+    """Version du jeu lors de la dernière lecture ; None si les cartes n'ont jamais été lues."""
+    row = conn.execute("SELECT value FROM maps_meta WHERE key = 'game_version'").fetchone()
+    return row[0] if row and conn.execute("SELECT 1 FROM maps LIMIT 1").fetchone() else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--game", type=Path, default=game_dir(), help="dossier d'installation de Dofus")
+    parser.add_argument("--if-new", action="store_true", help="ne rien faire si le jeu n'a pas changé depuis la dernière lecture")
     args = parser.parse_args()
     if not (args.game / MAP_DATA).is_dir():
         print(f"Cartes du jeu introuvables dans {args.game}. Donne le dossier avec --game.")
         return 1
+    if args.if_new:
+        conn = open_maps()
+        known = stored_version(conn)
+        conn.close()
+        if known is not None and known == game_version(args.game):
+            return 0
+        print("Lecture du décor des cartes dans les fichiers du jeu (deux à trois minutes)...")
     try:
         import UnityPy  # noqa: F401
     except ImportError:
-        print("Il manque la bibliothèque UnityPy : pip install UnityPy")
+        print("Décor des cartes non lu : il manque la bibliothèque UnityPy (pip install UnityPy).")
         return 1
     started = time.time()
     conn = open_maps()

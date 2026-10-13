@@ -137,4 +137,6 @@ finally {
     try { & $python -m dofustool.staticdata.update --if-new | ForEach-Object { Say $_ } } catch { Say "Données du jeu non vérifiées (hors ligne ?) : ce sera refait à la prochaine partie." }
     # Caractéristiques de base des équipements vus à l'HDV (DofusDB) : après la capture, jamais pendant.
     try { & $python -m dofustool.staticdata.effects | ForEach-Object { Say $_ } } catch { Say "DofusDB injoignable : à relancer plus tard." }
+    # Décor des cartes, lu dans les fichiers du jeu installés : seulement quand le jeu a été mis à jour.
+    try { & $python -m dofustool.staticdata.maps --if-new | ForEach-Object { Say $_ } } catch { Say "Décor des cartes non lu : ce sera refait à la prochaine partie." }
 }
