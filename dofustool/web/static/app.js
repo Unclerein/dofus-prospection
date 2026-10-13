@@ -1244,7 +1244,7 @@ async function pageJobs() {
   const change = (mutate) => { mutate(); persist(); refresh(); };
 
   const level = xpToLevel(mine.xp);
-  const query = `job=${job.id}&xp=${mine.xp}&target=${mine.target}&bonus=${saved.bonus}&resale=${saved.resale ? 1 : 0}&exclude=${mine.exclude.join(',')}` + (job.mage ? `&rate=${saved.rate || 77}` : '');
+  const query = `job=${job.id}&xp=${mine.xp}&target=${mine.target}&bonus=${saved.bonus}&resale=${saved.resale ? 1 : 0}&exclude=${mine.exclude.join(',')}` + (job.mage ? `&rate=${saved.rate || 77}&heavy=${saved.heavy ? 1 : 0}` : '');
   const plan = await cached(`plan-${query}`, `/api/jobs/plan?${query}`);
 
   const controls = h('section', { class: 'panel pad filters', 'aria-label': 'Réglages' },
@@ -1262,7 +1262,10 @@ async function pageJobs() {
       h('input', { id: 'j-rate', type: 'number', min: 5, max: 100, value: saved.rate || 77, onchange: (e) => change(() => { saved.rate = Math.max(5, Math.min(100, Math.round(Number(e.target.value) || 77))); }) }))
       : h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-bonus' }, 'Bonus XP %'),
         h('input', { id: 'j-bonus', type: 'number', min: 0, value: saved.bonus, onchange: (e) => change(() => { saved.bonus = Math.max(0, Number(e.target.value) || 100); }) })),
-    !job.mage && h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
+    job.mage ? h('div', { class: 'field', title: 'Le moins cher : la rune la moins chère au point d\u2019XP, quitte à en passer beaucoup. Moins de runes : des runes plus lourdes (Pa, Ra) tant qu\u2019elles ne coûtent pas plus de 30 % de plus.' },
+      h('span', { class: 'label' }, 'Choix des runes'),
+      segmented('Choix des runes', [[false, 'Le moins cher'], [true, 'Moins de runes']], !!saved.heavy, (heavy) => change(() => { saved.heavy = heavy; })))
+      : h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
 
   const excluded = plan.excluded.length ? h('div', { class: 'tags', style: 'align-items: center' }, h('span', { class: 'muted small' }, 'Retirés :'),
     plan.excluded.map((x) => h('span', { class: 'chip on' }, x.name,

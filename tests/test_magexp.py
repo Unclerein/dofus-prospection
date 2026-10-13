@@ -97,11 +97,14 @@ def test_mage_plan_is_served(app_db, tmp_path):  # noqa: F811
     assert plan["mage"] and plan["pass_rate"] == 0.5 and plan["blocked_at"] is None and plan["end_level"] == 62
     (step,) = plan["steps"]
     assert (step["item_id"], step["level"], step["from_level"], step["to_level"], step["bought"]) == (500, 60, 60, 62, True)
-    # Deux lignes sur l'anneau : Vitalité (la Pa, chiffrée par fusion à 300 et non 999) et PA. La Rune Fo n'y a pas de ligne.
-    assert {rune["item_id"] for rune in step["runes"]} == {9002, 9003}
-    assert {rune["item_id"]: rune["price"] for rune in step["runes"]} == {9002: 300, 9003: 20_000}
+    # Deux lignes sur l'anneau : Vitalité et PA. La Rune Fo n'y a pas de ligne. Au moins cher : la rune Vi simple.
+    assert {rune["item_id"] for rune in step["runes"]} == {9001, 9003} and plan["heavy"] is False
+    # Moins de runes : la Pa Vi, chiffrée par fusion à 300 et non 999.
+    heavy = api.job_plan(63, jobxp.level_to_xp(60), 62, pass_rate=0.5, heavy=True)
+    assert heavy["heavy"] and {rune["item_id"]: rune["price"] for rune in heavy["steps"][0]["runes"]} == {9002: 300, 9003: 20_000}
+    assert heavy["crafts"] < plan["crafts"]
     assert plan["supports_cost"] == step["support_price"] and plan["cost"] == pytest.approx(step["cost"] + step["support_price"])
-    assert {row["item_id"] for row in plan["shopping"]} == {500, 9002, 9003}
+    assert {row["item_id"] for row in plan["shopping"]} == {500, 9001, 9003}
     assert api.job_plan(63, 0, 10)["blocked_at"] == 1  # aucun objet de niveau 1 à 10 : le plan le dit
     assert api.job_plan(63, jobxp.level_to_xp(60), 62, exclude=frozenset({500}))["blocked_at"] == 60
 
@@ -133,13 +136,18 @@ def test_rune_size_follows_the_weight_of_the_line():
     small, pa, ra = Rune(1, FO, 1, 40.0, SIMPLE), Rune(2, FO, 3, 120.0, PA), Rune(3, FO, 10, 400.0, RA)  # même prix au poids
     other = Rune(4, SA, 3, 240.0, PA)
 
-    def chosen(line_weight):
-        _, pair, _ = magexp.best_pair(Support(100, 200, {FO: line_weight, SA: 60}, 1.0), [small, pa, ra, other], 200)
+    def chosen(line_weight, margin=magexp.CHEAPEST):
+        _, pair, _ = magexp.best_pair(Support(100, 200, {FO: line_weight, SA: 60}, 1.0), [small, pa, ra, other], 200, margin)
         return {rune.item_id for rune in pair} - {4}
 
-    assert chosen(10) == {1}  # petite ligne : la rune simple, la Pa perd déjà trop souvent sa place
-    assert chosen(60) == {2}  # la Pa est à moins de 10 % de la simple : trois fois moins de passages
-    assert chosen(300) == {3}  # grosse ligne : la Ra
+    # Au moins cher : la rune simple tant qu'elle passe bien, la Ra sur une grosse ligne.
+    assert chosen(10) == {1} and chosen(60) == {1} and chosen(300) == {3}
+    # Moins de runes : la plus lourde qui ne coûte pas plus de 30 % de plus. La Ra reste hors jeu sur une petite ligne.
+    assert chosen(10, magexp.HEAVY_MARGIN) == {2} and chosen(60, magexp.HEAVY_MARGIN) == {3}
+    start = jobxp.level_to_xp(150)
+    cheap = magexp.cheapest_path([Support(100, 150, {FO: 60, SA: 60}, 1.0)], [small, pa, ra, other], start, 160)
+    heavy = magexp.cheapest_path([Support(100, 150, {FO: 60, SA: 60}, 1.0)], [small, pa, ra, other], start, 160, margin=magexp.HEAVY_MARGIN)
+    assert heavy.passes < cheap.passes and cheap.rune_cost <= heavy.rune_cost <= cheap.rune_cost * 1.31
     # Maximum inconnu : toutes passent aussi bien, la plus lourde l'emporte.
     _, pair, _ = magexp.best_pair(Support(100, 200, frozenset({FO, SA}), 1.0), [small, pa, ra, other], 200)
     assert ra in pair

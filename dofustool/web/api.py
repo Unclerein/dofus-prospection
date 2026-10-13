@@ -700,10 +700,11 @@ class Api:
         resale: bool = False,
         exclude: frozenset[int] = frozenset(),
         pass_rate: float = magexp.PASS_RATE,
+        heavy: bool = False,
     ) -> dict:
         """Chemin le moins coûteux pour monter un métier, et la liste de courses qui va avec."""
         if job_id in MAGE_OF.values():
-            return self._mage_plan(job_id, start_xp, target_level, exclude, pass_rate)
+            return self._mage_plan(job_id, start_xp, target_level, exclude, pass_rate, heavy)
         conn = self.connect()
         try:
             state = self._load(conn)
@@ -800,7 +801,9 @@ class Api:
         finally:
             conn.close()
 
-    def _mage_plan(self, job_id: int, start_xp: int, target_level: int, exclude: frozenset[int], pass_rate: float) -> dict:
+    def _mage_plan(
+        self, job_id: int, start_xp: int, target_level: int, exclude: frozenset[int], pass_rate: float, heavy: bool = False
+    ) -> dict:
         """Montée d'un métier de forgemagie : objet support et runes à alterner, tranche par tranche (analysis.magexp)."""
         conn = self.connect()
         try:
@@ -851,7 +854,8 @@ class Api:
                     continue
                 supports.append(magexp.Support(item_id, item.level, found, price))
 
-            plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate)
+            # heavy : des runes plus lourdes tant qu'elles ne coûtent pas beaucoup plus, pour moins de passages.
+            plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate, magexp.HEAVY_MARGIN if heavy else magexp.CHEAPEST)
             pending = len(base_effects.mage_items(conn))
             if pending and self.background_refresh:
                 self.fetch_mage_templates()
@@ -909,7 +913,7 @@ class Api:
             excluded = [named(i) for i in sorted(exclude)]
             return clean(
                 {
-                    "mage": True, "pass_rate": plan.pass_rate, "pending": pending, "supports_cost": bought_cost,
+                    "mage": True, "pass_rate": plan.pass_rate, "heavy": heavy, "pending": pending, "supports_cost": bought_cost,
                     "export": list(export.values()),
                     "steps": steps, "shopping": needs, "excluded": excluded,
                     "start_xp": plan.start_xp, "start_level": jobxp.xp_to_level(plan.start_xp),

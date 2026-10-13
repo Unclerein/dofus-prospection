@@ -41,7 +41,10 @@ LINE_RATES = {
 # Une rune qui ne tient pas sous le maximum de sa ligne : 31 % (234 passages). Une Ra (+10) sur une ligne dont
 # le maximum est 10 ne tient que si la ligne est à zéro, d'où l'avantage des Pa sur les petites lignes.
 OVER_RATE = 0.31
-CLOSE = 0.10  # à moins de 10 % du meilleur coût, on prend la rune la plus lourde : bien moins de passages
+# Deux façons de choisir la rune d'une ligne. Au moins cher : la meilleure au point d'XP, la plus lourde à coût
+# égal. Moins de runes : la plus lourde parmi celles qui ne coûtent pas plus de HEAVY_MARGIN de plus.
+CHEAPEST = 0.0
+HEAVY_MARGIN = 0.30
 SAMPLES = 24
 
 
@@ -125,12 +128,15 @@ class Plan:
         return sum(sum(step.runes.values()) for step in self.steps)
 
 
-def best_pair(support: Support, runes: list[Rune], job_level: int) -> tuple[float, tuple[Rune, ...], float] | None:
+def best_pair(
+    support: Support, runes: list[Rune], job_level: int, margin: float = CHEAPEST
+) -> tuple[float, tuple[Rune, ...], float] | None:
     """(kamas par point d'XP si tout passait, les runes à alterner, XP par unité de poids passée sur chaque ligne).
 
     Pour chaque ligne de l'objet, la rune la moins chère au point d'XP espéré : sa chance de passer dépend
     de sa taille et du poids de la ligne (line_rate), rapportée à la réussite ordinaire PASS_RATE. Parmi
-    celles qui sont à moins de CLOSE du meilleur coût, la plus lourde : bien moins de passages. Puis les
+    celles qui ne coûtent pas plus de `margin` de plus que la meilleure, la plus lourde : moins de passages
+    (margin 0 : le moins cher, la plus lourde seulement à coût égal). Puis les
     deux lignes les moins chères. Une seule rune si l'objet n'a qu'une ligne où en passer une (voir
     SINGLE_LINE). None s'il n'en a aucune.
     """
@@ -148,7 +154,7 @@ def best_pair(support: Support, runes: list[Rune], job_level: int) -> tuple[floa
     by_line: dict[int, tuple[float, float, Rune, float]] = {}
     for effect_id, found in candidates.items():
         cheapest = min(entry[0] for entry in found)
-        by_line[effect_id] = min((entry for entry in found if entry[0] <= cheapest * (1 + CLOSE)), key=lambda entry: entry[1])
+        by_line[effect_id] = min((entry for entry in found if entry[0] <= cheapest * (1 + margin) + 1e-12), key=lambda entry: entry[1])
     if not by_line:
         return None
     if len(by_line) == 1:
@@ -162,8 +168,9 @@ def best_pair(support: Support, runes: list[Rune], job_level: int) -> tuple[floa
 
 
 def cheapest_path(
-    supports: list[Support], runes: list[Rune], start_xp: int, target_level: int, pass_rate: float = PASS_RATE
-) -> Plan:
+    supports: list[Support], runes: list[Rune], start_xp: int, target_level: int, pass_rate: float = PASS_RATE,
+    margin: float = CHEAPEST,
+) -> Plan:  # fmt: skip
     """Chemin le moins coûteux sur tout le trajet, prix des objets supports compris.
 
     Niveau par niveau, chaque objet a un coût au point d'XP (ses deux meilleures runes). Le meilleur
@@ -193,7 +200,7 @@ def cheapest_path(
         for support in supports:
             if support.level > level or not fitting[support.item_id]:
                 continue
-            pair = best_pair(support, fitting[support.item_id], level)
+            pair = best_pair(support, fitting[support.item_id], level, margin)
             if pair is not None:
                 rate, chosen, gained = pair
                 passing = pass_rate * (SINGLE_LINE if len(chosen) == 1 else 1.0)
