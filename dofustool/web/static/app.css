@@ -624,3 +624,8 @@ tr.mine.focus td { background: color-mix(in srgb, var(--accent) 12%, transparent
 .import-help .panel-head { flex-wrap: nowrap; align-items: center; gap: 8px; }
 .import-help .panel-head h2 { flex: 1 1 auto; min-width: 0; }
 .import-help .panel-head .icon-btn { flex: none; margin: 0; }
+/* Métiers de forgemagie : les runes d'une étape l'une sous l'autre, pour que le tableau tienne en largeur. */
+.rune-list { display: grid; gap: 4px; }
+.rune-line { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.rune-line .tile { width: 28px; height: 28px; flex: none; }
+table.mage-steps td.act { width: 88px; }

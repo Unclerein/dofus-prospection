@@ -1262,7 +1262,7 @@ async function pageJobs() {
       h('input', { id: 'j-rate', type: 'number', min: 5, max: 100, value: saved.rate || 77, onchange: (e) => change(() => { saved.rate = Math.max(5, Math.min(100, Math.round(Number(e.target.value) || 77))); }) }))
       : h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-bonus' }, 'Bonus XP %'),
         h('input', { id: 'j-bonus', type: 'number', min: 0, value: saved.bonus, onchange: (e) => change(() => { saved.bonus = Math.max(0, Number(e.target.value) || 100); }) })),
-    job.mage ? h('div', { class: 'field', title: 'Le moins cher : la rune la moins chère au point d\u2019XP, quitte à en passer beaucoup. Moins de runes : des runes plus lourdes (Pa, Ra) tant qu\u2019elles ne coûtent pas plus de 30 % de plus.' },
+    job.mage ? h('div', { class: 'field', title: 'Le moins cher : la rune la moins chère au point d\u2019XP, quitte à en passer beaucoup. Moins de runes : chaque passage compte en plus pour 100 kamas de ton temps, d\u2019où des runes plus lourdes et des objets de plus haut niveau.' },
       h('span', { class: 'label' }, 'Choix des runes'),
       segmented('Choix des runes', [[false, 'Le moins cher'], [true, 'Moins de runes']], !!saved.heavy, (heavy) => change(() => { saved.heavy = heavy; })))
       : h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
@@ -1297,13 +1297,13 @@ async function pageJobs() {
   const steps = h('section', { class: 'panel', 'aria-label': 'Étapes' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Étapes'), h('span', { class: 'muted small' }, plan.mage ? `${plan.candidates} objets supports possibles · ${plan.runes} runes chiffrées` : `${plan.candidates} recettes chiffrées`)),
     plan.steps.length === 0 ? h('div', { class: 'empty' }, 'Aucune étape.')
-      : plan.mage ? h('div', { class: 'scroll' }, h('table', { style: 'min-width: 980px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet support'), h('th', { class: 'l' }, 'Runes à alterner'), h('th', {}, 'XP'), h('th', {}, 'Coût des runes'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
+      : plan.mage ? h('div', { class: 'scroll' }, h('table', { class: 'mage-steps', style: 'min-width: 820px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet support'), h('th', { class: 'l', title: 'Nombre de runes à passer, échecs compris, et prix d\u2019une rune' }, 'Runes à passer'), h('th', {}, 'XP'), h('th', {}, 'Coût des runes'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
         h('tbody', {}, plan.steps.map((step) => h('tr', {},
           h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
-          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${step.item_id}` }, itemCell(step.icon, step.name, `niv. ${step.level} · ` + (step.bought ? `à acheter, environ ${fmt(step.support_price)}` : 'déjà acheté plus haut') + (step.single ? ' · une seule ligne : réussite comptée à moitié' : ''), step.item_id))),
-          h('td', { class: 'l' }, step.runes.map((rune) => h('div', { class: 'with-ico', style: 'margin: 2px 0' }, tile(rune.icon, false, rune.item_id),
-            h('span', {}, h('b', {}, `× ${fmt(rune.count)} `), rune.name, h('span', { class: 'muted small' }, ` · ${unitLabel(rune.price)} pièce`))))),
+          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${step.item_id}` }, itemCell(step.icon, step.name, `niv. ${step.level} · ` + (step.bought ? `achat ≈ ${fmt(step.support_price)}` : 'déjà acheté') + (step.single ? ' · 1 ligne' : ''), step.item_id))),
+          h('td', { class: 'l' }, h('div', { class: 'rune-list' }, step.runes.map((rune) => h('div', { class: 'rune-line' }, tile(rune.icon, false, rune.item_id),
+            h('span', {}, h('b', {}, `× ${fmt(rune.count)} `), rune.name.replace('Rune ', ''), h('span', { class: 'muted small' }, ` · ${unitLabel(rune.price)}`)))))),
           h('td', { class: 'soft' }, fmt(step.xp)),
           h('td', { class: 'strong' }, fmt(step.cost)),
           h('td', { class: 'soft' }, (step.cost / step.xp).toFixed(1).replace('.', ',')),

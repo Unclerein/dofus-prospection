@@ -25,9 +25,10 @@ from dataclasses import dataclass, field
 from .jobxp import MAX_LEVEL, level_to_xp, xp_to_level
 
 PASS_RATE = 0.77  # part des runes qui passent, ligne sous son maximum (mesurée sur 4 342 passages)
-# Objet à une seule ligne utilisable : rien à alterner, la ligne bute sur son maximum (un quart de réussite
-# mesuré là) jusqu'à ce qu'un échec la fasse redescendre. Hypothèse : moitié moins de runes qui passent.
-SINGLE_LINE = 0.5
+# Une seule ligne travaillée : rien à alterner, seuls ses propres échecs la font redescendre, donc elle reste
+# plus souvent collée à son maximum que ne le suppose line_rate. Hypothèse, non mesurée : un quart de réussite
+# en moins. Un objet à deux lignes peut aussi être travaillé ainsi, quand sa seconde ligne coûte trop cher.
+SINGLE_LINE = 0.75
 # Chance de passer selon la taille de la rune et le poids déjà présent sur la ligne (valeur x densité),
 # mesurée sur l'archive, ligne sous son maximum. Une rune simple passe très bien sur une ligne peu chargée
 # et presque plus au-delà de 100 de poids ; une Pa tient mieux ; une Ra reste stable. C'est ce qui fait
@@ -41,10 +42,11 @@ LINE_RATES = {
 # Une rune qui ne tient pas sous le maximum de sa ligne : 31 % (234 passages). Une Ra (+10) sur une ligne dont
 # le maximum est 10 ne tient que si la ligne est à zéro, d'où l'avantage des Pa sur les petites lignes.
 OVER_RATE = 0.31
-# Deux façons de choisir la rune d'une ligne. Au moins cher : la meilleure au point d'XP, la plus lourde à coût
-# égal. Moins de runes : la plus lourde parmi celles qui ne coûtent pas plus de HEAVY_MARGIN de plus.
+# Deux façons de choisir. Au moins cher : seuls les kamas comptent. Moins de runes : chaque rune passée coûte
+# en plus CLICK_COST kamas de temps (à 1,5 s le passage, 100 kamas valent le temps à 240 000 kamas de l'heure) ;
+# runes lourdes et objets de plus haut niveau deviennent alors préférables dès qu'ils épargnent des passages.
 CHEAPEST = 0.0
-HEAVY_MARGIN = 0.30
+CLICK_COST = 100.0
 SAMPLES = 24
 
 
@@ -129,18 +131,17 @@ class Plan:
 
 
 def best_pair(
-    support: Support, runes: list[Rune], job_level: int, margin: float = CHEAPEST
+    support: Support, runes: list[Rune], job_level: int, click: float = CHEAPEST
 ) -> tuple[float, tuple[Rune, ...], float] | None:
-    """(kamas par point d'XP si tout passait, les runes à alterner, XP par unité de poids passée sur chaque ligne).
+    """(coût par point d'XP si la réussite était ordinaire, les runes à passer, XP par unité de poids tentée).
 
     Pour chaque ligne de l'objet, la rune la moins chère au point d'XP espéré : sa chance de passer dépend
-    de sa taille et du poids de la ligne (line_rate), rapportée à la réussite ordinaire PASS_RATE. Parmi
-    celles qui ne coûtent pas plus de `margin` de plus que la meilleure, la plus lourde : moins de passages
-    (margin 0 : le moins cher, la plus lourde seulement à coût égal). Puis les
-    deux lignes les moins chères. Une seule rune si l'objet n'a qu'une ligne où en passer une (voir
-    SINGLE_LINE). None s'il n'en a aucune.
+    de sa taille et du poids de la ligne (line_rate), rapportée à la réussite ordinaire PASS_RATE. `click`
+    s'ajoute au prix de chaque rune (voir CLICK_COST) ; à coût égal, la plus lourde. Puis on alterne les
+    deux lignes les moins chères, ou on ne travaille que la meilleure si c'est moins cher malgré SINGLE_LINE.
+    None si aucune rune chiffrée ne va sur l'objet.
     """
-    candidates: dict[int, list[tuple[float, float, Rune, float]]] = {}
+    by_line: dict[int, tuple[float, float, Rune, float]] = {}
     for rune in runes:
         if rune.effect_id not in support.lines:
             continue
@@ -150,30 +151,31 @@ def best_pair(
         line_max = support.line_max(rune.effect_id)
         if line_max:
             gained = gained * line_rate(rune.tier, rune.weight, line_max) / PASS_RATE
-        candidates.setdefault(rune.effect_id, []).append((rune.price / gained, -rune.weight, rune, gained))
-    by_line: dict[int, tuple[float, float, Rune, float]] = {}
-    for effect_id, found in candidates.items():
-        cheapest = min(entry[0] for entry in found)
-        by_line[effect_id] = min((entry for entry in found if entry[0] <= cheapest * (1 + margin) + 1e-12), key=lambda entry: entry[1])
+        key = ((rune.price + click) / gained, -rune.weight, rune, gained)
+        if rune.effect_id not in by_line or key[:2] < by_line[rune.effect_id][:2]:
+            by_line[rune.effect_id] = key
     if not by_line:
         return None
-    if len(by_line) == 1:
-        (_, _, only, gained), = by_line.values()
-        return only.price / gained, (only,), gained / only.weight
-    (_, _, first, xp_a), (_, _, second, xp_b) = sorted(by_line.values(), key=lambda entry: entry[:2])[:2]
-    # Autant de poids passe sur chaque ligne : pour 1 de poids sur chacune, voici le coût et l'XP.
-    cost = first.price / first.weight + second.price / second.weight
+    ranked = sorted(by_line.values(), key=lambda entry: entry[:2])
+    rate, _, first, xp_a = ranked[0]
+    alone = (rate / SINGLE_LINE, (first,), xp_a / first.weight * SINGLE_LINE)
+    if len(ranked) == 1:
+        return alone
+    _, _, second, xp_b = ranked[1]
+    # Autant de poids tenté sur chaque ligne : pour 1 de poids sur chacune, voici le coût et l'XP.
+    cost = (first.price + click) / first.weight + (second.price + click) / second.weight
     gained = xp_a / first.weight + xp_b / second.weight
-    return cost / gained, (first, second), gained
+    return alone if alone[0] < cost / gained else (cost / gained, (first, second), gained)
 
 
 def cheapest_path(
     supports: list[Support], runes: list[Rune], start_xp: int, target_level: int, pass_rate: float = PASS_RATE,
-    margin: float = CHEAPEST,
+    click: float = CHEAPEST,
 ) -> Plan:  # fmt: skip
     """Chemin le moins coûteux sur tout le trajet, prix des objets supports compris.
 
-    Niveau par niveau, chaque objet a un coût au point d'XP (ses deux meilleures runes). Le meilleur
+    Niveau par niveau, chaque objet a un coût au point d'XP (ses meilleures runes ; `click` y ajoute le
+    temps de chaque passage, sans entrer dans les kamas affichés). Le meilleur
     enchaînement d'objets se calcule de proche en proche : à chaque niveau, garder l'objet en main ou en
     acheter un autre. On ne change donc d'objet que si le gain rembourse son prix d'ici la fin. Racheter
     un objet déjà utilisé plus tôt est compté comme un nouvel achat : cela n'arrive presque jamais.
@@ -200,11 +202,10 @@ def cheapest_path(
         for support in supports:
             if support.level > level or not fitting[support.item_id]:
                 continue
-            pair = best_pair(support, fitting[support.item_id], level, margin)
+            pair = best_pair(support, fitting[support.item_id], level, click)
             if pair is not None:
                 rate, chosen, gained = pair
-                passing = pass_rate * (SINGLE_LINE if len(chosen) == 1 else 1.0)
-                found[support.item_id] = (rate / passing * needed[level], chosen, gained * passing)
+                found[support.item_id] = (rate / pass_rate * needed[level], chosen, gained * pass_rate)
         options[level] = found
 
     # De proche en proche : coût minimal pour finir chaque niveau avec tel objet en main.

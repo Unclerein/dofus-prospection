@@ -33,9 +33,13 @@ def test_best_pair_takes_the_two_cheapest_lines():
     # Par point d'XP : So 2,5 ; Fo 2 (la Pa, aussi chère que la petite mais trois fois moins de passages) ; Sa 4.
     assert (first.item_id, second.item_id) == (2, 4)
     assert gained == pytest.approx(20 + 20) and rate == pytest.approx((40 + 50) / 40)
-    # Une seule ligne : une seule rune, rien à alterner. Aucune ligne : rien.
+    # Une seule ligne : une seule rune, rien à alterner, un quart de réussite en moins. Aucune ligne : rien.
     rate, only, gained = magexp.best_pair(Support(101, 200, frozenset({FO}), 1.0), RUNES, 200)
-    assert [r.item_id for r in only] == [2] and rate == pytest.approx(2.0) and gained == pytest.approx(20)
+    assert [r.item_id for r in only] == [2] and rate == pytest.approx(2.0 / 0.75) and gained == pytest.approx(20 * 0.75)
+    # Deux lignes dont l'une est hors de prix : on ne travaille que la bonne.
+    costly = [RUNES[1], Rune(9, SA, 3, 90_000.0)]
+    _, pair, _ = magexp.best_pair(Support(101, 200, frozenset({FO, SA}), 1.0), costly, 200)
+    assert [r.item_id for r in pair] == [2]
     assert magexp.best_pair(Support(101, 200, frozenset({999}), 1.0), RUNES, 200) is None
     assert magexp.best_pair(ring, RUNES, 199) is None  # hors de portée du métier
 
@@ -97,28 +101,30 @@ def test_mage_plan_is_served(app_db, tmp_path):  # noqa: F811
     assert plan["mage"] and plan["pass_rate"] == 0.5 and plan["blocked_at"] is None and plan["end_level"] == 62
     (step,) = plan["steps"]
     assert (step["item_id"], step["level"], step["from_level"], step["to_level"], step["bought"]) == (500, 60, 60, 62, True)
-    # Deux lignes sur l'anneau : Vitalité et PA. La Rune Fo n'y a pas de ligne. Au moins cher : la rune Vi simple.
-    assert {rune["item_id"] for rune in step["runes"]} == {9001, 9003} and plan["heavy"] is False
+    # Deux lignes sur l'anneau, Vitalité et PA, mais la rune de PA est hors de prix : seule la Vitalité est travaillée.
+    # La Rune Fo n'y a pas de ligne. Au moins cher : la rune Vi simple.
+    assert {rune["item_id"] for rune in step["runes"]} == {9001} and step["single"] and plan["heavy"] is False
     # Moins de runes : la Pa Vi, chiffrée par fusion à 300 et non 999.
     heavy = api.job_plan(63, jobxp.level_to_xp(60), 62, pass_rate=0.5, heavy=True)
-    assert heavy["heavy"] and {rune["item_id"]: rune["price"] for rune in heavy["steps"][0]["runes"]} == {9002: 300, 9003: 20_000}
+    assert heavy["heavy"] and {rune["item_id"]: rune["price"] for rune in heavy["steps"][0]["runes"]} == {9002: 300}
     assert heavy["crafts"] < plan["crafts"]
     assert plan["supports_cost"] == step["support_price"] and plan["cost"] == pytest.approx(step["cost"] + step["support_price"])
-    assert {row["item_id"] for row in plan["shopping"]} == {500, 9001, 9003}
+    assert {row["item_id"] for row in plan["shopping"]} == {500, 9001}
     assert api.job_plan(63, 0, 10)["blocked_at"] == 1  # aucun objet de niveau 1 à 10 : le plan le dit
     assert api.job_plan(63, jobxp.level_to_xp(60), 62, exclude=frozenset({500}))["blocked_at"] == 60
 
 
 def test_single_line_support_is_a_last_resort():
-    """Un objet à une seule ligne sert faute de mieux : moitié moins de runes y passent."""
+    """Un objet à une seule ligne sert faute de mieux : un quart de runes en moins y passent."""
+    cheap = [RUNES[0], Rune(3, SA, 1, 40.0)]  # deux runes simples au même prix
     one = Support(100, 1, frozenset({FO}), 100.0)
-    two = Support(101, 10, frozenset({FO, SA}), 100.0)
-    plan = magexp.cheapest_path([one, two], RUNES, 0, 12, pass_rate=1.0)
+    two = Support(101, 10, frozenset({FO, SA}), 1.0)
+    plan = magexp.cheapest_path([one, two], cheap, 0, 12, pass_rate=1.0)
     assert [(s.item_id, s.from_level, s.to_level, s.single) for s in plan.steps] == [(100, 1, 10, True), (101, 10, 12, False)]
-    assert set(plan.steps[0].runes) <= {1, 2} and len(plan.steps[1].runes) >= 2  # une seule ligne : des runes Fo seulement
-    alone = magexp.cheapest_path([one], RUNES, 0, 5, pass_rate=1.0)
-    twice = magexp.cheapest_path([Support(100, 1, frozenset({FO, SA}), 100.0)], [RUNES[0], Rune(3, SA, 1, 40.0)], 0, 5, pass_rate=1.0)
-    assert alone.rune_cost == pytest.approx(2 * twice.rune_cost, rel=0.1)  # même prix au poids, deux fois plus de runes
+    assert set(plan.steps[0].runes) == {1} and set(plan.steps[1].runes) == {1, 3}
+    alone = magexp.cheapest_path([one], cheap, 0, 5, pass_rate=1.0)
+    twice = magexp.cheapest_path([Support(100, 1, frozenset({FO, SA}), 100.0)], cheap, 0, 5, pass_rate=1.0)
+    assert alone.rune_cost == pytest.approx(twice.rune_cost / 0.75, rel=0.1)  # même prix au poids, un tiers de runes en plus
 
 
 def test_rune_size_follows_the_weight_of_the_line():
@@ -136,18 +142,18 @@ def test_rune_size_follows_the_weight_of_the_line():
     small, pa, ra = Rune(1, FO, 1, 40.0, SIMPLE), Rune(2, FO, 3, 120.0, PA), Rune(3, FO, 10, 400.0, RA)  # même prix au poids
     other = Rune(4, SA, 3, 240.0, PA)
 
-    def chosen(line_weight, margin=magexp.CHEAPEST):
-        _, pair, _ = magexp.best_pair(Support(100, 200, {FO: line_weight, SA: 60}, 1.0), [small, pa, ra, other], 200, margin)
+    def chosen(line_weight, click=magexp.CHEAPEST):
+        _, pair, _ = magexp.best_pair(Support(100, 200, {FO: line_weight, SA: 60}, 1.0), [small, pa, ra, other], 200, click)
         return {rune.item_id for rune in pair} - {4}
 
     # Au moins cher : la rune simple tant qu'elle passe bien, la Ra sur une grosse ligne.
     assert chosen(10) == {1} and chosen(60) == {1} and chosen(300) == {3}
-    # Moins de runes : la plus lourde qui ne coûte pas plus de 30 % de plus. La Ra reste hors jeu sur une petite ligne.
-    assert chosen(10, magexp.HEAVY_MARGIN) == {2} and chosen(60, magexp.HEAVY_MARGIN) == {3}
+    # Moins de runes : chaque passage coûte aussi du temps. La Pa sur une petite ligne (la Ra n'y tient pas), la Ra dès qu'elle tient.
+    assert chosen(10, magexp.CLICK_COST) == {2} and chosen(60, magexp.CLICK_COST) == {3}
     start = jobxp.level_to_xp(150)
     cheap = magexp.cheapest_path([Support(100, 150, {FO: 60, SA: 60}, 1.0)], [small, pa, ra, other], start, 160)
-    heavy = magexp.cheapest_path([Support(100, 150, {FO: 60, SA: 60}, 1.0)], [small, pa, ra, other], start, 160, margin=magexp.HEAVY_MARGIN)
-    assert heavy.passes < cheap.passes and cheap.rune_cost <= heavy.rune_cost <= cheap.rune_cost * 1.31
+    heavy = magexp.cheapest_path([Support(100, 150, {FO: 60, SA: 60}, 1.0)], [small, pa, ra, other], start, 160, click=magexp.CLICK_COST)
+    assert heavy.passes < cheap.passes / 2 and cheap.rune_cost <= heavy.rune_cost  # le coût affiché reste en kamas
     # Maximum inconnu : toutes passent aussi bien, la plus lourde l'emporte.
     _, pair, _ = magexp.best_pair(Support(100, 200, frozenset({FO, SA}), 1.0), [small, pa, ra, other], 200)
     assert ra in pair

@@ -854,8 +854,8 @@ class Api:
                     continue
                 supports.append(magexp.Support(item_id, item.level, found, price))
 
-            # heavy : des runes plus lourdes tant qu'elles ne coûtent pas beaucoup plus, pour moins de passages.
-            plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate, magexp.HEAVY_MARGIN if heavy else magexp.CHEAPEST)
+            # heavy : chaque passage compte aussi pour du temps, d'où des runes plus lourdes et des objets de plus haut niveau.
+            plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate, magexp.CLICK_COST if heavy else magexp.CHEAPEST)
             pending = len(base_effects.mage_items(conn))
             if pending and self.background_refresh:
                 self.fetch_mage_templates()
