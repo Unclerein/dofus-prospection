@@ -17,6 +17,11 @@ LINES = f"""# en-tête
     3.000 s2c jsq 99 | 12.2.1.1.3.5=77 12.2.1.2.3={ME} 12.2.1.2.4.2=44 12.2.1.2.4.3.2=16 12.2.1.2.4.3.2=120 12.2.1.2.4.2=11 12.2.1.2.4.3.2=30 12.2.1.5.3.1={PET} 12.2.1.5.3.2.3=231 22=181 36={ME}
     4.000 s2c jvj 18 | 2=290 3={FOE} 6=1 7=1
     4.500 s2c jsq 30 | 22=100 36={FOE} 37.5={ME} 37.6=12
+    4.600 s2c jtk 20 | 1.1=2 1.4.2=96 1.4.3.2=400 2={ME}
+    4.600 s2c jtk 20 | 1.1=2 1.4.2=1 1.4.3.2=9 2={ME}
+    4.700 s2c jtk 20 | 1.1=2 1.4.2=96 1.4.3.2=391 2={ME}
+    4.700 s2c jsq 27 | 22=100 36={FOE} 37.2=9 37.5={ME}
+    4.800 s2c jsq 27 | 22=3793 25.1=222 25.2=3 25.5=310 36={ME}
     5.000 s2c jvj 15 | 2=430 3={ME} 4=150 7=2
     6.000 s2c jsq 30 | 5.1={FOE} 5.2=100 5.3=128 22=5 36={PET}
     6.000 s2c jsq 30 | 22=80 36={PET} 37.4=-1 37.5={FOE} 37.6=30
@@ -37,12 +42,13 @@ def test_fight_is_read_turn_by_turn():
     (fight,) = journal.read_extract(LINES)
     assert fight.ended and fight.rounds == 2
     kinds = [e.kind for e in fight.events]
-    assert kinds == ["sheet", "sheet", "start", "turn", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "turn", "push", "damage", "death", "end"]
+    assert kinds == ["sheet", "sheet", "start", "turn", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "shield", "shield", "damage", "trigger", "turn", "push", "damage", "death", "end"]
     cast = fight.events[4]
     assert (cast.source, cast.target, cast.spell, cast.cell) == (ME, FOE, 111, 203)
-    assert [e.element for e in fight.events if e.kind == "damage"] == ["air", "neutre", "poussée"]
+    assert [e.element for e in fight.events if e.kind == "damage"] == ["air", "neutre", "neutre", "poussée"]
     me, foe, pet = fight.fighters[ME], fight.fighters[FOE], fight.fighters[PET]
     assert (me.dealt, me.taken, me.healed, me.dead) == (50, 12, 25, False)  # le coup reçu après la fin ne compte pas
+    assert (me.absorbed, me.shield) == (9, 391)  # le coup pris par le bouclier ne touche pas aux points de vie
     assert (foe.taken, foe.dead) == (80, True)
     assert pet.summoner == ME and pet.dealt == 30
     # vie de base + vitalité ; la mienne part de ce que j'avais en entrant, pas du maximum

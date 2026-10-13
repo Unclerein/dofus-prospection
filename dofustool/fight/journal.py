@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 FIGHT_START, FIGHT_END, TURN, ACTION = "jxr", "jwp", "jvj", "jsq"
 SHEET, MY_LIFE = "jwj", "kqo"  # fiche d'un combattant à son entrée ; mes points de vie hors combat
+STAT = "jtk"  # une stat d'un combattant change
+SHIELD_STAT = 96
 
 # Les points de vie de départ sont la somme de deux stats de la fiche, toutes parts confondues
 # (base, équipement, bonus) : la vie de base (stat 0, dont l'identifiant n'est donc pas écrit) et la vitalité.
@@ -20,6 +22,7 @@ SHEET_STATS, SUMMON_STATS = "1.3.4.7.4.", "12.2.1.2.4."
 
 # Champ 22 d'une action : ce qu'elle fait.
 CAST, DEATH, SUMMON, INVISIBLE = 300, 103, 181, 150
+POISON = 3793  # un poison ou un effet posé plus tôt se déclenche ; la ligne de dégâts suit
 AP_USED, MP_USED = 102, 129
 # Champ 37.4 d'une ligne de dégâts ; absent pour le neutre. Le code d'action dit la même chose
 # (96 eau, 97 terre, 98 air, 99 feu, 100 neutre, 92 et 93 vols de vie, 80 poussée) mais pas toujours (1133, 2822).
@@ -73,7 +76,7 @@ def life(fields: Fields, prefix: str) -> int | None:
 @dataclass
 class Event:
     when: float
-    kind: str  # start, end, turn, sheet, life, cast, damage, heal, death, summon, push, invisible, spent
+    kind: str  # start, end, turn, sheet, life, cast, trigger, damage, heal, shield, death, summon, push, invisible, spent
     source: int | None = None
     target: int | None = None
     amount: int | None = None
@@ -81,6 +84,7 @@ class Event:
     spell: int | None = None
     cell: int | None = None
     round: int | None = None
+    absorbed: int = 0  # part d'un coup prise par le bouclier
 
 
 def event(when: float, direction: str, key: str, fields: Fields) -> Event | None:
@@ -98,6 +102,10 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
                      spell=number(fields, "1.3.4.6.3.3"), cell=number(fields, "1.2.3"))
     if key == MY_LIFE:
         return Event(when, "life", amount=number(fields, "3"))
+    if key == STAT:
+        if number(fields, "1.4.2") != SHIELD_STAT:
+            return None
+        return Event(when, "shield", target=number(fields, "2"), amount=number(fields, "1.4.3.2") or 0)
     if key != ACTION:
         return None
     action, source = number(fields, "22"), number(fields, "36")
@@ -112,8 +120,11 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
         return Event(when, "invisible", source, number(fields, "14.2"), amount=number(fields, "14.1"))
     if action in (AP_USED, MP_USED):
         return Event(when, "spent", source, number(fields, "13.3"), amount=number(fields, "13.2"), element="PA" if action == AP_USED else "PM")
-    if number(fields, "37.6") is not None:
-        return Event(when, "damage", source, number(fields, "37.5"), amount=number(fields, "37.6"), element=ELEMENTS.get(number(fields, "37.4"), ""))
+    if action == POISON:
+        return Event(when, "trigger", source, spell=number(fields, "25.1"), cell=number(fields, "25.5"))
+    if number(fields, "37.6") is not None or number(fields, "37.2") is not None:
+        return Event(when, "damage", source, number(fields, "37.5"), amount=number(fields, "37.6") or 0,
+                     element=ELEMENTS.get(number(fields, "37.4"), ""), absorbed=number(fields, "37.2") or 0)
     if number(fields, "39.4") is not None:
         return Event(when, "heal", source, number(fields, "39.2"), amount=number(fields, "39.4"))
     if number(fields, "5.3") is not None:
@@ -126,6 +137,8 @@ class Tally:
     dealt: int = 0
     taken: int = 0
     healed: int = 0
+    absorbed: int = 0
+    shield: int = 0  # points de bouclier en ce moment
     dead: bool = False
     summoner: int | None = None
     monster: int | None = None  # None pour un personnage ou un compagnon
@@ -158,8 +171,11 @@ class Fight:
             self.rounds = max(self.rounds, item.round)
         elif item.kind == "damage" and item.target is not None:
             self.fighters[item.target].taken += item.amount
+            self.fighters[item.target].absorbed += item.absorbed
             if item.source is not None:
                 self.fighters[item.source].dealt += item.amount
+        elif item.kind == "shield" and item.target is not None:
+            self.fighters[item.target].shield = item.amount
         elif item.kind == "heal" and item.target is not None:
             self.fighters[item.target].healed += item.amount
         elif item.kind == "death" and item.target is not None:
