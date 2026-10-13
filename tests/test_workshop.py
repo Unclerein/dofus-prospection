@@ -200,3 +200,19 @@ def test_workshop_opens_containers_before_buying(app_db):  # noqa: F811
     stock_rows = {row["item_id"]: row for row in api.stock()["rows"]}
     assert stock_rows[900]["contains"] == {"item_id": 1, "name": line["name"], "per": 10, "units": 30}
     assert stock_rows[1]["packed"] == 30 and stock_rows[1]["total"] == 4
+
+
+def test_cheapest_counts_what_is_already_owned():
+    """Remarque d'un ami : l'ingrédient cher déjà en stock (la Légende des Mériana) ne doit plus faire choisir l'achat."""
+    # Une épée : acheter 1 000, fabriquer 2 lames (200) + 5 bois (10) = 450. Lames trop chères : achat.
+    prices = {**PRICES, BLADE: 600.0}
+    assert plan([Goal(1, SWORD, 1)], prices=prices).goals[0].mode == BUY  # 1 250 à fabriquer contre 1 000
+    # Mais les deux lames sont déjà là : il ne reste que le bois, 50.
+    found = plan([Goal(1, SWORD, 1)], stock={BLADE: 2}, prices=prices)
+    goal = found.goals[0]
+    assert (goal.mode, goal.craft_cost, goal.buy_cost) == (CRAFT, 50.0, 1_000.0)
+    assert found.lines == {BLADE: 2, WOOD: 5}  # les lames restent à réunir : elles sont prises dans le stock
+    # Un ingrédient possédé n'a pas besoin de prix ; une épée déjà faite ne coûte plus rien à acheter.
+    assert plan([Goal(1, SWORD, 1)], stock={BLADE: 2}, prices={**prices, BLADE: None}).goals[0].craft_cost == 50.0
+    owned_sword = plan([Goal(1, SWORD, 2)], stock={SWORD: 1}).goals[0]
+    assert owned_sword.buy_cost == 1_000.0 and owned_sword.craft_cost == 450.0  # une seule reste à obtenir

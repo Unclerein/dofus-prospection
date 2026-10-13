@@ -7,6 +7,9 @@ que le joueur l'« ouvre » pour le remplacer par ses propres ingrédients.
 Ce que le joueur possède déjà est déduit : d'abord des objets à fabriquer (objectif ou ingrédient
 ouvert déjà en stock), puis des lignes à acheter. Chaque liste est calculée face au stock entier ;
 quand plusieurs listes veulent la même ressource, le besoin total est donné à côté.
+
+« Le moins cher » compare ce qu'il reste à payer : un ingrédient cher déjà en stock fait pencher
+vers la fabrication.
 """
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,8 +34,8 @@ class GoalPlan:
     goal: Goal
     mode: str  # ce qui est retenu
     craftable: bool
-    buy_cost: float | None  # tout acheter fait
-    craft_cost: float | None  # acheter les ingrédients du premier niveau
+    buy_cost: float | None  # tout acheter fait, exemplaires déjà possédés déduits
+    craft_cost: float | None  # acheter les ingrédients du premier niveau qui manquent encore
     owned: int  # exemplaires déjà possédés
     to_make: int  # à fabriquer, une fois le stock déduit (0 pour un objectif acheté)
 
@@ -47,14 +50,22 @@ class Plan:
     sources: dict[int, dict[int, int]] = field(default_factory=dict)
 
 
-def first_level_cost(recipe: Recipe, price: Callable[[int], float | None]) -> float | None:
-    """Coût d'une fabrication en achetant chaque ingrédient ; None si l'un d'eux n'a pas de prix."""
+def first_level_cost(
+    recipe: Recipe, price: Callable[[int], float | None], count: int = 1, free: Callable[[int], int] = lambda _: 0
+) -> float | None:
+    """Coût de count fabrications en achetant les ingrédients qui manquent (free : ce qui est déjà là).
+
+    None si un ingrédient à acheter n'a pas de prix ; un ingrédient déjà possédé n'a pas besoin d'en avoir.
+    """
     total = 0.0
     for item_id, quantity in recipe.ingredients:
+        missing = max(0, quantity * count - free(item_id))
+        if missing == 0:
+            continue
         unit = price(item_id)
         if unit is None:
             return None
-        total += unit * quantity
+        total += unit * missing
     return total
 
 
@@ -68,10 +79,12 @@ def plan(
     out = Plan()
     used: dict[int, int] = {}  # stock déjà affecté à un objet à fabriquer
 
+    def free(item_id: int) -> int:
+        return max(0, owned(item_id) - used.get(item_id, 0))
+
     def take(item_id: int, wanted: int) -> int:
         """Prend dans le stock ce qui est disponible pour cet objet ; renvoie ce qu'il reste à produire."""
-        free = max(0, owned(item_id) - used.get(item_id, 0))
-        taken = min(wanted, free)
+        taken = min(wanted, free(item_id))
         used[item_id] = used.get(item_id, 0) + taken
         return wanted - taken
 
@@ -93,10 +106,11 @@ def plan(
     for goal in goals:
         recipe = recipes.get(goal.item_id)
         craftable = recipe is not None and bool(recipe.ingredients)
+        # Les deux coûts comparent ce qu'il reste à payer : un objet ou un ingrédient déjà possédé ne coûte rien.
+        left = max(0, goal.quantity - free(goal.item_id))
         unit = price(goal.item_id)
-        buy_cost = unit * goal.quantity if unit is not None else None
-        craft_unit = first_level_cost(recipe, price) if craftable else None
-        craft_cost = craft_unit * goal.quantity if craft_unit is not None else None
+        buy_cost = unit * left if unit is not None else (0.0 if left == 0 else None)
+        craft_cost = first_level_cost(recipe, price, left, free) if craftable else None
         if not craftable:
             mode = BUY
         elif goal.mode in (BUY, CRAFT):
