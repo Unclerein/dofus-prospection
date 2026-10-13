@@ -51,6 +51,7 @@ def test_fight_is_read_turn_by_turn():
     assert (me.absorbed, me.shield) == (9, 391)  # le coup pris par le bouclier ne touche pas aux points de vie
     assert (foe.taken, foe.dead) == (80, True)
     assert pet.summoner == ME and pet.dealt == 30
+    assert (me.cell, foe.cell, pet.cell) == (300, 128, 231)  # placement, case d'arrivée de la poussée, case d'invocation
     # vie de base + vitalité ; la mienne part de ce que j'avais en entrant, pas du maximum
     assert (me.max_life, me.start_life, me.life) == (1500, 1400, 1413)
     assert (foe.monster, foe.max_life, foe.life) == (489, 80, 0)

@@ -141,6 +141,9 @@ class Tally:
     shield: int = 0  # points de bouclier en ce moment
     dead: bool = False
     summoner: int | None = None
+    # Numéro de case Dofus (0 à 559, voir fight.grid) : placement, invocation et poussées. Les déplacements
+    # à pied ne sont pas suivis ici : leur chemin est une suite d'octets, que l'extrait ne montre pas.
+    cell: int | None = None
     monster: int | None = None  # None pour un personnage ou un compagnon
     max_life: int | None = None
     start_life: int | None = None
@@ -165,6 +168,7 @@ class Fight:
         if item.kind in ("sheet", "summon") and item.target is not None:
             tally = self.fighters[item.target]
             tally.max_life = tally.start_life = item.amount
+            tally.cell = item.cell
             if item.kind == "sheet":
                 tally.monster = item.spell
         if item.kind == "turn" and item.round:
@@ -174,6 +178,8 @@ class Fight:
             self.fighters[item.target].absorbed += item.absorbed
             if item.source is not None:
                 self.fighters[item.source].dealt += item.amount
+        elif item.kind == "push" and item.target is not None:
+            self.fighters[item.target].cell = item.cell
         elif item.kind == "shield" and item.target is not None:
             self.fighters[item.target].shield = item.amount
         elif item.kind == "heal" and item.target is not None:
