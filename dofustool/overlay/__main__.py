@@ -8,9 +8,6 @@ active : pendant qu'on regarde autre chose, les bandeaux attendent son retour. D
 que ce que Windows dit de sa fenêtre (titre, position, nom du programme), comme le fait le
 gestionnaire des tâches ; jamais sa mémoire.
 
-Le jeu doit être en mode fenêtré ou plein écran fenêtré : en plein écran exclusif, Windows ne laisse
-aucune autre fenêtre passer devant.
-
 Usage : python -m dofustool.overlay [--demo] [--anywhere] [--probe]
 """
 import argparse
