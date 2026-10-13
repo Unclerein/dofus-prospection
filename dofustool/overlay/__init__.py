@@ -9,7 +9,7 @@ regroupent en bandeaux.
 import sqlite3
 from dataclasses import dataclass
 
-SHOWN_S = 6.0  # durée d'un bandeau après la dernière vente qui l'a touché
+SHOWN_S = 3.0  # durée d'un bandeau après la dernière vente qui l'a touché
 MAX_BANNERS = 4
 FRESH_S = 60.0  # une vente plus vieille que ça vient d'un rattrapage de l'archive : on ne l'annonce pas
 
