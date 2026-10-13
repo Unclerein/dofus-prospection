@@ -874,7 +874,7 @@ class Api:
                     {
                         **named(step.item_id), "level": support.level, "from_level": step.from_level, "to_level": step.to_level,
                         "crafts": passes, "xp": step.xp, "cost": step.cost, "unit_cost": step.cost / passes if passes else None,
-                        "support_price": support.price, "bought": step.bought,
+                        "support_price": support.price, "bought": step.bought, "single": step.single,
                         "runes": [
                             {**named(rune_id), "count": count, "price": prices[rune_id], "weight": rune_gives[rune_id][2]}
                             for rune_id, count in sorted(step.runes.items(), key=lambda entry: -entry[1])

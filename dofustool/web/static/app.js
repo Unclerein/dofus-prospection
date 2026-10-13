@@ -1278,7 +1278,7 @@ async function pageJobs() {
 
   const blocked = plan.blocked_at !== null
     ? h('div', { class: 'banner' }, plan.mage
-      ? `Bloqué au niveau ${plan.blocked_at} : aucun équipement connu à ce niveau ou en dessous n\u2019a deux lignes où passer une rune chiffrée.` + (plan.pending ? ' Des fiches sont encore en cours de lecture.' : '')
+      ? `Bloqué au niveau ${plan.blocked_at} : aucun équipement connu à ce niveau ou en dessous n\u2019a de ligne où passer une rune chiffrée.` + (plan.pending ? ' Des fiches sont encore en cours de lecture.' : '')
       : `Bloqué au niveau ${plan.blocked_at} : aucune recette chiffrable ne rapporte d'XP. ${plan.unpriced} recette${plan.unpriced > 1 ? 's' : ''} sans prix.`)
     : null;
   const mageNote = plan.mage ? h('div', { class: 'note' },
@@ -1293,7 +1293,7 @@ async function pageJobs() {
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet support'), h('th', { class: 'l' }, 'Runes à alterner'), h('th', {}, 'XP'), h('th', {}, 'Coût des runes'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
         h('tbody', {}, plan.steps.map((step) => h('tr', {},
           h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
-          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${step.item_id}` }, itemCell(step.icon, step.name, `niv. ${step.level} · ` + (step.bought ? `à acheter, environ ${fmt(step.support_price)}` : 'déjà acheté plus haut'), step.item_id))),
+          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${step.item_id}` }, itemCell(step.icon, step.name, `niv. ${step.level} · ` + (step.bought ? `à acheter, environ ${fmt(step.support_price)}` : 'déjà acheté plus haut') + (step.single ? ' · une seule ligne : réussite comptée à moitié' : ''), step.item_id))),
           h('td', { class: 'l' }, step.runes.map((rune) => h('div', { class: 'with-ico', style: 'margin: 2px 0' }, tile(rune.icon, false, rune.item_id),
             h('span', {}, h('b', {}, `× ${fmt(rune.count)} `), rune.name, h('span', { class: 'muted small' }, ` · ${unitLabel(rune.price)} pièce`))))),
           h('td', { class: 'soft' }, fmt(step.xp)),

@@ -33,7 +33,10 @@ def test_best_pair_takes_the_two_cheapest_lines():
     # Par point d'XP : So 2,5 ; Fo 2 (la Pa, aussi chère que la petite mais trois fois moins de passages) ; Sa 4.
     assert (first.item_id, second.item_id) == (2, 4)
     assert gained == pytest.approx(20 + 20) and rate == pytest.approx((40 + 50) / 40)
-    assert magexp.best_pair(Support(101, 200, frozenset({FO}), 1.0), RUNES, 200) is None  # une seule ligne : rien à alterner
+    # Une seule ligne : une seule rune, rien à alterner. Aucune ligne : rien.
+    rate, only, gained = magexp.best_pair(Support(101, 200, frozenset({FO}), 1.0), RUNES, 200)
+    assert [r.item_id for r in only] == [2] and rate == pytest.approx(2.0) and gained == pytest.approx(20)
+    assert magexp.best_pair(Support(101, 200, frozenset({999}), 1.0), RUNES, 200) is None
     assert magexp.best_pair(ring, RUNES, 199) is None  # hors de portée du métier
 
 
@@ -42,7 +45,7 @@ def test_cheapest_path_changes_support_only_when_it_pays():
         Support(100, 1, frozenset({FO, SA}), 500.0),
         Support(101, 50, frozenset({FO, SA}), 2_000.0),
         Support(102, 51, frozenset({FO, SA}), 5_000_000.0),  # un niveau de plus, hors de prix : jamais rentable
-        Support(103, 100, frozenset({FO}), 10.0),  # une seule ligne
+        Support(103, 100, frozenset({999}), 10.0),  # aucune ligne où passer une rune
     ]
     plan = magexp.cheapest_path(supports, RUNES, 0, 60, pass_rate=0.5)
     assert plan.blocked_at is None and plan.end_xp == jobxp.level_to_xp(60) and plan.pass_rate == 0.5
@@ -101,3 +104,15 @@ def test_mage_plan_is_served(app_db, tmp_path):  # noqa: F811
     assert {row["item_id"] for row in plan["shopping"]} == {500, 9002, 9003}
     assert api.job_plan(63, 0, 10)["blocked_at"] == 1  # aucun objet de niveau 1 à 10 : le plan le dit
     assert api.job_plan(63, jobxp.level_to_xp(60), 62, exclude=frozenset({500}))["blocked_at"] == 60
+
+
+def test_single_line_support_is_a_last_resort():
+    """Un objet à une seule ligne sert faute de mieux : moitié moins de runes y passent."""
+    one = Support(100, 1, frozenset({FO}), 100.0)
+    two = Support(101, 10, frozenset({FO, SA}), 100.0)
+    plan = magexp.cheapest_path([one, two], RUNES, 0, 12, pass_rate=1.0)
+    assert [(s.item_id, s.from_level, s.to_level, s.single) for s in plan.steps] == [(100, 1, 10, True), (101, 10, 12, False)]
+    assert set(plan.steps[0].runes) <= {1, 2} and len(plan.steps[1].runes) >= 2  # une seule ligne : des runes Fo seulement
+    alone = magexp.cheapest_path([one], RUNES, 0, 5, pass_rate=1.0)
+    twice = magexp.cheapest_path([Support(100, 1, frozenset({FO, SA}), 100.0)], [RUNES[0], Rune(3, SA, 1, 40.0)], 0, 5, pass_rate=1.0)
+    assert alone.rune_cost == pytest.approx(2 * twice.rune_cost, rel=0.1)  # même prix au poids, deux fois plus de runes
