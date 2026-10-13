@@ -41,3 +41,14 @@ def test_dump_keeps_the_window_and_drops_the_handshake(tmp_path):
     assert skipped == 1
     assert lines == ["  100.000 c2s bbb 2 | 2=42", f"  101.500 s2c ccc {len(SECRET.encode()) + 4} | 1=LEN{len(SECRET.encode())} 3=7"]
     assert SECRET not in "\n".join(lines)
+
+
+def test_cell_lists_are_shown_and_nothing_else_is():
+    cells = bytes([0xE0, 0x02, 0xEE, 0x02, 0x7C])  # 352, 366, 124 en liste compacte
+    assert dump_window.small_numbers(cells) == [352, 366, 124]
+    assert dump_window.describe(ld(1, cells) + vi(4, 7)) == ["1=[352,366,124]", "4=7"]
+    for text in ("12:30", "é ", "ab", SECRET):  # du texte, même court ou sans lettres : jamais en nombres
+        assert dump_window.small_numbers(text.encode()) is None
+    assert dump_window.small_numbers(bytes([0xFF, 0xFF, 0x03])) is None  # nombre trop grand
+    assert dump_window.small_numbers(bytes([0xE0, 0x02, 0xEE])) is None  # liste coupée
+    assert dump_window.small_numbers(bytes(range(200, 232))) is None  # octets quelconques

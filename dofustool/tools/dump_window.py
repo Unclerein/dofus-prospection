@@ -3,6 +3,7 @@
 Un message par ligne : délai depuis le début de la tranche, sens, clé, taille, puis ses champs. Seuls
 la structure et les nombres sortent : numéros de champ, entiers, flottants, tailles. Jamais une
 chaîne de caractères ni un octet brut : un champ de texte n'apparaît que par sa longueur (« LEN12 »).
+Une liste de petits nombres (des cases de la carte) sort entre crochets : « 1=[352,366,380] ».
 Les premiers messages de chaque connexion (la poignée de main, qui peut porter le jeton) sont écartés.
 
 Le fichier écrit va dans data/, hors du dépôt. Il ne contient pas le chat, mais il décrit ce que le
@@ -37,6 +38,33 @@ def looks_like_text(chunk: bytes) -> bool:
     return readable >= 0.8 * len(text)
 
 
+SMALL = 1000  # au-delà, ce n'est plus une liste de cases : on ne montre que la longueur
+
+
+def small_numbers(chunk: bytes) -> list[int] | None:
+    """Les nombres d'une liste compacte de petits entiers (les cases d'un chemin), sinon None.
+
+    Rien de ce qui se lit comme du texte ne passe, quel qu'il soit, et un bloc d'octets quelconque
+    n'a aucune chance de ne donner que des nombres sous 1000."""
+    try:
+        chunk.decode("utf-8")
+        return None
+    except UnicodeDecodeError:
+        pass
+    numbers, current, shift = [], 0, 0
+    for byte in chunk:
+        current |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            if current >= SMALL:
+                return None
+            numbers.append(current)
+            current = shift = 0
+        elif shift > 14:
+            return None
+    return numbers if shift == 0 else None
+
+
 def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | None = None) -> list[str] | None:
     """Champs d'un message, à plat : « 2.1=57 ». None si ce n'est pas un message lisible."""
     out = [] if out is None else out
@@ -56,8 +84,11 @@ def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | Non
                 inner = None
                 if chunk and depth < MAX_DEPTH and not looks_like_text(chunk):
                     inner = describe(chunk, depth + 1, name + ".", [])
+                numbers = None if inner else small_numbers(chunk)
                 if inner:
                     out.extend(inner)
+                elif numbers:
+                    out.append(f"{name}=[{','.join(map(str, numbers))}]")
                 else:
                     out.append(f"{name}=LEN{len(chunk)}")
             else:
