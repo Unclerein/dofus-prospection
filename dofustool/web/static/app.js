@@ -2347,8 +2347,12 @@ async function pageStatus() {
   S.status = await api('/api/status');
   renderCapture();
   const s = S.status, now = s.now;
+  // Capture lancée depuis plus de dix minutes sans un seul paquet du jeu : elle écoute dans le vide (ou le jeu est fermé).
+  const deaf = s.running && !s.last_packet_ts && s.started_ts && now - s.started_ts > 600;
   const rows = [
-    ['Dernière connexion au jeu captée', when(s.last_connection_ts)], ['Derniers prix moyens décodés', when(s.last_avg_prices_ts)],
+    ['Dernière connexion au jeu captée', when(s.last_connection_ts)],
+    ['Dernier paquet du jeu entendu', s.last_packet_ts ? ago(s.last_packet_ts, now) : s.running ? 'aucun depuis le lancement de la capture' : '—'],
+    ['Derniers prix moyens décodés', when(s.last_avg_prices_ts)],
     ['Relevés de prix moyens en base', fmt(s.snapshots)], ['Objets avec un prix moyen', fmt(s.priced_items)],
     ['Objets avec un dernier prix de vente', fmt(s.last_sales)], ['Objets avec un historique du cours du marché', fmt(s.history_items)],
     ['Objets avec des annonces HDV', fmt(s.hdv_items)], ['Version des données statiques', s.static_version || 'non importées'],
@@ -2357,6 +2361,7 @@ async function pageStatus() {
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'État'))),
     s.decode_alert && h('div', { class: 'banner', role: 'alert' }, `${s.decode_alert} (alerte du ${when(s.decode_alert_ts)})`),
+    deaf ? h('div', { class: 'banner', role: 'alert' }, `La capture tourne depuis ${Math.round((now - s.started_ts) / 60)} min sans rien entendre du jeu. Si Dofus est ouvert : ferme le jeu et le launcher puis relance par le raccourci Prospection. Si ça continue, réinstalle Npcap (npcap.com), le pilote d\u2019écoute : c\u2019est nécessaire après un changement de carte mère ou de carte réseau.`) : null,
     s.unknown_jobs && s.unknown_jobs.length ? h('div', { class: 'note' }, `Métiers inconnus dans la configuration : ${s.unknown_jobs.join(', ')}`) : null,
     h('section', { class: 'kpis' },
       kpi('Capture', s.running ? 'En cours' : 'Arrêtée', s.running ? ago(s.started_ts, now) : when(s.stopped_ts), s.running ? 'gain' : ''),
@@ -2863,6 +2868,10 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 16, date: '13 octobre 2026', title: 'Capture : toutes les cartes réseau écoutées', hash: '#/status', go: 'Voir l\u2019état', points: [
+    ['Carte réseau :', 'la capture écoute désormais toutes les cartes réseau du PC à la fois, au lieu de la seule carte « par défaut » de Windows. Après un changement de matériel, de box, ou avec un VPN, elle n\u2019écoute plus dans le vide. Le champ « Interface réseau » de Config reste là pour en imposer une.'],
+    ['Alerte :', 'la page État indique quand le dernier paquet du jeu a été entendu, et prévient si la capture tourne depuis dix minutes sans rien entendre.'],
+  ] },
   { id: 15, date: '13 octobre 2026', title: 'Bandeau de vente en jeu, métiers de forgemagie, conteneurs', hash: '#/jobs', go: 'Voir les métiers', points: [
     ['Bandeau de vente :', 'quand un objet se vend, un bandeau apparaît quelques secondes dans l\u2019angle haut droit de la fenêtre du jeu : image, nom, quantité et kamas. Plusieurs lots du même objet vendus à la suite complètent le même bandeau au lieu d\u2019en empiler. Il ne s\u2019affiche que lorsque le jeu est au premier plan, et la souris passe au travers.'],
     ['Le couper :', 'une case dans Config permet de désactiver le bandeau.'],

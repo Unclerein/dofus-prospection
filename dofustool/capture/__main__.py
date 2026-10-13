@@ -21,6 +21,9 @@ READY_FILE = DATA_DIR / "capture.ready"
 STOP_FILE = DATA_DIR / "capture.stop"
 LOG_FILE = DATA_DIR / "capture.log"
 
+# La page État dit quand un paquet du jeu a été entendu pour la dernière fois : écrit au plus à ce rythme.
+PACKET_NOTE_S = 20.0
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -60,16 +63,22 @@ def main() -> int:
     except Exception as exc:
         log.error("Impossible de démarrer l'écoute sur « %s » : %s", source.iface, exc)
         return 1
-    db.set_status(market, started_ts=time.time(), stopped_ts="", decode_alert="", awaiting_prices_since="")
+    db.set_status(market, started_ts=time.time(), stopped_ts="", decode_alert="", awaiting_prices_since="", last_packet_ts="")
     READY_FILE.write_text(str(time.time()), encoding="utf-8")
     log.info("Capture démarrée (écoute passive, tcp port %d, interface « %s »).", GAME_PORT, source.iface)
+    noted = 0.0  # dernière fois que l'arrivée d'un paquet du jeu a été notée dans l'état
     try:
         while not STOP_FILE.exists():
             segment = source.poll(1.0)
+            heard = segment is not None
             while segment is not None:
                 pipeline.handle(segment)
                 segment = source.poll(0)
-            pipeline.tick(time.time())
+            now = time.time()
+            if heard and now - noted >= PACKET_NOTE_S:
+                db.set_status(market, last_packet_ts=now)
+                noted = now
+            pipeline.tick(now)
     except KeyboardInterrupt:
         pass
     finally:

@@ -346,6 +346,7 @@ def status(conn: sqlite3.Connection, now: float) -> dict:
         "stopped_ts": stopped,
         "heartbeat_ts": heartbeat,
         "last_connection_ts": ts("last_connection_ts"),
+        "last_packet_ts": ts("last_packet_ts"),
         "last_avg_prices_ts": ts("last_avg_prices_ts"),
         "decode_alert": raw.get("decode_alert", ""),
         "decode_alert_ts": ts("decode_alert_ts"),
