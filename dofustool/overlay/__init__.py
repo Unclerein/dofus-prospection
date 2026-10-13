@@ -29,7 +29,9 @@ class Banner:
     quantity: int
     kamas: int
     until: float
-    version: int = 0  # change à chaque vente ajoutée : la fenêtre sait qu'il faut redessiner
+    version: int = 0  # nombre de ventes venues compléter le bandeau
+    born: float = 0.0  # apparition à l'écran, pour le fondu d'entrée
+    bumped: float = 0.0  # dernière vente qui l'a complété, pour allumer la quantité
 
 
 class Feed:
@@ -65,8 +67,9 @@ class Board:
                 banner.kamas += sale.price
                 banner.until = now + self.shown_s
                 banner.version += 1
+                banner.bumped = now
                 return banner
-        banner = Banner(sale.item_id, sale.quantity, sale.price, now + self.shown_s)
+        banner = Banner(sale.item_id, sale.quantity, sale.price, now + self.shown_s, born=now)
         self.banners.append(banner)
         del self.banners[: -self.limit]  # trop de bandeaux : les plus anciens cèdent la place
         return banner
@@ -78,6 +81,7 @@ class Board:
         """Le jeu n'est pas à l'écran : les bandeaux attendent, leur délai ne commencera qu'à son retour."""
         for banner in self.banners:
             banner.until = now + self.shown_s
+            banner.born = now  # il apparaîtra au retour du jeu
 
 
 def is_game(window_class: str, title: str, program: str = "", name: str = "Dofus") -> bool:
@@ -99,7 +103,3 @@ def kamas(amount: int) -> str:
     """« 1 250 000 » : milliers séparés par une espace insécable."""
     return f"{amount:,}".replace(",", " ")
 
-
-def lines(banner: Banner, name: str) -> tuple[str, str]:
-    """Les deux lignes d'un bandeau : ce qui est parti, ce que ça rapporte."""
-    return f"{banner.quantity} × {name}", f"+ {kamas(banner.kamas)} kamas"

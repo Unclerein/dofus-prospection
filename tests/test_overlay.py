@@ -12,9 +12,9 @@ def test_same_item_updates_its_banner():
     for i in range(5):  # cinq lots d'une laine achetés coup sur coup
         banner = board.add(Sale(i, 100.0 + i, WOOL, 1, 250), now=100.0 + i)
     assert len(board.banners) == 1
-    assert (banner.quantity, banner.kamas, banner.version) == (5, 1250, 4)
+    assert (banner.quantity, banner.kamas, banner.version, banner.born, banner.bumped) == (5, 1250, 4, 100.0, 104.0)
     assert banner.until == 110.0  # le délai repart à chaque vente
-    assert overlay.lines(banner, "Laine de Bouftou") == ("5 × Laine de Bouftou", "+ 1 250 kamas")
+    assert overlay.kamas(banner.kamas) == "1 250"
 
 
 def test_other_item_opens_another_banner_and_old_ones_leave():
@@ -70,3 +70,37 @@ def test_only_the_game_window_and_its_top_right_corner():
     assert not overlay.is_game("Chrome_WidgetWin_1", "Prospection - Dofus", program="chrome.exe")
     assert overlay.place((100, 50, 1700, 950), width=340, margin_x=24, margin_y=110) == (1336, 160)
     assert overlay.place((0, 0, 300, 200), width=340, margin_x=24, margin_y=10) == (0, 10)  # fenêtre trop étroite : calé à gauche
+
+
+def test_render_draws_rounded_transparent_banners():
+    from dofustool.overlay import render
+
+    def view(**changes):
+        base = dict(name="Laine de Bouftou", quantity=5, gain="+ 1 250 kamas", icon=None, age=3.0, left=3.0, total=6.0, bumped=99.0)
+        return render.View(**{**base, **changes})
+
+    assert render.render([]) is None
+    one, two = render.render([view()]), render.render([view(), view(name="Anneau")])
+    assert one.mode == "RGBA" and one.width == render.WIDTH + 2 * render.PAD
+    assert two.height - one.height == render.HEIGHT + render.GAP  # un bandeau de plus, empilé
+    alpha = one.getchannel("A")
+    assert alpha.getpixel((0, 0)) == 0  # hors du bandeau : on voit le jeu
+    assert alpha.getpixel((render.PAD + 1, render.PAD + 1)) < 120  # coin arrondi
+    assert alpha.getpixel((one.width // 2, one.height // 2)) > 230  # cœur du bandeau, presque opaque
+    assert render.render([view()], scale=2.0).size == (one.width * 2, one.height * 2)
+    # fondu : à peine apparu ou sur le point de partir, le bandeau est plus transparent
+    for faint in (view(age=0.02), view(left=0.03)):
+        assert render.render([faint]).getchannel("A").getpixel((one.width // 2, one.height // 2)) < 130
+    assert render.visibility(view(left=0.0)) == 0.0
+
+
+def test_long_names_are_cut():
+    from PIL import Image, ImageDraw
+
+    from dofustool.overlay import render
+
+    pen = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    face = render.font(15, bold=True)
+    cut = render.fit(pen, "Anneau au nom vraiment beaucoup trop long pour tenir", face, 120)
+    assert cut.endswith("…") and pen.textlength(cut, font=face) <= 120
+    assert render.fit(pen, "Court", face, 120) == "Court"
