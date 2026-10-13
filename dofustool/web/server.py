@@ -128,6 +128,7 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                             min(1000.0, max(0.0, bonus)),
                             query.get("resale") == "1",
                             exclude,
+                            min(100.0, max(5.0, float(to_int(query.get("rate")) or 77))) / 100,
                         )
                     )
                 if path == "/api/ignored":

@@ -1231,7 +1231,7 @@ async function pageJobs() {
   const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Métiers'), h('div', { class: 'lead' }, 'Chemin le moins coûteux vers un niveau')));
   if (!jobs.length) return [head, h('div', { class: 'panel empty' }, 'Aucune recette connue.')];
 
-  const saved = S.ui.jobs || (S.ui.jobs = Object.assign({ job: jobs[0].id, bonus: 100, resale: false, perJob: {} }, loadJobState()));
+  const saved = S.ui.jobs || (S.ui.jobs = Object.assign({ job: jobs[0].id, bonus: 100, resale: false, rate: 77, perJob: {} }, loadJobState()));
   if (!jobs.some((j) => j.id === saved.job)) saved.job = jobs[0].id;
   const job = jobs.find((j) => j.id === saved.job);
   const mine = saved.perJob[job.id] || (saved.perJob[job.id] = { xp: job.xp ?? (job.level ? levelToXp(job.level) : 0), target: Math.min(200, (job.level || 1) + 20), exclude: [] });
@@ -1239,22 +1239,25 @@ async function pageJobs() {
   const change = (mutate) => { mutate(); persist(); refresh(); };
 
   const level = xpToLevel(mine.xp);
-  const query = `job=${job.id}&xp=${mine.xp}&target=${mine.target}&bonus=${saved.bonus}&resale=${saved.resale ? 1 : 0}&exclude=${mine.exclude.join(',')}`;
+  const query = `job=${job.id}&xp=${mine.xp}&target=${mine.target}&bonus=${saved.bonus}&resale=${saved.resale ? 1 : 0}&exclude=${mine.exclude.join(',')}` + (job.mage ? `&rate=${saved.rate || 77}` : '');
   const plan = await cached(`plan-${query}`, `/api/jobs/plan?${query}`);
 
   const controls = h('section', { class: 'panel pad filters', 'aria-label': 'Réglages' },
     h('div', { class: 'field', style: 'flex: 0 1 200px' }, h('label', { for: 'j-job' }, 'Métier'),
       h('select', { id: 'j-job', onchange: (e) => change(() => { saved.job = Number(e.target.value); }) },
-        jobs.map((j) => h('option', { value: j.id, selected: j.id === job.id }, j.name)))),
+        h('optgroup', { label: 'Fabrication' }, jobs.filter((j) => !j.mage).map((j) => h('option', { value: j.id, selected: j.id === job.id }, j.name))),
+        h('optgroup', { label: 'Forgemagie' }, jobs.filter((j) => j.mage).map((j) => h('option', { value: j.id, selected: j.id === job.id }, j.name))))),
     h('div', { class: 'field', style: 'flex: 0 1 170px' }, h('label', { for: 'j-xp' }, 'XP actuelle'),
       h('input', { id: 'j-xp', type: 'number', min: 0, value: mine.xp, onchange: (e) => change(() => { mine.xp = Math.max(0, Math.floor(Number(e.target.value) || 0)); }) })),
     h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-level' }, 'ou niveau actuel'),
       h('input', { id: 'j-level', type: 'number', min: 1, max: 200, value: level, onchange: (e) => change(() => { mine.xp = levelToXp(Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 1)))); }) })),
     h('div', { class: 'field', style: 'flex: 0 1 130px' }, h('label', { for: 'j-target' }, 'Niveau souhaité'),
       h('input', { id: 'j-target', type: 'number', min: 1, max: 200, value: mine.target, class: 'set', onchange: (e) => change(() => { mine.target = Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 1))); }) })),
-    h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-bonus' }, 'Bonus XP %'),
-      h('input', { id: 'j-bonus', type: 'number', min: 0, value: saved.bonus, onchange: (e) => change(() => { saved.bonus = Math.max(0, Number(e.target.value) || 100); }) })),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
+    job.mage ? h('div', { class: 'field', style: 'flex: 0 1 150px', title: 'Part des runes qui passent et donnent de l\u2019XP. 77 % mesurés sur des lignes sous leur maximum ; baisse-la si tu tentes des exos.' }, h('label', { for: 'j-rate' }, 'Runes qui passent %'),
+      h('input', { id: 'j-rate', type: 'number', min: 5, max: 100, value: saved.rate || 77, onchange: (e) => change(() => { saved.rate = Math.max(5, Math.min(100, Math.round(Number(e.target.value) || 77))); }) }))
+      : h('div', { class: 'field', style: 'flex: 0 1 120px' }, h('label', { for: 'j-bonus' }, 'Bonus XP %'),
+        h('input', { id: 'j-bonus', type: 'number', min: 0, value: saved.bonus, onchange: (e) => change(() => { saved.bonus = Math.max(0, Number(e.target.value) || 100); }) })),
+    !job.mage && h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: saved.resale, onchange: (e) => change(() => { saved.resale = e.target.checked; }) }), 'Déduire la revente'));
 
   const excluded = plan.excluded.length ? h('div', { class: 'tags', style: 'align-items: center' }, h('span', { class: 'muted small' }, 'Retirés :'),
     plan.excluded.map((x) => h('span', { class: 'chip on' }, x.name,
@@ -1267,18 +1270,36 @@ async function pageJobs() {
 
   const gained = plan.end_xp - plan.start_xp;
   const kpis = h('section', { class: 'kpis' },
-    kpi(saved.resale ? 'Coût net' : 'Coût des ingrédients', plan.cost < 0 ? signed(-plan.cost) : fmt(plan.cost), plan.cost < 0 ? 'bénéfice' : null, plan.cost < 0 ? 'gain' : ''),
+    plan.mage ? kpi('Coût estimé', fmt(plan.cost), plan.supports_cost ? `dont ${fmt(plan.supports_cost)} d\u2019objets supports` : 'runes seulement')
+      : kpi(saved.resale ? 'Coût net' : 'Coût des ingrédients', plan.cost < 0 ? signed(-plan.cost) : fmt(plan.cost), plan.cost < 0 ? 'bénéfice' : null, plan.cost < 0 ? 'gain' : ''),
     kpi('Niveaux', `${plan.start_level} → ${plan.end_level}`, `${fmt(gained)} XP`),
-    kpi('Crafts', fmt(plan.crafts), `${plan.steps.length} étape${plan.steps.length > 1 ? 's' : ''}`),
+    kpi(plan.mage ? 'Runes à passer' : 'Crafts', fmt(plan.crafts), plan.mage ? `échecs compris, ${Math.round(plan.pass_rate * 100)} % qui passent` : `${plan.steps.length} étape${plan.steps.length > 1 ? 's' : ''}`),
     kpi('Kamas par XP', gained > 0 ? (plan.cost / gained).toFixed(1).replace('.', ',') : '—'));
 
   const blocked = plan.blocked_at !== null
-    ? h('div', { class: 'banner' }, `Bloqué au niveau ${plan.blocked_at} : aucune recette chiffrable ne rapporte d'XP. ${plan.unpriced} recette${plan.unpriced > 1 ? 's' : ''} sans prix.`)
+    ? h('div', { class: 'banner' }, plan.mage
+      ? `Bloqué au niveau ${plan.blocked_at} : aucun équipement connu à ce niveau ou en dessous n\u2019a deux lignes où passer une rune chiffrée.` + (plan.pending ? ' Des fiches sont encore en cours de lecture.' : '')
+      : `Bloqué au niveau ${plan.blocked_at} : aucune recette chiffrable ne rapporte d'XP. ${plan.unpriced} recette${plan.unpriced > 1 ? 's' : ''} sans prix.`)
     : null;
+  const mageNote = plan.mage ? h('div', { class: 'note' },
+    h('strong', {}, 'Estimation, pas un calcul exact. '),
+    'L\u2019XP d\u2019une rune qui passe est connue au point près. Ce qui est estimé, c\u2019est la part des runes qui passent : alterne les deux runes indiquées en visant toujours une ligne sous son maximum. L\u2019objet redescend tout seul, à chaque échec et à chaque passage qui casse des jets.',
+    plan.pending ? ` Lecture des fiches des runes et des équipements en cours (${fmt(plan.pending)} restantes) : le plan se complétera.` : '') : null;
 
   const steps = h('section', { class: 'panel', 'aria-label': 'Étapes' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Étapes'), h('span', { class: 'muted small' }, `${plan.candidates} recettes chiffrées`)),
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Étapes'), h('span', { class: 'muted small' }, plan.mage ? `${plan.candidates} objets supports possibles · ${plan.runes} runes chiffrées` : `${plan.candidates} recettes chiffrées`)),
     plan.steps.length === 0 ? h('div', { class: 'empty' }, 'Aucune étape.')
+      : plan.mage ? h('div', { class: 'scroll' }, h('table', { style: 'min-width: 980px' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet support'), h('th', { class: 'l' }, 'Runes à alterner'), h('th', {}, 'XP'), h('th', {}, 'Coût des runes'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
+        h('tbody', {}, plan.steps.map((step) => h('tr', {},
+          h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
+          h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${step.item_id}` }, itemCell(step.icon, step.name, `niv. ${step.level} · ` + (step.bought ? `à acheter, environ ${fmt(step.support_price)}` : 'déjà acheté plus haut'), step.item_id))),
+          h('td', { class: 'l' }, step.runes.map((rune) => h('div', { class: 'with-ico', style: 'margin: 2px 0' }, tile(rune.icon, false, rune.item_id),
+            h('span', {}, h('b', {}, `× ${fmt(rune.count)} `), rune.name, h('span', { class: 'muted small' }, ` · ${unitLabel(rune.price)} pièce`))))),
+          h('td', { class: 'soft' }, fmt(step.xp)),
+          h('td', { class: 'strong' }, fmt(step.cost)),
+          h('td', { class: 'soft' }, (step.cost / step.xp).toFixed(1).replace('.', ',')),
+          h('td', { class: 'act', style: 'width: 96px' }, h('button', { class: 'btn', title: 'Écarter cet objet support du plan', onclick: () => change(() => { mine.exclude = [...new Set([...mine.exclude, step.item_id])]; }) }, 'Retirer')))))))
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Crafts'), h('th', {}, 'XP'), h('th', {}, saved.resale ? 'Coût net / craft' : 'Coût / craft'), h('th', {}, 'Coût'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
         h('tbody', {}, plan.steps.map((step) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${step.item_id}`; } },
@@ -1293,14 +1314,14 @@ async function pageJobs() {
 
   const total = plan.shopping.reduce((sum, row) => sum + (row.cost || 0), 0);
   const shopping = h('section', { class: 'panel', 'aria-label': 'Liste de courses' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ingrédients · ${fmt(total)} à acheter`),
-      plan.steps.length > 0 && h('button', { class: 'btn', title: 'Crée une liste de l\u2019atelier avec les objets à fabriquer de ce plan', onclick: async () => {
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ${plan.mage ? 'runes et objets' : 'ingrédients'} · ${fmt(total)} à acheter`),
+      plan.steps.length > 0 && !plan.mage && h('button', { class: 'btn', title: 'Crée une liste de l\u2019atelier avec les objets à fabriquer de ce plan', onclick: async () => {
         const done = await workshopAct({ action: 'plan', name: `${job.name} ${plan.start_level} → ${plan.end_level}`, goals: plan.steps.map((step) => [step.item_id, step.crafts]) });
         if (done) location.hash = `#/workshop/${done.list}`;
       } }, 'Envoyer vers l\u2019atelier')),
     plan.shopping.length === 0 ? h('div', { class: 'empty' }, 'Rien à acheter.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
+        h('thead', {}, h('tr', {}, h('th', { class: 'l' }, plan.mage ? 'Rune ou objet' : 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
         h('tbody', {}, plan.shopping.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
           h('td', { class: 'l' }, itemCell(row.icon, row.name, null, row.item_id)),
           h('td', { class: 'soft' }, fmt(row.quantity)),
@@ -1309,7 +1330,7 @@ async function pageJobs() {
           h('td', {}, row.price === null ? h('span', { class: 'warn' }, '—') : [h('div', { class: 'soft' }, row.price < 100 && !Number.isInteger(row.price) ? row.price.toFixed(2).replace('.', ',') : fmt(row.price)), h('div', { class: 'source', title: lotTitle(row.lot, row.price) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
           h('td', { class: 'strong' }, fmt(row.cost))))))));
 
-  return [head, controls, excluded, blocked, kpis, steps, shopping];
+  return [head, controls, excluded, blocked, mageNote, kpis, steps, shopping];
 }
 
 // ---------------------------------------------------------------- page Forgemagie

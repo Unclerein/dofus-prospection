@@ -172,6 +172,26 @@ def missing_items(conn: sqlite3.Connection, all_equipment: bool = False) -> list
     ]
 
 
+def mage_items(conn: sqlite3.Connection) -> list[int]:
+    """Fiches qu'il faut pour chiffrer la montée d'un métier de forgemagie et qui manquent encore : les runes
+    (ce que chacune ajoute), puis les équipements fabricables, du plus bas niveau au plus haut."""
+    runes = [
+        row[0]
+        for row in conn.execute(
+            "SELECT id FROM items WHERE type_name = 'Rune de forgemagie' "
+            "AND id NOT IN (SELECT item_id FROM item_effects_fetched) ORDER BY id"
+        )
+    ]
+    supports = [
+        row[0]
+        for row in conn.execute(
+            "SELECT i.id FROM items i JOIN recipes r ON r.result_id = i.id WHERE i.category_id = 0 AND i.exchangeable "
+            "AND i.id NOT IN (SELECT item_id FROM item_effects_fetched) ORDER BY i.level, i.id"
+        )
+    ]
+    return runes + supports
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--all-equipment", action="store_true", help="tous les équipements, pas seulement ceux vus à l'HDV")

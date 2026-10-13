@@ -17,9 +17,10 @@ import pandas as pd
 
 from .. import ankama, config, db, ganymede
 from ..staticdata import contents as item_contents
+from ..staticdata.source import DOFUS_SQLITE
 from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, WEAPON_TYPES, Filter, base_lines, classify
-from ..analysis import jobxp
+from ..analysis import jobxp, magexp
 from ..analysis.prices import PriceRef
 from ..analysis.stock import Stock, stock_crafts
 from ..app import data, forge
@@ -125,6 +126,8 @@ class Api:
         self._stamp: list | None = None
         self._state: dict | None = None
         self._fetching = threading.Lock()
+        self._density: dict[int, float] | None = None  # densité de chaque caractéristique, lue une fois dans les données du jeu
+        self.static_path: Path = DOFUS_SQLITE  # remplacé dans les tests
         self.ganymede_dir: Path | None = None  # None : le dossier de données de Ganymède sur ce PC ; remplacé dans les tests
         self._templates_checked = 0.0  # dernier passage en arrière-plan sur les fiches des équipements
         self._ranking_stamp: tuple | None = None
@@ -198,6 +201,47 @@ class Api:
                 self._fetching.release()
 
         threading.Thread(target=work, daemon=True).start()
+
+    def fetch_mage_templates(self) -> None:
+        """En arrière-plan : les fiches des runes et des équipements fabricables, pour les métiers de forgemagie."""
+        if not self._fetching.acquire(blocking=False):
+            return
+
+        def work() -> None:
+            try:
+                conn = self.connect()
+                try:
+                    done = 0
+                    for item_id in base_effects.mage_items(conn):
+                        if not self.ensure_template(conn, item_id):
+                            break  # inutile d'insister si le service ne répond pas
+                        done += 1
+                        if done % TEMPLATES_BATCH == 0:
+                            base_effects.mark_refreshed(conn)
+                        time.sleep(0.2)
+                    if done:
+                        base_effects.mark_refreshed(conn)
+                finally:
+                    conn.close()
+            finally:
+                self._fetching.release()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def densities(self) -> dict[int, float]:
+        """Densité de chaque caractéristique (le « poids » d'un point), telle que la donnent les données du jeu."""
+        if self._density is None:
+            found: dict[int, float] = {}
+            if self.static_path.exists():
+                source = sqlite3.connect(f"file:{self.static_path.as_posix()}?mode=ro", uri=True)
+                try:
+                    found = {row[0]: float(row[1]) for row in source.execute("SELECT id, effectPowerRate FROM EffectData") if row[1]}
+                except sqlite3.Error as exc:
+                    log.warning("Densité des caractéristiques illisible : %s", exc)
+                finally:
+                    source.close()
+            self._density = found
+        return self._density
 
     def connect(self) -> sqlite3.Connection:
         return db.connect(self.db_path)
@@ -632,7 +676,17 @@ class Api:
                 seen = captured.get(job_id)
                 # L'expérience relevée ne vaut que si elle correspond au niveau enregistré.
                 xp = seen[1] if seen is not None and seen[0] == level else None
-                jobs.append({"id": job_id, "name": name, "recipes": count, "max_level": top, "level": level, "xp": xp})
+                jobs.append({"id": job_id, "name": name, "recipes": count, "max_level": top, "level": level, "xp": xp, "mage": False})
+            names = dict(conn.execute("SELECT id, name FROM jobs"))
+            for job_id in sorted(set(MAGE_OF.values()), key=lambda j: names.get(j, "")):
+                if job_id not in names:
+                    continue
+                level = levels.get(names[job_id].casefold())
+                seen = captured.get(job_id)
+                # Un métier de mage n'est pas toujours dans la configuration : l'expérience relevée suffit alors.
+                xp = seen[1] if seen is not None and (level is None or seen[0] == level) else None
+                jobs.append({"id": job_id, "name": names[job_id], "recipes": 0, "max_level": jobxp.MAX_LEVEL,
+                             "level": level if level is not None else (seen[0] if seen else None), "xp": xp, "mage": True})  # fmt: skip
             return {"jobs": jobs}
         finally:
             conn.close()
@@ -645,8 +699,11 @@ class Api:
         bonus_pct: float = 100.0,
         resale: bool = False,
         exclude: frozenset[int] = frozenset(),
+        pass_rate: float = magexp.PASS_RATE,
     ) -> dict:
         """Chemin le moins coûteux pour monter un métier, et la liste de courses qui va avec."""
+        if job_id in MAGE_OF.values():
+            return self._mage_plan(job_id, start_xp, target_level, exclude, pass_rate)
         conn = self.connect()
         try:
             state = self._load(conn)
@@ -740,6 +797,116 @@ class Api:
                     "resale": resale,
                 }
             )
+        finally:
+            conn.close()
+
+    def _mage_plan(self, job_id: int, start_xp: int, target_level: int, exclude: frozenset[int], pass_rate: float) -> dict:
+        """Montée d'un métier de forgemagie : objet support et runes à alterner, tranche par tranche (analysis.magexp)."""
+        conn = self.connect()
+        try:
+            state = self._load(conn)
+            ws, stock, icons = state["ws"], state["stock"], state["icons"]
+            hidden = self._hidden(conn, state)
+            density = self.densities()
+            sources = fmjournal.fusion_sources(conn)
+
+            def market(item_id: int) -> float | None:
+                item = ws.items.get(item_id)
+                ref = ws.prices.get(item_id) if item is not None and item.exchangeable else None
+                return ref.price if ref is not None else None
+
+            # Ce qu'ajoute chaque rune : la seule ligne positive de sa fiche. Son prix : par fusion pour une Pa ou une Ra.
+            runes, rune_gives = [], {}
+            for rune_id, effect_id, value in conn.execute(
+                "SELECT e.item_id, e.effect_id, e.max_value FROM item_effects e JOIN items i ON i.id = e.item_id "
+                "WHERE i.type_name = 'Rune de forgemagie' AND e.max_value > 0"
+            ):
+                price = fmjournal.fusion_price(rune_id, sources, market)
+                weight = density.get(effect_id, 0.0) * value
+                if price is not None and price > 0 and weight > 0:
+                    runes.append(magexp.Rune(rune_id, effect_id, weight, price))
+                    rune_gives[rune_id] = (effect_id, value, weight)
+
+            # Objets supports : les équipements que ce mage sait travailler (ceux du métier de fabrication associé).
+            crafts = [maker for maker, mage in MAGE_OF.items() if mage == job_id]
+            marks = ",".join("?" * len(crafts))
+            lines: dict[int, set[int]] = {}
+            for item_id, effect_id in conn.execute(
+                f"SELECT e.item_id, e.effect_id FROM item_effects e JOIN recipes r ON r.result_id = e.item_id "
+                f"JOIN items i ON i.id = e.item_id LEFT JOIN effect_meta m ON m.effect_id = e.effect_id "
+                f"WHERE r.job_id IN ({marks}) AND i.category_id = 0 AND i.exchangeable AND e.max_value > 0 AND COALESCE(m.is_stat, 1) = 1",
+                crafts,
+            ):
+                lines.setdefault(item_id, set()).add(effect_id)
+            supports, unpriced = [], 0
+            for item_id, found in lines.items():
+                item = ws.items.get(item_id)
+                if item is None or item_id in exclude or hidden(item_id):
+                    continue
+                cheapest = ws.prices.hdv_any(item_id)
+                price = cheapest[0] if cheapest is not None else market(item_id)
+                if price is None:
+                    unpriced += 1
+                    continue
+                supports.append(magexp.Support(item_id, item.level, frozenset(found), price))
+
+            plan = magexp.cheapest_path(supports, runes, start_xp, target_level, pass_rate)
+            pending = len(base_effects.mage_items(conn))
+            if pending and self.background_refresh:
+                self.fetch_mage_templates()
+
+            def named(item_id: int) -> dict:
+                item = ws.items.get(item_id)
+                return {"item_id": item_id, "name": item.name if item else f"#{item_id}", "icon": icons.get(item_id)}
+
+            prices = {rune.item_id: rune.price for rune in runes}
+            by_id = {support.item_id: support for support in supports}
+            steps, shopping, bought_cost = [], {}, 0.0
+            for step in plan.steps:
+                support = by_id[step.item_id]
+                passes = sum(step.runes.values())
+                if step.bought:
+                    bought_cost += support.price
+                    shopping[step.item_id] = shopping.get(step.item_id, 0) + 1
+                for rune_id, count in step.runes.items():
+                    shopping[rune_id] = shopping.get(rune_id, 0) + count
+                steps.append(
+                    {
+                        **named(step.item_id), "level": support.level, "from_level": step.from_level, "to_level": step.to_level,
+                        "crafts": passes, "xp": step.xp, "cost": step.cost, "unit_cost": step.cost / passes if passes else None,
+                        "support_price": support.price, "bought": step.bought,
+                        "runes": [
+                            {**named(rune_id), "count": count, "price": prices[rune_id], "weight": rune_gives[rune_id][2]}
+                            for rune_id, count in sorted(step.runes.items(), key=lambda entry: -entry[1])
+                        ],
+                    }
+                )  # fmt: skip
+            needs = []
+            for item_id, quantity in shopping.items():
+                price = prices.get(item_id, by_id[item_id].price if item_id in by_id else None)
+                have = stock.get(item_id).total
+                ref = ws.prices.get(item_id)
+                needs.append(
+                    {
+                        **named(item_id), "quantity": quantity, "have": have, "to_buy": max(0, quantity - have), "price": price,
+                        "source": "fusion de runes simples" if item_id in sources else (ref.source if ref else None),
+                        "lot": None if item_id in sources else (ref.lot if ref else None),
+                        "cost": price * max(0, quantity - have) if price is not None else None,
+                    }
+                )  # fmt: skip
+            needs.sort(key=lambda row: -(row["cost"] or 0))
+            excluded = [named(i) for i in sorted(exclude)]
+            return clean(
+                {
+                    "mage": True, "pass_rate": plan.pass_rate, "pending": pending, "supports_cost": bought_cost,
+                    "steps": steps, "shopping": needs, "excluded": excluded,
+                    "start_xp": plan.start_xp, "start_level": jobxp.xp_to_level(plan.start_xp),
+                    "end_xp": plan.end_xp, "end_level": jobxp.xp_to_level(plan.end_xp),
+                    "target_level": plan.target_level, "target_xp": jobxp.level_to_xp(plan.target_level),
+                    "blocked_at": plan.blocked_at, "cost": plan.rune_cost + bought_cost, "crafts": plan.passes,
+                    "candidates": len(supports), "runes": len(runes), "unpriced": unpriced, "stock_known": stock.known, "resale": False,
+                }
+            )  # fmt: skip
         finally:
             conn.close()
 
