@@ -316,3 +316,33 @@ def test_offline_sales_can_span_several_markets():
     db.save_sales(conn, SalesList(22, ()), 2300.0)
     assert conn.execute("SELECT COUNT(*) FROM gone_lots").fetchone()[0] == 0
     conn.close()
+
+
+# --- prix des runes Pa et Ra : par fusion de runes simples ---------------------------------------
+
+
+def test_pa_and_ra_runes_are_priced_by_fusion():
+    from dofustool import db
+    from dofustool.analysis import fmjournal
+
+    conn = db.connect(":memory:")
+    runes = [(1, "Rune Fo"), (2, "Rune Pa Fo"), (3, "Rune Ra Fo"), (4, "Rune Ga Pa"), (5, "Rune Ga Pme"), (6, "Rune Pa Vi")]
+    conn.executemany("INSERT INTO items VALUES (?, ?, 78, 'Rune de forgemagie', 1, 1, 0, 2)", runes)
+    sources = fmjournal.fusion_sources(conn)
+    # Pa = 3 runes simples, Ra = 3 Pa = 9 simples. « Ga Pa » n'est pas une rune Pa ; « Pa Vi » sans « Rune Vi » connue : ignorée.
+    assert sources == {2: (1, 3), 3: (1, 9)}
+    hdv = {1: 1_000.0, 2: 50_000.0, 3: 900_000.0, 4: 2_000_000.0}.get
+    assert [fmjournal.fusion_price(r, sources, hdv) for r in (1, 2, 3, 4)] == [1_000.0, 3_000.0, 9_000.0, 2_000_000.0]
+    # Rune simple sans prix : la rune Pa garde le sien plutôt que de rester sans prix.
+    assert fmjournal.fusion_price(2, sources, {2: 50_000.0}.get) == 50_000.0
+
+    # Passages déjà chiffrés au prix de l'HDV : rechiffrés une seule fois, par fusion.
+    conn.executemany(
+        "INSERT INTO fm_passes VALUES (?, 0, 7, 500, ?, 1, 0, 0, 0, ?)", [(10, 2, 50_000.0), (11, 4, 2_000_000.0)]
+    )
+    fmjournal.reprice_fusions_once(conn, sources)
+    fmjournal.freeze_prices(conn, lambda r: fmjournal.fusion_price(r, sources, hdv))
+    assert dict(conn.execute("SELECT source_id, rune_price FROM fm_passes")) == {10: 3_000.0, 11: 2_000_000.0}
+    conn.execute("UPDATE fm_passes SET rune_price = 4000 WHERE source_id = 10")  # le prix figé ne bouge plus ensuite
+    fmjournal.reprice_fusions_once(conn, sources)
+    assert conn.execute("SELECT rune_price FROM fm_passes WHERE source_id = 10").fetchone()[0] == 4_000

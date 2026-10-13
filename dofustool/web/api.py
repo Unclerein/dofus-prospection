@@ -1646,7 +1646,10 @@ class Api:
                 ref = ws.prices.get(item_id)
                 return ref.price if ref is not None else None
 
-            fmjournal.freeze_prices(conn, price_of)
+            # Runes Pa et Ra : au prix de 3 ou 9 runes simples, pas à celui de l'HDV.
+            fusions = fmjournal.fusion_sources(conn)
+            fmjournal.reprice_fusions_once(conn, fusions)
+            fmjournal.freeze_prices(conn, lambda rune_id: fmjournal.fusion_price(rune_id, fusions, price_of))
             units = fmjournal.purchase_units(conn)
             on_sale = dict(conn.execute("SELECT uid, price FROM my_sales"))
             ignored = forge.non_stat_effects(conn)

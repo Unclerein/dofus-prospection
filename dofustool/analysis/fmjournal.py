@@ -71,6 +71,48 @@ class Dossier:
         return self.passes - sum(line.priced for line in self.runes.values())
 
 
+# Une rune Pa se fabrique en fusionnant 3 runes simples, une rune Ra en fusionnant 3 runes Pa :
+# leur prix se déduit de celui de la rune simple, quel que soit leur prix à l'HDV.
+# « Rune Ga Pa » (le PA) n'est pas une rune Pa : son deuxième mot est « Ga ».
+FUSION = {"Pa": 3, "Ra": 9}
+FUSION_DONE = "rune_fusion_repriced"
+
+
+def fusion_sources(conn: sqlite3.Connection) -> dict[int, tuple[int, int]]:
+    """{rune Pa ou Ra: (rune simple dont elle est faite, nombre de runes simples)}."""
+    names = dict(conn.execute("SELECT name, id FROM items WHERE type_name LIKE 'Rune%'"))
+    out = {}
+    for name, rune_id in names.items():
+        parts = name.split(" ", 2)
+        if len(parts) == 3 and parts[0] == "Rune" and parts[1] in FUSION:
+            base = names.get(f"Rune {parts[2]}")
+            if base is not None:
+                out[rune_id] = (base, FUSION[parts[1]])
+    return out
+
+
+def fusion_price(
+    rune_id: int, sources: dict[int, tuple[int, int]], price_of: Callable[[int], float | None]
+) -> float | None:
+    """Prix d'une rune : par fusion pour une rune Pa ou Ra (sauf si la rune simple n'a pas de prix), sinon le sien."""
+    source = sources.get(rune_id)
+    if source is not None:
+        base = price_of(source[0])
+        if base is not None:
+            return base * source[1]
+    return price_of(rune_id)
+
+
+def reprice_fusions_once(conn: sqlite3.Connection, sources: dict[int, tuple[int, int]]) -> None:
+    """Les runes Pa et Ra déjà chiffrées l'ont été au prix de l'HDV : on les rechiffre une fois, par fusion."""
+    if conn.execute("SELECT 1 FROM capture_status WHERE key = ?", (FUSION_DONE,)).fetchone() or not sources:
+        return
+    marks = ",".join("?" * len(sources))
+    with conn:
+        conn.execute(f"UPDATE fm_passes SET rune_price = NULL WHERE rune_id IN ({marks})", tuple(sources))
+        conn.execute("INSERT OR REPLACE INTO capture_status (key, value) VALUES (?, '1')", (FUSION_DONE,))
+
+
 def freeze_prices(conn: sqlite3.Connection, price_of: Callable[[int], float | None]) -> int:
     """Fige le prix unitaire des runes des passages qui n'en ont pas encore. Renvoie le nombre de runes chiffrées.
 
