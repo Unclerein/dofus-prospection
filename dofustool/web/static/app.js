@@ -2709,7 +2709,8 @@ async function pageConfig() {
           if (found.path) { d.ankama_path = found.path; document.getElementById('c-ankama').value = found.path; sync(); }
           else notify('Launcher Ankama introuvable sur ce PC : indique son chemin à la main.');
         } }, 'Détecter'),
-        h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'))));
+        h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
+        h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'))));
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),

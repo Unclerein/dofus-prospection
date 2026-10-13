@@ -42,6 +42,7 @@ if (-not $NoLauncher -and (-not $cfg.ankama_path -or -not (Test-Path $cfg.ankama
 # 1. Capture en arrière-plan.
 #    Une capture déjà en cours n'est gardée que si un autre lanceur la surveille encore. Sinon elle est
 #    restée orpheline (fenêtre du lanceur fermée, plantage) : on l'arrête proprement et on repart.
+function Get-Overlays { Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object { $_.CommandLine -match 'dofustool\.overlay' } }
 function Get-Captures { Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object { $_.CommandLine -match 'dofustool\.capture' } }
 $others = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
     Where-Object { $_.CommandLine -match 'start\.ps1' -and $_.ProcessId -ne $PID }
@@ -87,6 +88,13 @@ try {
             Start-Process -FilePath $python -ArgumentList '-m', 'dofustool.web' -WorkingDirectory $root -WindowStyle Hidden
             Say "Interface lancée : http://localhost:8600"
         }
+    }
+
+    # 3 bis. Bandeau de vente par-dessus le jeu (optionnel) : une fenêtre à part, qui ne fait qu'afficher.
+    Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    if ($cfg.sale_notifications) {
+        $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+        if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }
 
     # 4. Attendre le jeu, puis la fin de la session.
@@ -135,6 +143,7 @@ finally {
         }
     }
     Say "Capture arrêtée."
+    Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     # Objets, recettes et métiers : une nouvelle version sort à chaque mise à jour du jeu. Rien n'est fait
     # si la version locale est déjà la dernière ; sinon téléchargement (environ 360 Mo) puis import.
     try { & $python -m dofustool.staticdata.update --if-new | ForEach-Object { Say $_ } } catch { Say "Données du jeu non vérifiées (hors ligne ?) : ce sera refait à la prochaine partie." }

@@ -27,6 +27,7 @@ class Config:
     ankama_path: str = r"C:\Program Files\Ankama\Ankama Launcher\Ankama Launcher.exe"
     dofus_process: str = "Dofus"
     start_dashboard: bool = True
+    sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -62,6 +63,7 @@ def _from_raw(raw: dict) -> Config:
         ankama_path=launcher.get("ankama_path", defaults.ankama_path),
         dofus_process=launcher.get("dofus_process", defaults.dofus_process),
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
+        sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -140,6 +142,7 @@ def from_values(values: dict) -> Config:
         ankama_path=_text(values, "ankama_path", "Chemin du launcher"),
         dofus_process=_text(values, "dofus_process", "Processus du jeu", 60),
         start_dashboard=bool(values.get("start_dashboard")),
+        sale_notifications=bool(values.get("sale_notifications", True)),
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -208,6 +211,8 @@ ankama_path = {_quoted(cfg.ankama_path)}
 dofus_process = {_quoted(cfg.dofus_process)}
 # Ouvrir l'interface au lancement.
 start_dashboard = {"true" if cfg.start_dashboard else "false"}
+# Afficher un bandeau par-dessus le jeu quand un objet se vend.
+sale_notifications = {"true" if cfg.sale_notifications else "false"}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

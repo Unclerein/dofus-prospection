@@ -112,6 +112,7 @@ VALUES = {
     "ankama_path": 'C:\\Program Files\\Ankama\\Ankama "Launcher".exe',
     "dofus_process": "Dofus",
     "start_dashboard": True,
+    "sale_notifications": True,
 }
 
 
