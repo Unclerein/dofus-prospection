@@ -7,8 +7,11 @@ LINES = f"""# en-tête
     0.200 s2c kqo 9 | 1=1500 3=1400 4=7
     0.300 s2c jwj 90 | 1.1={ME} 1.2.3=300 1.3.4.7.4.2=1 1.3.4.7.4.1.1=6 1.3.4.7.4.2=44 1.3.4.7.4.5.7=400 1.3.4.7.4.5.7=500 1.3.4.7.4.2=11 1.3.4.7.4.5.3=1 1.3.4.7.4.5.5=990 1.3.4.7.4.5.7=9 1.3.4.7.4.2=95 1.3.4.7.4.5=LEN0
     0.300 s2c jwj 90 | 1.1={FOE} 1.2.3=310 1.3.4.6.3.3=489 1.3.4.7.4.2=44 1.3.4.7.4.3.2=160 1.3.4.7.4.3.2=80 1.3.4.7.4.2=11 1.3.4.7.4.3=LEN0 1.3.4.7.4.2=120 1.3.4.7.4.3.2=100
+    0.400 s2c jxk 54 | 1.1=[310,352] 1.2=[300,257]
     1.000 s2c jxr 0 | 
     1.100 s2c jvj 15 | 2=430 3={ME} 4=150 7=1
+    1.500 s2c jnz 25 | 1=[300,314,329] 2=1 4={ME}
+    1.600 s2c jnz 21 | 1.40=f3.3e-37 2=1 4={FOE}
     2.000 c2s jsr 7 | 1=111 2=203
     2.100 s2c jsq 40 | 2.2.1=5 2.2.2=111 2.5=203 2.6={FOE} 22=300 36={ME}
     2.100 s2c jsq 20 | 13.2=-4 13.3={ME} 22=102 36={ME}
@@ -42,8 +45,8 @@ def test_fight_is_read_turn_by_turn():
     (fight,) = journal.read_extract(LINES)
     assert fight.ended and fight.rounds == 2
     kinds = [e.kind for e in fight.events]
-    assert kinds == ["sheet", "sheet", "start", "turn", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "shield", "shield", "damage", "trigger", "turn", "push", "damage", "death", "end"]
-    cast = fight.events[4]
+    assert kinds == ["sheet", "sheet", "sides", "start", "turn", "move", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "shield", "shield", "damage", "trigger", "turn", "push", "damage", "death", "end"]
+    cast = fight.events[6]
     assert (cast.source, cast.target, cast.spell, cast.cell) == (ME, FOE, 111, 203)
     assert [e.element for e in fight.events if e.kind == "damage"] == ["air", "neutre", "neutre", "poussée"]
     me, foe, pet = fight.fighters[ME], fight.fighters[FOE], fight.fighters[PET]
@@ -51,7 +54,8 @@ def test_fight_is_read_turn_by_turn():
     assert (me.absorbed, me.shield) == (9, 391)  # le coup pris par le bouclier ne touche pas aux points de vie
     assert (foe.taken, foe.dead) == (80, True)
     assert pet.summoner == ME and pet.dealt == 30
-    assert (me.cell, foe.cell, pet.cell) == (300, 128, 231)  # placement, case d'arrivée de la poussée, case d'invocation
+    assert (me.cell, foe.cell, pet.cell) == (329, 128, 231)  # bout du chemin, case d'arrivée de la poussée, case d'invocation
+    assert fight.sides == ([310, 352], [300, 257]) and fight.events[5].path == ([300, 314, 329],)
     # vie de base + vitalité ; la mienne part de ce que j'avais en entrant, pas du maximum
     assert (me.max_life, me.start_life, me.life) == (1500, 1400, 1413)
     assert (foe.monster, foe.max_life, foe.life) == (489, 80, 0)
@@ -60,3 +64,10 @@ def test_fight_is_read_turn_by_turn():
 
 def test_nothing_outside_a_fight():
     assert journal.read_extract("    1.000 s2c jsq 30 | 22=100 36=-1 37.5=900 37.6=12\n") == []
+
+
+def test_preview_before_the_fight():
+    _, _, key, fields = journal.parse_line("   79.382 s2c jvk 64 | 1=111 2.1=[258,271] 2.2=[230,243] 4=222")
+    seen = journal.preview(key, fields)
+    assert (seen.map_id, seen.fight_map, seen.sides) == (111, 222, ([258, 271], [230, 243]))
+    assert journal.preview("jsq", fields) is None

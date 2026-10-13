@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 FIGHT_START, FIGHT_END, TURN, ACTION = "jxr", "jwp", "jvj", "jsq"
 SHEET, MY_LIFE = "jwj", "kqo"  # fiche d'un combattant à son entrée ; mes points de vie hors combat
 STAT = "jtk"  # une stat d'un combattant change
+MOVE = "jnz"  # déplacement à pied : le chemin, case par case ; absent pour un ennemi invisible
+# Cases de départ des deux équipes : à l'entrée en combat, et avant le combat quand le joueur demande l'aperçu (touche L).
+START_CELLS, PREVIEW = "jxk", "jvk"
 SHIELD_STAT = 96
 
 # Les points de vie de départ sont la somme de deux stats de la fiche, toutes parts confondues
@@ -73,10 +76,32 @@ def life(fields: Fields, prefix: str) -> int | None:
     return total if found else None
 
 
+def cells(fields: Fields, path: str) -> list[int]:
+    """Liste de cases de ce champ (« [352,366] » dans un extrait)."""
+    for name, value in fields:
+        if name == path and value.startswith("[") and value.endswith("]"):
+            return [int(part) for part in value[1:-1].split(",")]
+    return []
+
+
+@dataclass
+class Preview:
+    """Aperçu d'un combat avant de le lancer : ce que le jeu montre avec la touche L."""
+    map_id: int | None
+    fight_map: int | None
+    sides: tuple[list[int], list[int]]
+
+
+def preview(key: str, fields: Fields) -> Preview | None:
+    if key != PREVIEW:
+        return None
+    return Preview(number(fields, "1"), number(fields, "4"), (cells(fields, "2.1"), cells(fields, "2.2")))
+
+
 @dataclass
 class Event:
     when: float
-    kind: str  # start, end, turn, sheet, life, cast, trigger, damage, heal, shield, death, summon, push, invisible, spent
+    kind: str  # start, end, turn, sheet, life, sides, move, cast, trigger, damage, heal, shield, death, summon, push, invisible, spent
     source: int | None = None
     target: int | None = None
     amount: int | None = None
@@ -85,6 +110,7 @@ class Event:
     cell: int | None = None
     round: int | None = None
     absorbed: int = 0  # part d'un coup prise par le bouclier
+    path: tuple[list[int], ...] = ()  # chemin d'un déplacement, ou cases de départ des deux équipes
 
 
 def event(when: float, direction: str, key: str, fields: Fields) -> Event | None:
@@ -102,6 +128,11 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
                      spell=number(fields, "1.3.4.6.3.3"), cell=number(fields, "1.2.3"))
     if key == MY_LIFE:
         return Event(when, "life", amount=number(fields, "3"))
+    if key == START_CELLS:
+        return Event(when, "sides", path=(cells(fields, "1.1"), cells(fields, "1.2")))
+    if key == MOVE:
+        path = cells(fields, "1")
+        return Event(when, "move", target=number(fields, "4"), cell=path[-1], path=(path,)) if path else None
     if key == STAT:
         if number(fields, "1.4.2") != SHIELD_STAT:
             return None
@@ -161,6 +192,7 @@ class Fight:
     events: list[Event] = field(default_factory=list)
     fighters: dict[int, Tally] = field(default_factory=lambda: defaultdict(Tally))
     rounds: int = 0
+    sides: tuple[list[int], ...] = ()  # cases de départ de chaque équipe
     ended: bool = False
 
     def add(self, item: Event) -> None:
@@ -178,7 +210,9 @@ class Fight:
             self.fighters[item.target].absorbed += item.absorbed
             if item.source is not None:
                 self.fighters[item.source].dealt += item.amount
-        elif item.kind == "push" and item.target is not None:
+        elif item.kind == "sides":
+            self.sides = item.path
+        elif item.kind in ("push", "move") and item.target is not None:
             self.fighters[item.target].cell = item.cell
         elif item.kind == "shield" and item.target is not None:
             self.fighters[item.target].shield = item.amount
@@ -198,6 +232,7 @@ def fights(messages) -> list[Fight]:
     current: Fight | None = None
     sheets: dict[int, Event] = {}  # fiches reçues pendant le placement, avant le début
     my_life: int | None = None
+    sides: Event | None = None
     for when, direction, key, fields in messages:
         item = event(when, direction, key, fields)
         if item is None:
@@ -207,6 +242,8 @@ def fights(messages) -> list[Fight]:
             continue
         if current is None and item.kind == "sheet" and item.target is not None:
             sheets[item.target] = item
+        if current is None and item.kind == "sides":
+            sides = item
         if item.kind == "start":
             current = Fight()
             out.append(current)
@@ -214,13 +251,15 @@ def fights(messages) -> list[Fight]:
                 current.add(sheet)
                 if sheet.target > 0 and my_life is not None and my_life <= (sheet.amount or 0):
                     current.fighters[sheet.target].start_life = my_life
-            sheets = {}
+            if sides is not None:
+                current.add(sides)
+            sheets, sides = {}, None
             current.events.append(item)
             continue
         if current is not None:
             current.add(item)
             if item.kind == "end":
-                current, sheets = None, {}
+                current, sheets, sides = None, {}, None
     return out
 
 
