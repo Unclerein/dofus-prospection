@@ -10,7 +10,6 @@ dependencies = [
     "pandas>=2.2",
     "truststore>=0.9",
     "Pillow>=10",  # dessin des notifications par-dessus le jeu
-    "UnityPy>=1.20",  # lecture du décor des cartes dans les fichiers du jeu
 ]
 
 [project.optional-dependencies]

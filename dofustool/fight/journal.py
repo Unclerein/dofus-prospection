@@ -104,9 +104,9 @@ class Event:
     kind: str  # start, end, turn, sheet, life, sides, move, cast, trigger, damage, heal, shield, death, summon, push, invisible, spent
     source: int | None = None
     target: int | None = None
-    amount: int | None = None
+    amount: int | None = None  # dégâts, soin, points de vie, points de bouclier, PA ou PM dépensés, selon l'événement
     element: str = ""
-    spell: int | None = None
+    spell: int | None = None  # sort lancé ; pour une fiche ou une invocation, le numéro du monstre
     cell: int | None = None
     round: int | None = None
     absorbed: int = 0  # part d'un coup prise par le bouclier
@@ -172,9 +172,7 @@ class Tally:
     shield: int = 0  # points de bouclier en ce moment
     dead: bool = False
     summoner: int | None = None
-    # Numéro de case Dofus (0 à 559, voir fight.grid) : placement, invocation et poussées. Les déplacements
-    # à pied ne sont pas suivis ici : leur chemin est une suite d'octets, que l'extrait ne montre pas.
-    cell: int | None = None
+    cell: int | None = None  # numéro de case Dofus (0 à 559, voir fight.grid) ; inconnue pour un ennemi invisible
     monster: int | None = None  # None pour un personnage ou un compagnon
     max_life: int | None = None
     start_life: int | None = None
@@ -197,33 +195,36 @@ class Fight:
 
     def add(self, item: Event) -> None:
         self.events.append(item)
-        if item.kind in ("sheet", "summon") and item.target is not None:
-            tally = self.fighters[item.target]
+        kind = item.kind
+        if kind == "turn":
+            self.rounds = max(self.rounds, item.round or 0)
+        elif kind == "sides":
+            self.sides = item.path
+        elif kind == "end":
+            self.ended = True
+        if item.target is None or kind not in ("sheet", "summon", "damage", "heal", "shield", "death", "push", "move"):
+            return
+        tally = self.fighters[item.target]
+        if kind in ("sheet", "summon"):
             tally.max_life = tally.start_life = item.amount
             tally.cell = item.cell
-            if item.kind == "sheet":
+            if kind == "sheet":
                 tally.monster = item.spell
-        if item.kind == "turn" and item.round:
-            self.rounds = max(self.rounds, item.round)
-        elif item.kind == "damage" and item.target is not None:
-            self.fighters[item.target].taken += item.amount
-            self.fighters[item.target].absorbed += item.absorbed
+            else:
+                tally.summoner = item.source
+        elif kind == "damage":
+            tally.taken += item.amount
+            tally.absorbed += item.absorbed
             if item.source is not None:
                 self.fighters[item.source].dealt += item.amount
-        elif item.kind == "sides":
-            self.sides = item.path
-        elif item.kind in ("push", "move") and item.target is not None:
-            self.fighters[item.target].cell = item.cell
-        elif item.kind == "shield" and item.target is not None:
-            self.fighters[item.target].shield = item.amount
-        elif item.kind == "heal" and item.target is not None:
-            self.fighters[item.target].healed += item.amount
-        elif item.kind == "death" and item.target is not None:
-            self.fighters[item.target].dead = True
-        elif item.kind == "summon" and item.target is not None:
-            self.fighters[item.target].summoner = item.source
-        elif item.kind == "end":
-            self.ended = True
+        elif kind == "heal":
+            tally.healed += item.amount
+        elif kind == "shield":
+            tally.shield = item.amount
+        elif kind == "death":
+            tally.dead = True
+        else:  # poussée ou déplacement
+            tally.cell = item.cell
 
 
 def fights(messages) -> list[Fight]:

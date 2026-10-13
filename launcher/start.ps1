@@ -28,7 +28,6 @@ if ($updated -contains 'updated') {
 
 $cfg = & $python -c "import json, dataclasses; from dofustool import config; print(json.dumps(dataclasses.asdict(config.load())))" | ConvertFrom-Json
 $gameName = $cfg.dofus_process
-$gameDir = $null
 
 # Chemin du launcher Ankama introuvable (installé ailleurs que prévu) : on le cherche, et on l'enregistre.
 if (-not $NoLauncher -and (-not $cfg.ankama_path -or -not (Test-Path $cfg.ankama_path))) {
@@ -112,8 +111,6 @@ try {
         Start-Sleep -Seconds 2
     }
     Say "Dofus détecté. La capture s'arrêtera quand le jeu et le launcher Ankama seront fermés."
-    # Dossier où le jeu est installé, d'après l'exécutable qui tourne : il sert après la partie à lire le décor des cartes.
-    try { $gameExe = (Get-Process -Name $gameName -ErrorAction SilentlyContinue | Select-Object -First 1).Path; if ($gameExe) { $gameDir = Split-Path -Parent $gameExe } } catch { }
     $waiting = $false
     while ($true) {
         Start-Sleep -Seconds 3
@@ -149,7 +146,4 @@ finally {
     try { & $python -m dofustool.staticdata.update --if-new | ForEach-Object { Say $_ } } catch { Say "Données du jeu non vérifiées (hors ligne ?) : ce sera refait à la prochaine partie." }
     # Caractéristiques de base des équipements vus à l'HDV (DofusDB) : après la capture, jamais pendant.
     try { & $python -m dofustool.staticdata.effects | ForEach-Object { Say $_ } } catch { Say "DofusDB injoignable : à relancer plus tard." }
-    # Décor des cartes, lu dans les fichiers du jeu installés : seulement quand le jeu a été mis à jour.
-    $mapArgs = @('-m', 'dofustool.staticdata.maps', '--if-new'); if ($gameDir) { $mapArgs += @('--game', $gameDir) }
-    try { & $python @mapArgs | ForEach-Object { Say $_ } } catch { Say "Décor des cartes non lu : ce sera refait à la prochaine partie." }
 }

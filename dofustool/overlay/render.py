@@ -142,7 +142,6 @@ def render(views: list[View], scale: float = 1.0) -> Image.Image | None:
         image = card(view, scale)
         if shown < 1:
             image.putalpha(image.getchannel("A").point(lambda a: round(a * shown)))
-        # Glisse depuis la droite en apparaissant.
-        canvas.alpha_composite(image, (0, row * step), (0, 0)) if shown >= 1 else canvas.alpha_composite(
-            image.crop((0, 0, image.width - s(18 * (1 - shown)), image.height)), (s(18 * (1 - shown)), row * step))
+        slide = s(18 * (1 - shown))  # glisse depuis la droite en apparaissant
+        canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, row * step))
     return canvas

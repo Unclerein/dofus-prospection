@@ -55,7 +55,7 @@ def test_banners_wait_while_the_game_is_not_in_front():
     for now in (3.0, 30.0, 300.0):  # on regarde autre chose
         board.hold(now)
     board.expire(304.0)
-    assert len(board.banners) == 1  # encore là au retour sur le jeu, pour six secondes
+    assert len(board.banners) == 1  # encore là au retour sur le jeu, pour toute sa durée
     board.expire(306.5)
     assert board.banners == []
 

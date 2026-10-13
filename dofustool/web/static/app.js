@@ -2863,6 +2863,15 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 15, date: '13 octobre 2026', title: 'Bandeau de vente en jeu, métiers de forgemagie, conteneurs', hash: '#/jobs', go: 'Voir les métiers', points: [
+    ['Bandeau de vente :', 'quand un objet se vend, un bandeau apparaît quelques secondes dans l\u2019angle haut droit de la fenêtre du jeu : image, nom, quantité et kamas. Plusieurs lots du même objet vendus à la suite complètent le même bandeau au lieu d\u2019en empiler. Il ne s\u2019affiche que lorsque le jeu est au premier plan, et la souris passe au travers.'],
+    ['À savoir :', 'le jeu doit être en fenêtré ou en plein écran fenêtré. Une case dans Config permet de couper le bandeau.'],
+    ['Métiers de forgemagie :', 'la page Métiers propose le chemin le moins coûteux pour monter un métier de mage, niveau par niveau : objet support, rune à passer, nombre de passages et coût. Deux choix de runes : le moins cher, ou moins de runes à passer.'],
+    ['Montée de métier dans l\u2019atelier :', 'un plan de métier s\u2019exporte en liste « montée de métier », suivie au nombre de crafts faits. Le stock n\u2019est plus déduit des objets à fabriquer, ce qui faussait l\u2019expérience.'],
+    ['Conteneurs :', 'sachets, tonneaux et sacs de ressources sont comptés à part du stock. L\u2019atelier et les crafts indiquent combien en ouvrir, et si tu les as.'],
+    ['Atelier :', '« le moins cher » tient compte de ce que tu possèdes déjà, et le choix acheter ou fabriquer descend dans les sous-recettes ouvertes.'],
+    ['Journal de forgemagie :', 'les runes Pa et Ra sont chiffrées par fusion de runes simples (3 pour une Pa, 9 pour une Ra), plus par leur prix en HDV.'],
+  ] },
   { id: 14, date: '10 octobre 2026', title: 'Rune de chasse reconnue sur les armes', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Rune de chasse :', 'une arme qui porte « Arme de chasse » grâce à une rune n\u2019est plus confondue avec une arme de base ni avec un simple exo. Ses annonces s\u2019affichent « chasse » ou « exo + chasse ».'],
     ['Chercher avec ou sans :', 'dans le classement de forgemagie, un critère « Rune de chasse » à côté de l\u2019exo ou de l\u2019over. Il est sur « Sans » au départ : un exo désigne alors un exo seul. « Avec » ne garde que les armes.'],
