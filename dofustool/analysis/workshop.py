@@ -27,6 +27,9 @@ class Goal:
     quantity: int
     mode: str | None = None  # BUY, CRAFT, ou None : le moins cher des deux
     note: str = ""
+    # Montée de métier : nombre de crafts déjà faits. L'objectif se fabrique alors en entier, sans déduire les
+    # exemplaires possédés (ils n'ont donné aucune XP) ; seuls ses ingrédients sont pris dans le stock.
+    done: int | None = None
 
 
 @dataclass(slots=True)
@@ -132,7 +135,14 @@ def plan(
         left = max(0, goal.quantity - free(goal.item_id))
         unit = price(goal.item_id)
         buy_cost = unit * left if unit is not None else (0.0 if left == 0 else None)
+        if goal.done is not None and craftable:
+            left = max(0, goal.quantity - goal.done)
         craft_cost = craft_cost_left(goal.item_id, left, recipes, opened, price, free) if craftable else None
+        if goal.done is not None and craftable:
+            for ingredient_id, per in recipe.ingredients:
+                need(ingredient_id, per * left, (goal.item_id,))
+            out.goals.append(GoalPlan(goal, CRAFT, craftable, buy_cost, craft_cost, owned(goal.item_id), left))
+            continue
         if not craftable:
             mode = BUY
         elif goal.mode in (BUY, CRAFT):

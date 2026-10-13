@@ -241,3 +241,57 @@ def test_a_resource_shared_by_two_sub_recipes_is_counted_once():
     # 3 fers en stock pour 6 demandés (lame et garde) : 3 restent à acheter, 150 — pas 0.
     assert found.goals[0].craft_cost == 150.0
     assert workshop.craft_cost_left(SWORD, 1, recipes, {BLADE, hilt}, PRICES.get, lambda i: 0) == 300.0
+
+
+def test_a_job_list_counts_crafts_not_owned_items(app_db):  # noqa: F811
+    """Montée de métier : ce qui compte est le nombre de crafts faits, pas les objets déjà possédés."""
+    import time
+    from types import SimpleNamespace
+
+    from dofustool.messages.storage import Stack, Storage
+
+    conn = db.connect(app_db)
+    db.save_holdings(conn, db.INVENTORY, Storage(0, (Stack(2, 12, False), Stack(1, 30, False))), 100.0)  # 12 Farine, 30 Blé
+    db.save_craft(conn, 1, time.time() - 3_600, SimpleNamespace(item_id=2, quantity=5, uid=1))  # avant la liste : ne compte pas
+    conn.close()
+    api = Api(app_db)
+
+    def goal_of(list_id):
+        (found,) = [entry for entry in api.workshop()["lists"] if entry["id"] == list_id]
+        return found, found["goals"][0]
+
+    # Liste ordinaire : 50 Farine voulues, 12 possédées, donc 38 à fabriquer.
+    plain = api.workshop_action({"action": "plan", "name": "farine", "goals": [[2, 50]]})["list"]
+    found, goal = goal_of(plain)
+    assert (found["kind"], goal["done"], goal["to_make"]) == ("", None, 38)
+    # Montée de métier : les 12 Farine en stock n'ont donné aucune XP, il reste 50 crafts ; le Blé, lui, est déduit.
+    job = api.workshop_action({"action": "plan", "xp": True, "name": "Paysan 1 → 20", "goals": [[2, 50]]})["list"]
+    found, goal = goal_of(job)
+    assert (found["kind"], goal["done"], goal["recorded"], goal["to_make"], goal["mode"]) == ("xp", 0, 0, 50, "craft")
+    (wheat,) = [row for row in found["lines"] if row["item_id"] == 1]
+    assert (wheat["need"], wheat["owned"]["total"], wheat["to_buy"]) == (100, 30, 70)
+    # La capture relève 18 crafts : il en reste 32, et il ne faut plus de Blé que pour ceux-là.
+    conn = db.connect(app_db)
+    db.save_craft(conn, 2, time.time() + 5, SimpleNamespace(item_id=2, quantity=18, uid=2))
+    conn.close()
+    api = Api(app_db)
+    found, goal = goal_of(job)
+    assert (goal["done"], goal["recorded"], goal["to_make"]) == (18, 18, 32)
+    assert [row["need"] for row in found["lines"] if row["item_id"] == 1] == [64]
+    # Correction à la main : 25 faits en vrai (7 sans la capture). Un craft relevé ensuite s'y ajoute.
+    api.workshop_action({"action": "goal", "goal": goal["id"], "done": 25})
+    assert goal_of(job)[1]["done"] == 25 and goal_of(job)[1]["to_make"] == 25
+    conn = db.connect(app_db)
+    db.save_craft(conn, 3, time.time() + 6, SimpleNamespace(item_id=2, quantity=30, uid=3))
+    conn.close()
+    api = Api(app_db)
+    assert (goal_of(job)[1]["done"], goal_of(job)[1]["to_make"]) == (55, 0)  # au-delà du but : rien à faire, jamais négatif
+    assert goal_of(plain)[1]["done"] is None  # la liste ordinaire n'a pas changé de nature
+
+    # Liste venue d'un plan de forgemagie : mode et note par objectif.
+    mage = api.workshop_action({"action": "plan", "name": "Joaillomage", "goals": [[1, 300, "buy", "à fusionner : 100 Pa Fo"], [500, 1, None, "objet support"]]})["list"]
+    found, _ = goal_of(mage)
+    assert [(g["item_id"], g["quantity"], g["choice"], g["note"]) for g in found["goals"]] == [(1, 300, "buy", "à fusionner : 100 Pa Fo"), (500, 1, None, "objet support")]
+    for bad in ([[1, 2, "voler"]], [[1, 2, "buy", 3]], [[1]], [[1, 2, "buy", "x", 5]]):
+        with pytest.raises(ValueError):
+            api.workshop_action({"action": "plan", "name": "x", "goals": bad})

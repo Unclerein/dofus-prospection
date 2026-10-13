@@ -553,7 +553,7 @@ async function pageWorkshop(r) {
   const side = h('section', { class: 'panel workshop-lists', 'aria-label': 'Listes' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Mes listes')),
     data.lists.map((l) => h('a', { class: 'list-row link' + (current && l.id === current.id ? ' on' : ''), href: `#/workshop/${l.id}` },
-      h('div', { style: 'min-width: 0' }, h('div', { style: 'font-weight: 600' }, l.name), h('div', { class: 'source' }, plural(l.goals.length, 'objectif', 'objectifs') + (l.lines.length ? ` · ${l.cost_remaining ? fmt(l.cost_remaining) + ' à acheter' : 'complet'}` : ''))),
+      h('div', { style: 'min-width: 0' }, h('div', { style: 'font-weight: 600' }, l.name), h('div', { class: 'source' }, (l.kind === 'xp' ? 'montée de métier · ' : '') + plural(l.goals.length, 'objectif', 'objectifs') + (l.lines.length ? ` · ${l.cost_remaining ? fmt(l.cost_remaining) + ' à acheter' : 'complet'}` : ''))),
       ui.confirm === l.id
         ? h('button', { class: 'btn end', onclick: (event) => { event.preventDefault(); ui.confirm = null; run({ action: 'delete', list: l.id }, () => { if (current && current.id === l.id) location.hash = '#/workshop'; }); } }, 'Supprimer ?')
         : h('button', { class: 'icon-btn end', title: `Supprimer ${l.name}`, 'aria-label': `Supprimer ${l.name}`, onclick: (event) => { event.preventDefault(); ui.confirm = l.id; refresh(); } }, '×'))),
@@ -588,7 +588,7 @@ async function pageWorkshop(r) {
   const way = (g) => (!g.craftable ? h('span', { class: 'muted', title: 'Cet objet ne se fabrique pas' }, 'achat')
     : segmented('Obtention', [[null, 'Le moins cher'], ['buy', 'Acheter'], ['craft', 'Fabriquer']], g.choice, (mode) => run({ action: 'goal', goal: g.id, mode })));
   const goals = h('section', { class: 'panel', 'aria-label': 'Objectifs' },
-    h('div', { class: 'panel-head' }, h('h2', {}, 'Objectifs'), h('span', { class: 'muted small' }, 'Ce que tu veux obtenir')),
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Objectifs'), h('span', { class: 'muted small' }, l.kind === 'xp' ? 'Montée de métier : les crafts faits comptent, pas les objets possédés' : 'Ce que tu veux obtenir')),
     l.goals.length === 0 ? h('div', { class: 'empty' }, 'Liste vide : ajoute un objet avec la recherche ci-dessus.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', { class: 'l' }, 'Obtention'), h('th', { title: 'Ce qu\u2019il reste à payer, exemplaires déjà possédés déduits. Équipement : annonce la moins chère de l\u2019HDV si son relevé a moins de 48 h, sinon le prix de référence' }, 'Tout acheter'), h('th', { title: 'Ce qu\u2019il reste à payer en achetant les ingrédients qui te manquent ; un ingrédient ouvert est compté par sa propre recette' }, 'Fabriquer'), h('th', {}, 'En stock'), h('th', {}, ''))),
@@ -596,7 +596,12 @@ async function pageWorkshop(r) {
           h('td', { class: 'l' }, h('a', { class: 'tree-item', href: `#/item/${g.item_id}`, title: 'Ouvrir la fiche de l\u2019objet' }, itemCell(g.icon, g.name, [g.note, g.mode === 'craft' ? (g.to_make < g.quantity ? `${fmt(g.to_make)} à fabriquer, le reste en stock` : 'à fabriquer') : 'à acheter'].filter(Boolean).join(' · '), g.item_id))),
           h('td', {}, h('input', { type: 'number', min: 1, max: 1000000, value: g.quantity, class: 'qty-input', 'aria-label': `Quantité de ${g.name}`,
             onchange: (e) => { const q = Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))); run({ action: 'goal', goal: g.id, quantity: q }); } })),
-          h('td', { class: 'l' }, way(g)),
+          h('td', { class: 'l' }, g.done !== null && g.done !== undefined && g.craftable
+            ? h('div', { class: 'with-ico', title: `La capture a relevé ${fmt(g.recorded)} craft${g.recorded > 1 ? 's' : ''} depuis la création de la liste. Corrige le nombre si tu en as fait sans elle.` },
+              h('input', { type: 'number', min: 0, max: 1000000, value: g.done, class: 'qty-input', 'aria-label': `Crafts déjà faits de ${g.name}`,
+                onchange: (e) => { const q = Math.max(0, Math.min(1000000, Math.floor(Number(e.target.value) || 0))); run({ action: 'goal', goal: g.id, done: q }); } }),
+              h('span', { class: g.to_make ? 'soft' : 'gain' }, g.to_make ? `faits · reste ${fmt(g.to_make)}` : 'faits · terminé'))
+            : way(g)),
           h('td', { class: g.mode === 'buy' ? 'strong' : 'soft' }, fmt(g.buy_cost)),
           h('td', { class: g.mode === 'craft' ? 'strong' : 'soft' }, g.craftable ? fmt(g.craft_cost) : h('span', { class: 'muted' }, '—')),
           h('td', {}, g.owned ? haveTag(g.owned, g.quantity) : h('span', { class: 'muted' }, '0')),
@@ -1315,8 +1320,11 @@ async function pageJobs() {
   const total = plan.shopping.reduce((sum, row) => sum + (row.cost || 0), 0);
   const shopping = h('section', { class: 'panel', 'aria-label': 'Liste de courses' },
     h('div', { class: 'panel-head' }, h('h2', {}, 'Liste de courses'), h('span', { class: 'muted small' }, `${plan.shopping.length} ${plan.mage ? 'runes et objets' : 'ingrédients'} · ${fmt(total)} à acheter`),
-      plan.steps.length > 0 && !plan.mage && h('button', { class: 'btn', title: 'Crée une liste de l\u2019atelier avec les objets à fabriquer de ce plan', onclick: async () => {
-        const done = await workshopAct({ action: 'plan', name: `${job.name} ${plan.start_level} → ${plan.end_level}`, goals: plan.steps.map((step) => [step.item_id, step.crafts]) });
+      plan.steps.length > 0 && h('button', { class: 'btn', title: plan.mage ? 'Crée une liste de l\u2019atelier : les runes simples à acheter (celles à fusionner sont indiquées) et les objets supports, à acheter ou fabriquer au moins cher'
+        : 'Crée une liste de l\u2019atelier pour cette montée de métier : elle compte les crafts que tu fais, pas les objets que tu possèdes déjà', onclick: async () => {
+        const done = await workshopAct(plan.mage
+          ? { action: 'plan', name: `${job.name} ${plan.start_level} → ${plan.end_level}`, goals: plan.export }
+          : { action: 'plan', xp: true, name: `${job.name} ${plan.start_level} → ${plan.end_level}`, goals: plan.steps.map((step) => [step.item_id, step.crafts]) });
         if (done) location.hash = `#/workshop/${done.list}`;
       } }, 'Envoyer vers l\u2019atelier')),
     plan.shopping.length === 0 ? h('div', { class: 'empty' }, 'Rien à acheter.')

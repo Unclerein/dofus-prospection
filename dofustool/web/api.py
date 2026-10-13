@@ -882,6 +882,16 @@ class Api:
                     }
                 )  # fmt: skip
             needs = []
+            export: dict[int, list] = {}
+            for item_id, quantity in shopping.items():
+                if item_id in by_id:
+                    export[item_id] = [item_id, quantity, None, "objet support"]  # acheter ou fabriquer : le moins cher
+                    continue
+                small, count = sources.get(item_id, (item_id, 1))
+                entry = export.setdefault(small, [small, 0, workshop.BUY, ""])
+                entry[1] += quantity * count
+                if small != item_id:
+                    entry[3] = (entry[3] + " · " if entry[3] else "à fusionner : ") + f"{quantity} {named(item_id)['name'].replace('Rune ', '')}"
             for item_id, quantity in shopping.items():
                 price = prices.get(item_id, by_id[item_id].price if item_id in by_id else None)
                 have = stock.get(item_id).total
@@ -899,6 +909,7 @@ class Api:
             return clean(
                 {
                     "mage": True, "pass_rate": plan.pass_rate, "pending": pending, "supports_cost": bought_cost,
+                    "export": list(export.values()),
                     "steps": steps, "shopping": needs, "excluded": excluded,
                     "start_xp": plan.start_xp, "start_level": jobxp.xp_to_level(plan.start_xp),
                     "end_xp": plan.end_xp, "end_level": jobxp.xp_to_level(plan.end_xp),
@@ -1005,11 +1016,24 @@ class Api:
                 }  # fmt: skip
 
             plans = []
-            for list_id, name, created_at in conn.execute("SELECT id, name, created_at FROM workshop_lists ORDER BY created_at DESC, id DESC").fetchall():
-                goals = [
-                    workshop.Goal(*row)
-                    for row in conn.execute("SELECT id, item_id, quantity, mode, note FROM workshop_goals WHERE list_id = ? ORDER BY id", (list_id,))
-                ]
+            kinds, recorded = {}, {}
+            for list_id, name, created_at, kind in conn.execute(
+                "SELECT id, name, created_at, kind FROM workshop_lists ORDER BY created_at DESC, id DESC"
+            ).fetchall():
+                kinds[list_id] = kind
+                # Montée de métier : crafts relevés par la capture depuis la création de la liste.
+                made = (
+                    dict(conn.execute("SELECT item_id, SUM(quantity) FROM crafts WHERE ts >= ? GROUP BY item_id", (created_at,)))
+                    if kind == "xp"
+                    else {}
+                )
+                goals = []
+                for goal_id, item_id, quantity, mode, note, adjust in conn.execute(
+                    "SELECT id, item_id, quantity, mode, note, adjust FROM workshop_goals WHERE list_id = ? ORDER BY id", (list_id,)
+                ):
+                    recorded[goal_id] = made.get(item_id, 0)
+                    done = max(0, recorded[goal_id] + adjust) if kind == "xp" else None
+                    goals.append(workshop.Goal(goal_id, item_id, quantity, mode, note, done))
                 opened = {row[0] for row in conn.execute("SELECT item_id FROM workshop_opened WHERE list_id = ?", (list_id,))}
                 plans.append((list_id, name, created_at, workshop.plan(goals, opened, recipes, price, owned)))
             # Besoin de chaque ressource toutes listes confondues, pour signaler celles que plusieurs listes se disputent.
@@ -1081,12 +1105,14 @@ class Api:
                 tree = [node(item_id, parts[0], ()) for item_id, parts in found.sources.items() if parts.get(0)]
                 lists.append(
                     {
-                        "id": list_id, "name": name, "created_at": created_at,
+                        "id": list_id, "name": name, "created_at": created_at, "kind": kinds[list_id],
                         "goals": [
                             {
                                 **named(g.goal.item_id), "id": g.goal.id, "quantity": g.goal.quantity, "choice": g.goal.mode, "mode": g.mode,
                                 "note": g.goal.note, "craftable": g.craftable, "buy_cost": g.buy_cost, "craft_cost": g.craft_cost,
                                 "owned": g.owned, "to_make": g.to_make,
+                                # Montée de métier : crafts faits (relevés par la capture, corrigés à la main au besoin).
+                                "done": g.goal.done, "recorded": recorded.get(g.goal.id, 0),
                             }
                             for g in found.goals
                         ],
@@ -1132,18 +1158,25 @@ class Api:
             if action == "create":
                 return {"list": db.workshop_create(conn, text("name"), [], now)}
             if action == "plan":
-                # Liste toute faite : [[objet, quantité], …], chaque objectif à fabriquer (plan de métier).
+                # Liste toute faite : [[objet, quantité], …] ou [[objet, quantité, mode, note], …].
+                # Sans mode, l'objectif est à fabriquer (plan de métier) ; mode null : le moins cher des deux.
+                # xp : montée de métier, suivie au nombre de crafts faits et non aux objets possédés.
                 goals = payload.get("goals")
                 if not isinstance(goals, list) or not 0 < len(goals) <= 200:
                     raise ValueError("goals attendu")
                 rows = []
                 for entry in goals:
-                    if not (isinstance(entry, list) and len(entry) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in entry)):
+                    if not (isinstance(entry, list) and 2 <= len(entry) <= 4 and all(isinstance(v, int) and not isinstance(v, bool) for v in entry[:2])):
                         raise ValueError("objectif mal formé")
                     if not known(entry[0]) or not 0 < entry[1] <= 10**6:
                         raise ValueError("objectif inconnu")
-                    rows.append((entry[0], entry[1], workshop.CRAFT, ""))
-                return {"list": db.workshop_create(conn, text("name"), rows, now)}
+                    mode = entry[2] if len(entry) > 2 else workshop.CRAFT
+                    note = entry[3] if len(entry) > 3 else ""
+                    if mode not in (None, workshop.BUY, workshop.CRAFT) or not isinstance(note, str):
+                        raise ValueError("objectif mal formé")
+                    rows.append((entry[0], entry[1], mode, " ".join(note.split())[:80]))
+                kind = "xp" if payload.get("xp") is True else ""
+                return {"list": db.workshop_create(conn, text("name"), rows, now, kind)}
             if action == "ganymede":
                 # Ce qu'il reste à réunir pour finir un guide Ganymède : les objets échangeables seulement
                 # (un objet de quête ne s'achète pas), chacun à acheter ou fabriquer au moins cher.
@@ -1235,6 +1268,16 @@ class Api:
                     else:
                         if "quantity" in payload:
                             conn.execute("UPDATE workshop_goals SET quantity = ? WHERE id = ?", (number("quantity", 1, 10**6), goal_id))
+                        if "done" in payload:
+                            # Le joueur corrige le nombre de crafts faits : on garde l'écart avec ce que la capture a relevé.
+                            item_id, created_at = conn.execute(
+                                "SELECT g.item_id, l.created_at FROM workshop_goals g JOIN workshop_lists l ON l.id = g.list_id WHERE g.id = ?",
+                                (goal_id,),
+                            ).fetchone()
+                            seen = conn.execute(
+                                "SELECT COALESCE(SUM(quantity), 0) FROM crafts WHERE item_id = ? AND ts >= ?", (item_id, created_at)
+                            ).fetchone()[0]
+                            conn.execute("UPDATE workshop_goals SET adjust = ? WHERE id = ?", (number("done", 0, 10**6) - seen, goal_id))
                         if "mode" in payload:
                             mode = payload["mode"]
                             if mode not in (None, workshop.BUY, workshop.CRAFT):

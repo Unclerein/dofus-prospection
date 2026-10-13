@@ -342,7 +342,10 @@ CREATE INDEX IF NOT EXISTS crafts_ts ON crafts (ts);
 CREATE TABLE IF NOT EXISTS workshop_lists (
     id         INTEGER PRIMARY KEY,
     name       TEXT NOT NULL,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    -- 'xp' : montée de métier. Ce qui compte est le nombre de crafts faits depuis la création de la liste,
+    -- pas le nombre d'objets possédés : un objet déjà en banque n'a donné aucune XP.
+    kind       TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS workshop_goals (
     id       INTEGER PRIMARY KEY,
@@ -350,7 +353,8 @@ CREATE TABLE IF NOT EXISTS workshop_goals (
     item_id  INTEGER NOT NULL,
     quantity INTEGER NOT NULL,
     mode     TEXT,               -- 'buy', 'craft', ou NULL : le moins cher des deux
-    note     TEXT NOT NULL DEFAULT ''
+    note     TEXT NOT NULL DEFAULT '',
+    adjust   INTEGER NOT NULL DEFAULT 0  -- liste 'xp' : correction à la main du nombre de crafts relevés
 );
 -- Ingrédients « ouverts » d'une liste : remplacés par leurs propres ingrédients.
 CREATE TABLE IF NOT EXISTS workshop_opened (
@@ -404,6 +408,12 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
             "UPDATE cours_state SET base_qty = (SELECT SUM(COALESCE(qty_sold, 0)) FROM market_history m "
             "WHERE m.item_id = cours_state.item_id AND m.period = 'day' AND m.captured_at = cours_state.base_at)"
         )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(workshop_lists)")}
+    if columns and "kind" not in columns:
+        conn.execute("ALTER TABLE workshop_lists ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(workshop_goals)")}
+    if columns and "adjust" not in columns:
+        conn.execute("ALTER TABLE workshop_goals ADD COLUMN adjust INTEGER NOT NULL DEFAULT 0")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(fm_items)")}
     if columns and "lot_uid" not in columns:  # renseigné au prochain relevé de l'onglet Vendre
         conn.execute("ALTER TABLE fm_items ADD COLUMN lot_uid INTEGER")
@@ -753,10 +763,13 @@ def return_unsold(conn: sqlite3.Connection, count: int, ts: float) -> list[tuple
     return [(item_id, lot, price) for _, _, item_id, lot, price in rows]
 
 
-def workshop_create(conn: sqlite3.Connection, name: str, goals, now: float) -> int:
-    """Crée une liste de l'atelier. goals : [(objet, quantité, mode ou None, note)]. Renvoie son numéro."""
+def workshop_create(conn: sqlite3.Connection, name: str, goals, now: float, kind: str = "") -> int:
+    """Crée une liste de l'atelier. goals : [(objet, quantité, mode ou None, note)]. Renvoie son numéro.
+
+    kind 'xp' : montée de métier, suivie au nombre de crafts faits depuis sa création.
+    """
     with conn:
-        list_id = conn.execute("INSERT INTO workshop_lists (name, created_at) VALUES (?, ?)", (name, now)).lastrowid
+        list_id = conn.execute("INSERT INTO workshop_lists (name, created_at, kind) VALUES (?, ?, ?)", (name, now, kind)).lastrowid
         conn.executemany(
             "INSERT INTO workshop_goals (list_id, item_id, quantity, mode, note) VALUES (?, ?, ?, ?, ?)",
             [(list_id, item_id, quantity, mode, note) for item_id, quantity, mode, note in goals],
