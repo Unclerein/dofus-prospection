@@ -2715,7 +2715,8 @@ async function pageConfig() {
           else notify('Launcher Ankama introuvable sur ce PC : indique son chemin à la main.');
         } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
-        h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'))));
+        h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
+        h('label', { class: 'check' }, h('input', { id: 'c-element', type: 'checkbox', checked: !!d.fight_element, onchange: (e) => { d.fight_element = e.target.checked; sync(); } }), 'En combat, afficher l\u2019élément de mon dernier sort (Huppermage)'))));
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),

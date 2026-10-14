@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .. import db, identify
 from ..archive import Archive
+from ..fight import live
 from ..messages import Mapping, avg_prices, characters, exchange, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
@@ -62,7 +63,16 @@ class Pipeline:
         avg_prices_timeout_s: float = 60.0,
         keymap_path: Path | None = None,
         started_at: float | None = None,
+        fight_path: Path | None = None,
     ) -> None:
+        # fight_path : où écrire le combat en cours pour la fenêtre d'affichage. Sans lui, le combat n'est pas suivi.
+        self._fight_path = fight_path
+        self.fight = live.Tracker(live.load_known(fight_path.with_name(live.SPELLS_PATH.name))) if fight_path else None
+        if fight_path is not None:
+            try:
+                live.write(fight_path, {"active": False, "updated": 0.0})  # efface un combat resté ouvert à l'arrêt précédent
+            except OSError:
+                pass
         # started_at : heure de démarrage de la capture, pour reconnaître une connexion ouverte avant elle.
         self._started_at = started_at
         # Si le chemin est donné, keymap.json est relu dès qu'il change : après une mise à jour du jeu,
@@ -100,6 +110,21 @@ class Pipeline:
         watch.last_ts = msg.ts
         source_id = self.archive.add(watch.archive_id, msg) if watch.archive_id is not None else None
         self._decode(msg, watch, source_id)
+        if self.fight is not None:
+            try:
+                self.fight.feed(msg.ts, msg.direction, msg.key, msg.body, watch.character_id)
+            except Exception as exc:  # le suivi du combat ne doit jamais gêner le reste
+                self._log_error_once(exc)
+
+    def _write_fight(self, now: float) -> None:
+        """Écrit le combat en cours pour la fenêtre d'affichage, et les éléments de sorts appris."""
+        try:
+            live.write(self._fight_path, {**self.fight.state(), "updated": now})
+            if self.fight.learnt:
+                self.fight.learnt = False
+                live.write(self._fight_path.with_name(live.SPELLS_PATH.name), {str(spell): element for spell, element in self.fight.known.items()})
+        except OSError as exc:
+            self._log_error_once(exc)
 
     def _decode(self, msg: Message, watch: _ConnWatch, source_id: int | None = None) -> None:
         mapping = self.keymap.get("market_history")
@@ -385,6 +410,8 @@ class Pipeline:
 
     def tick(self, now: float) -> None:
         """À appeler régulièrement : valide l'archive et surveille le décodage."""
+        if self.fight is not None and self.fight.dirty:
+            self._write_fight(now)
         try:
             self._reload_keymap()
             self.archive.commit()

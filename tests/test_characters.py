@@ -113,6 +113,7 @@ VALUES = {
     "dofus_process": "Dofus",
     "start_dashboard": True,
     "sale_notifications": True,
+    "fight_element": False,
 }
 
 

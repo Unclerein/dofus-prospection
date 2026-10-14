@@ -28,6 +28,7 @@ class Config:
     dofus_process: str = "Dofus"
     start_dashboard: bool = True
     sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
+    fight_element: bool = False  # en combat, pastille de l'élément de mon dernier sort (Huppermage)
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -64,6 +65,7 @@ def _from_raw(raw: dict) -> Config:
         dofus_process=launcher.get("dofus_process", defaults.dofus_process),
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
         sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
+        fight_element=bool(launcher.get("fight_element", defaults.fight_element)),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -143,6 +145,7 @@ def from_values(values: dict) -> Config:
         dofus_process=_text(values, "dofus_process", "Processus du jeu", 60),
         start_dashboard=bool(values.get("start_dashboard")),
         sale_notifications=bool(values.get("sale_notifications", True)),
+        fight_element=bool(values.get("fight_element", False)),
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -213,6 +216,8 @@ dofus_process = {_quoted(cfg.dofus_process)}
 start_dashboard = {"true" if cfg.start_dashboard else "false"}
 # Afficher un bandeau par-dessus le jeu quand un objet se vend.
 sale_notifications = {"true" if cfg.sale_notifications else "false"}
+# En combat, afficher par-dessus le jeu l'élément de mon dernier sort.
+fight_element = {"true" if cfg.fight_element else "false"}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

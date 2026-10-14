@@ -21,11 +21,13 @@ from ctypes import wintypes
 from pathlib import Path
 
 from .. import db
+from ..fight import live
 from . import Board, Feed, Sale, is_game, kamas, place
 from . import render as draw
 
 POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
+STALE_FIGHT_S = 900.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
 
 GWL_EXSTYLE = -20
@@ -192,8 +194,11 @@ class Items:
 
 
 class Window:
-    def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus") -> None:
+    def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
+                 element: bool = False, demo_element: str | None = None) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
+        self.is_demo = demo is not None
+        self.show_element, self.element = element, demo_element  # pastille de l'élément de mon dernier sort, en combat
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
         self.board = Board()
         self.clock = 0.0  # temps de la démonstration : il n'avance que lorsque les bandeaux peuvent se voir
@@ -220,6 +225,10 @@ class Window:
                 sales.append(self.demo.pop(0)[1])
             for sale in sales:
                 self.board.add(sale, now)
+            if self.show_element and not self.is_demo:
+                fight = live.read()
+                fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
+                self.element = fight.get("element") if fight.get("active") and fresh else None
             self.area = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()) if self.anywhere else game_area(self.game)
         if self.area is None:
             self.board.hold(now)
@@ -227,7 +236,7 @@ class Window:
         else:
             self.board.expire(now)
             self.paint(now)
-        if self.feed is None and not self.demo and not self.board.banners:
+        if self.is_demo and not self.demo and not self.board.banners:
             self.root.destroy()  # démonstration terminée
             return
         self.root.after(FRAME_MS if self.board.banners and self.area else POLL_MS, self.tick)
@@ -241,7 +250,7 @@ class Window:
             )
             for banner in self.board.banners
         ]  # fmt: skip
-        image = draw.render(views, self.scale)
+        image = draw.render(views, self.scale, self.element if self.show_element else None)
         if image is None:
             self.layer.hide()
             return
@@ -287,6 +296,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--demo", action="store_true", help="affiche des ventes inventées ; rien n'est écrit dans la base")
     parser.add_argument("--anywhere", action="store_true", help="dans l'angle de l'écran, même si le jeu n'est pas la fenêtre active")
+    parser.add_argument("--element", choices=live.ELEMENTS, help="avec --demo : montre aussi la pastille de cet élément")
     parser.add_argument("--probe", action="store_true", help="dit pendant douze secondes si la fenêtre active est reconnue comme le jeu")
     args = parser.parse_args()
     if sys.platform != "win32":
@@ -308,12 +318,13 @@ def main() -> int:
         script, names = demo_sales(conn)
         items = Items(conn, icon_dir)
         items.demo_names = names
-        Window(None, items, script, anywhere=args.anywhere, game=game).run()
+        Window(None, items, script, anywhere=args.anywhere, game=game, element=bool(args.element), demo_element=args.element).run()
         return 0
     if conn is None:
         print(f"Base absente : {db.MARKET_PATH}")
         return 1
-    Window(Feed(conn), Items(conn, icon_dir), anywhere=args.anywhere, game=game).run()
+    cfg = config.load()
+    Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, element=cfg.fight_element).run()
     return 0
 
 

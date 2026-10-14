@@ -16,6 +16,7 @@ STAT = "jtk"  # une stat d'un combattant change
 MOVE = "jnz"  # déplacement à pied : le chemin, case par case ; absent pour un ennemi invisible
 # Cases de départ des deux équipes : à l'entrée en combat, et avant le combat quand le joueur demande l'aperçu (touche L).
 START_CELLS, PREVIEW = "jxk", "jvk"
+ORDER = "jsr"  # du client vers le serveur : le joueur lance un sort (1 : sort, 2 : case)
 SHIELD_STAT = 96
 
 # Les points de vie de départ sont la somme de deux stats de la fiche, toutes parts confondues
@@ -36,7 +37,7 @@ Fields = list[tuple[str, str]]
 
 def parse_line(line: str) -> tuple[float, str, str, Fields] | None:
     """(délai, sens, clé, champs) d'une ligne d'extrait ; None pour l'en-tête ou une ligne illisible."""
-    head, sep, tail = line.partition(" | ")
+    head, sep, tail = line.partition("|")  # un message sans champ finit par la barre, sans rien derrière
     parts = head.split()
     if not sep or len(parts) != 4:
         return None
@@ -227,41 +228,52 @@ class Fight:
             tally.cell = item.cell
 
 
-def fights(messages) -> list[Fight]:
-    """Les combats d'une suite de messages (délai, sens, clé, champs), dans l'ordre."""
-    out: list[Fight] = []
-    current: Fight | None = None
-    sheets: dict[int, Event] = {}  # fiches reçues pendant le placement, avant le début
-    my_life: int | None = None
-    sides: Event | None = None
-    for when, direction, key, fields in messages:
+class Reader:
+    """Lit les messages un à un et tient le combat en cours : le même code sert après coup et en direct."""
+
+    def __init__(self) -> None:
+        self.current: Fight | None = None
+        self.finished: list[Fight] = []
+        self._sheets: dict[int, Event] = {}  # fiches reçues pendant le placement, avant le début
+        self._my_life: int | None = None
+        self._sides: Event | None = None
+
+    def feed(self, when: float, direction: str, key: str, fields: Fields) -> Event | None:
+        """L'événement porté par ce message, une fois pris en compte ; None s'il n'en porte pas."""
         item = event(when, direction, key, fields)
         if item is None:
-            continue
+            return None
         if item.kind == "life":
-            my_life = item.amount
-            continue
-        if current is None and item.kind == "sheet" and item.target is not None:
-            sheets[item.target] = item
-        if current is None and item.kind == "sides":
-            sides = item
-        if item.kind == "start":
-            current = Fight()
-            out.append(current)
-            for sheet in sheets.values():
-                current.add(sheet)
-                if sheet.target > 0 and my_life is not None and my_life <= (sheet.amount or 0):
-                    current.fighters[sheet.target].start_life = my_life
-            if sides is not None:
-                current.add(sides)
-            sheets, sides = {}, None
-            current.events.append(item)
-            continue
-        if current is not None:
-            current.add(item)
+            self._my_life = item.amount
+        elif item.kind == "start":
+            self.current = Fight()
+            for sheet in self._sheets.values():
+                self.current.add(sheet)
+                if sheet.target > 0 and self._my_life is not None and self._my_life <= (sheet.amount or 0):
+                    self.current.fighters[sheet.target].start_life = self._my_life
+            if self._sides is not None:
+                self.current.add(self._sides)
+            self._sheets, self._sides = {}, None
+            self.current.events.append(item)
+        elif self.current is None:
+            if item.kind == "sheet" and item.target is not None:
+                self._sheets[item.target] = item
+            elif item.kind == "sides":
+                self._sides = item
+        else:
+            self.current.add(item)
             if item.kind == "end":
-                current, sheets, sides = None, {}, None
-    return out
+                self.finished.append(self.current)
+                self.current, self._sheets, self._sides = None, {}, None
+        return item
+
+
+def fights(messages) -> list[Fight]:
+    """Les combats d'une suite de messages (délai, sens, clé, champs), dans l'ordre ; le dernier peut être inachevé."""
+    reader = Reader()
+    for when, direction, key, fields in messages:
+        reader.feed(when, direction, key, fields)
+    return reader.finished + ([reader.current] if reader.current is not None else [])
 
 
 def read_extract(text: str) -> list[Fight]:
