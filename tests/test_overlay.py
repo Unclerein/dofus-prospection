@@ -110,8 +110,10 @@ def test_rune_pill_alone_or_above_the_banners():
 
     banner = render.View(name="Laine", quantity=1, gain="+ 5 kamas", icon=None, age=3.0, left=2.0, total=3.0, bumped=99.0)
     alone = render.render([], rune="feu")
-    assert alone is not None and alone.height == render.PILL_HEIGHT + 2 * render.PAD
+    assert alone is not None and alone.height == render.RUNE_HEIGHT + 2 * render.PAD
     both, only_banner = render.render([banner], rune="feu"), render.render([banner])
-    assert both.height == only_banner.height + render.PILL_HEIGHT + render.GAP
-    edge = alone.getpixel((alone.width - render.PAD - render.PILL_WIDTH // 2, render.PAD))
-    assert edge[:3] == render.ELEMENT_COLOURS["feu"] and alone.getpixel((2, alone.height // 2))[3] == 0
+    assert both.height == only_banner.height + render.RUNE_HEIGHT + render.GAP
+    # liseré à la couleur de l'élément, à gauche de la carte calée à droite ; transparent autour
+    bar = alone.getpixel((alone.width - render.PAD - render.RUNE_WIDTH + 2, render.PAD + render.RUNE_HEIGHT // 2))
+    assert bar[:3] == render.ELEMENT_COLOURS["feu"] and alone.getpixel((2, alone.height // 2))[3] == 0
+    assert set(render.ELEMENT_ICONS) == set(render.ELEMENT_COLOURS)

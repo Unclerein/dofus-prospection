@@ -334,6 +334,23 @@ class Items:
 
         fetch_icon(icon_id, self.icon_dir)
 
+    def effect_icon(self, asset: str | None) -> Path | None:
+        """Icône de caractéristique du jeu (élément…), depuis le cache du tableau de bord ; demandée à DofusDB sinon."""
+        if not asset:
+            return None
+        path = self.icon_dir / "effects" / f"{asset}.png"
+        if path.exists():
+            return path
+        if asset not in self.fetching:
+            self.fetching.add(asset)
+            threading.Thread(target=self._fetch_effect, args=(asset,), daemon=True).start()
+        return None
+
+    def _fetch_effect(self, asset: str) -> None:
+        from ..web.server import fetch_effect_icon
+
+        fetch_effect_icon(asset, self.icon_dir)
+
 
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
@@ -341,7 +358,8 @@ class Window:
         self.feed, self.items, self.demo = feed, items, demo or []
         self.is_demo = demo is not None
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
-        self.show_rune, self.rune = rune, demo_rune  # pastille de ma dernière rune (Huppermage), en combat
+        self.show_rune, self.rune = rune, demo_rune  # carte de ma dernière rune (Huppermage), en combat
+        self.rune_changed = 0.0  # quand la rune a changé, pour l'éclat du puits
         self.board = Board()
         self.clock = 0.0  # temps de la démonstration : il n'avance que lorsque les bandeaux peuvent se voir
         self.checked = 0.0  # dernier passage sur la base et la fenêtre active
@@ -373,8 +391,8 @@ class Window:
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
                 self.fight = fight if fight.get("active") and fresh else {"active": False}
-                if self.show_rune:
-                    self.rune = self.fight.get("rune")
+                if self.show_rune and self.fight.get("rune") != self.rune:
+                    self.rune, self.rune_changed = self.fight.get("rune"), now
             self.area = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()) if self.anywhere else game_area(self.game)
         if self.area is None:
             self.board.hold(now)
@@ -387,6 +405,7 @@ class Window:
             self.root.destroy()  # démonstration terminée
             return
         fast = aiming or (self.board.banners and self.area) or (self.aim is not None and self.fight.get("map") == aim.COMTE_MAP)
+        fast = fast or (self.show_rune and self.rune and now - self.rune_changed < draw.BUMP_S + 0.2)
         self.root.after(FRAME_MS if fast else POLL_MS, self.tick)
 
     def paint(self, now: float) -> None:
@@ -398,7 +417,8 @@ class Window:
             )
             for banner in self.board.banners
         ]  # fmt: skip
-        image = draw.render(views, self.scale, self.rune if self.show_rune else None)
+        rune = self.rune if self.show_rune else None
+        image = draw.render(views, self.scale, rune, self.items.effect_icon(draw.ELEMENT_ICONS.get(rune)), now - self.rune_changed)
         if image is None:
             self.layer.hide()
             return

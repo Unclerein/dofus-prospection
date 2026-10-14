@@ -128,40 +128,61 @@ def card(view: View, scale: float) -> Image.Image:
     return image
 
 
-PILL_WIDTH, PILL_HEIGHT = 178, 46
-ELEMENT_COLOURS = {"terre": (176, 124, 68), "feu": (226, 88, 62), "eau": (74, 160, 232), "air": (96, 200, 110)}
+RUNE_WIDTH, RUNE_HEIGHT, RUNE_WELL, RUNE_ICON = 214, 62, 44, 36
+ELEMENT_COLOURS = {"terre": (190, 140, 82), "feu": (232, 101, 74), "eau": (79, 166, 232), "air": (108, 199, 122)}
+ELEMENT_ICONS = {"terre": "tx_strength", "feu": "tx_intelligence", "eau": "tx_chance", "air": "tx_agility"}  # icônes du jeu
 
 
-@lru_cache(maxsize=16)
-def rune_pill(element: str, scale: float) -> Image.Image:
-    """Pastille « dernière rune » : un disque de la couleur de l'élément, et son nom."""
+@lru_cache(maxsize=4)
+def rune_base(scale: float) -> Image.Image:
+    """Fond de la carte de rune, ombre comprise, comme celui des bandeaux de vente."""
+    s = lambda v: round(v * scale)  # noqa: E731
+    size = (s(RUNE_WIDTH + 2 * PAD), s(RUNE_HEIGHT + 2 * PAD))
+    box = (s(PAD), s(PAD), s(PAD + RUNE_WIDTH) - 1, s(PAD + RUNE_HEIGHT) - 1)
+    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((box[0], box[1] + s(3), box[2], box[3] + s(3)), s(RADIUS), fill=(0, 0, 0, 150))
+    base = shadow.filter(ImageFilter.GaussianBlur(s(6)))
+    card = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(card).rounded_rectangle(box, s(RADIUS), fill=(*SURFACE, 245), outline=(*LINE, 255), width=max(1, s(1)))
+    base.alpha_composite(card)
+    return base
+
+
+def rune_card(element: str, scale: float, icon: Path | None = None, changed: float = 99.0) -> Image.Image:
+    """Carte « Dernière rune » : l'icône de l'élément dans un puits sombre, son nom, un liseré à sa couleur.
+
+    changed : secondes depuis le changement de rune ; le puits s'allume un instant à la couleur de l'élément."""
     s = lambda v: round(v * scale)  # noqa: E731
     colour = ELEMENT_COLOURS.get(element, MUTED)
-    size = (s(PILL_WIDTH + 2 * PAD), s(PILL_HEIGHT + 2 * PAD))
-    box = (s(PAD), s(PAD), s(PAD + PILL_WIDTH) - 1, s(PAD + PILL_HEIGHT) - 1)
-    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).rounded_rectangle((box[0], box[1] + s(3), box[2], box[3] + s(3)), s(PILL_HEIGHT / 2), fill=(0, 0, 0, 150))
-    image = shadow.filter(ImageFilter.GaussianBlur(s(6)))
-    top = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(top)
-    draw.rounded_rectangle(box, s(PILL_HEIGHT / 2), fill=(*SURFACE, 245), outline=(*colour, 255), width=max(1, s(1.5)))
-    centre = (box[0] + s(PILL_HEIGHT / 2), box[1] + s(PILL_HEIGHT / 2))
-    draw.ellipse((centre[0] - s(13), centre[1] - s(13), centre[0] + s(13), centre[1] + s(13)), fill=(*colour, 255))
-    draw.text((centre[0], centre[1] - s(1)), element[:1].upper(), font=font(s(14), bold=True), fill=(*GROUND, 255), anchor="mm")
-    text_x = box[0] + s(PILL_HEIGHT + 4)
-    draw.text((text_x, box[1] + s(7)), "DERNIÈRE RUNE", font=font(s(9), bold=True), fill=(*MUTED, 255))
-    draw.text((text_x, box[1] + s(19)), element.capitalize(), font=font(s(15), bold=True), fill=(*TEXT, 255))
-    image.alpha_composite(top)
+    image = rune_base(scale).copy()
+    draw = ImageDraw.Draw(image)
+    left, top = s(PAD), s(PAD)
+    draw.rounded_rectangle((left + s(1), top + s(13), left + s(4), top + s(RUNE_HEIGHT - 13)), s(2), fill=(*colour, 255))
+    glow = 1 - ease(changed / BUMP_S)
+    well = (left + s(14), top + s((RUNE_HEIGHT - RUNE_WELL) / 2))
+    well_box = (*well, well[0] + s(RUNE_WELL), well[1] + s(RUNE_WELL))
+    fill = tuple(round(GROUND[i] + (colour[i] - GROUND[i]) * 0.35 * glow) for i in range(3))
+    edge = tuple(round(LINE[i] + (colour[i] - LINE[i]) * max(0.45, glow)) for i in range(3))
+    draw.rounded_rectangle(well_box, s(10), fill=(*fill, 255), outline=(*edge, 255), width=max(1, s(1.5)))
+    picture = icon_image(icon, s(RUNE_ICON)) if icon else None
+    if picture is not None:
+        image.alpha_composite(picture, (well[0] + s((RUNE_WELL - RUNE_ICON) / 2), well[1] + s((RUNE_WELL - RUNE_ICON) / 2)))
+    else:
+        centre = (well[0] + s(RUNE_WELL / 2), well[1] + s(RUNE_WELL / 2))
+        draw.ellipse((centre[0] - s(9), centre[1] - s(9), centre[0] + s(9), centre[1] + s(9)), fill=(*colour, 255))
+    text_x = well[0] + s(RUNE_WELL + 12)
+    draw.text((text_x, top + s(13)), "DERNIÈRE RUNE", font=font(s(10), bold=True), fill=(*MUTED, 255))
+    draw.text((text_x, top + s(27)), element.capitalize(), font=font(s(17), bold=True), fill=(*colour, 255))
     return image
 
 
-def render(views: list[View], scale: float = 1.0, rune: str | None = None) -> Image.Image | None:
+def render(views: list[View], scale: float = 1.0, rune: str | None = None, rune_icon: Path | None = None, rune_changed: float = 99.0) -> Image.Image | None:
     """La pastille de la dernière rune s'il y en a une, puis les bandeaux, le plus récent en haut. None s'il n'y a rien à montrer."""
     if not views and not rune:
         return None
     s = lambda v: round(v * scale)  # noqa: E731
     step = s(HEIGHT + GAP)
-    pill = rune_pill(rune, scale) if rune else None
+    pill = rune_card(rune, scale, rune_icon, rune_changed) if rune else None
     offset = pill.height - s(2 * PAD) + s(GAP) if pill is not None else 0
     height = offset + (s(2 * PAD + HEIGHT) + step * (len(views) - 1) if views else s(2 * PAD) - s(GAP))
     canvas = Image.new("RGBA", (s(WIDTH + 2 * PAD), height), (0, 0, 0, 0))
