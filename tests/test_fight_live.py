@@ -23,10 +23,10 @@ def test_last_element_follows_my_own_casts_only():
     tracker = live.Tracker()
     feed(tracker, START, me=ME)
     assert tracker.state() == {"active": True, "round": 1, "element": None, "fighters": [
-        {"kind": "moi", "monster": None, "life": 1000, "max_life": 1000, "shield": 0, "dead": False, "cell": 300},
-        {"kind": "joueur", "monster": None, "life": 900, "max_life": 900, "shield": 0, "dead": False, "cell": 301},
-        {"kind": "monstre", "monster": 489, "life": 80, "max_life": 80, "shield": 0, "dead": False, "cell": 310},
-    ]}
+        {"kind": "moi", "monster": None, "life": 1000, "max_life": 1000, "shield": 0, "dead": False, "cell": 300, "mine": False},
+        {"kind": "joueur", "monster": None, "life": 900, "max_life": 900, "shield": 0, "dead": False, "cell": 301, "mine": False},
+        {"kind": "monstre", "monster": 489, "life": 80, "max_life": 80, "shield": 0, "dead": False, "cell": 310, "mine": False},
+    ], "map": None, "confusion": None}
     feed(tracker, f"""
     2.000 c2s jsr 7 | 1=111 2=310
     2.100 s2c jsq 40 | 2.2.2=111 2.5=310 2.6={FOE} 22=300 36={ME}
@@ -116,3 +116,26 @@ def test_capture_writes_the_fight_for_the_overlay(tmp_path):
     assert live.load_known(tmp_path / live.SPELLS_PATH.name) == {111: "air"}
     # sans chemin, rien n'est suivi ni écrit
     assert Pipeline(Archive(":memory:"), db.connect(":memory:"), {}).fight is None
+
+
+def test_confusion_of_the_comte_fight():
+    tracker = live.Tracker()
+    feed(tracker, "    0.100 s2c jow 5 | 1=112206595", me=ME)
+    feed(tracker, START)
+    # Comtoise : 2 fois un quart de tour contre horaire, soit 180° ; puis Pendultimatum : +90° horaire
+    feed(tracker, f"""
+    1.200 s2c juh 70 | 1.1.6=114318 1.1.8={ME} 1.1.10=2 1.1.16=3646 1.2=774 1.3={ME}
+    """)
+    assert tracker.state()["confusion"] == 180 and tracker.state()["map"] == 112206595
+    feed(tracker, f"    2.000 s2c juh 70 | 1.1.6=113833 1.1.8={ME} 1.1.10=1 1.1.16=3643 1.2=771 1.3=-5")
+    assert tracker.confusion == 270
+    feed(tracker, f"    2.100 s2c juh 70 | 1.1.8={OTHER} 1.1.10=1 1.1.16=3643 1.2=771 1.3=-5")  # sur l'allié : pas pour moi
+    assert tracker.confusion == 270
+    # nouveau tour : la Comtoise remplace (2 huitièmes de tour contre horaire = 90° contre horaire)
+    feed(tracker, f"    5.000 s2c juh 70 | 1.1.6=113842 1.1.8={ME} 1.1.10=2 1.1.16=3646 1.2=775 1.3={ME}")
+    assert tracker.confusion == 270
+    feed(tracker, f"    6.000 s2c juh 70 | 1.1.6=113838 1.1.8={ME} 1.1.10=90 1.1.16=3646 1.2=770 1.3={ME}")
+    assert tracker.confusion == 90
+    feed(tracker, "    9.000 s2c jwp 50 | 1=3")
+    feed(tracker, f"   10.000 s2c juh 70 | 1.1.8={ME} 1.1.10=1 1.1.16=3643 1.2=771 1.3=-5")  # hors combat
+    assert tracker.state() == {"active": False}

@@ -16,10 +16,16 @@ from . import journal
 FIGHT_PATH = Path(__file__).resolve().parents[2] / "data" / "fight.json"
 SPELLS_PATH = FIGHT_PATH.with_name("spell_elements.json")
 
+MAP_CHANGE = "jow"  # le joueur arrive sur une carte ; à l'entrée en combat, celle du combat
+EFFECT = "juh"  # un effet est posé sur un combattant (1.2 : code, 1.1.8 : cible, 1.1.10 : valeur, 1.1.16 : sort)
 WATCHED = frozenset({
     journal.FIGHT_START, journal.FIGHT_END, journal.TURN, journal.ACTION, journal.SHEET, journal.MY_LIFE,
-    journal.STAT, journal.MOVE, journal.START_CELLS, journal.ORDER,
+    journal.STAT, journal.MOVE, journal.START_CELLS, journal.ORDER, journal.PLACEMENT, MAP_CHANGE, EFFECT,
 })  # fmt: skip
+# Confusion (combat du Comte Harebourg) : code d'effet -> degrés par unité, horaire positif.
+# 770 à 772 : horaire en degrés, en quarts de tour, en huitièmes de tour ; 773 à 775 : de même, contre horaire.
+CONFUSION = {770: 1, 771: 90, 772: 45, 773: -1, 774: -90, 775: -45}
+COMTOISE = 3646  # sort de début de tour qui fixe la confusion ; les autres (Pendultimatum) s'y ajoutent
 ELEMENTS = ("terre", "feu", "eau", "air")
 ORDER_WINDOW_S = 5.0  # un sort annoncé par le serveur plus tard que ça après ma demande n'est pas le mien
 
@@ -40,6 +46,8 @@ class Tracker:
         self._ordered: tuple[int, float] | None = None  # sort que je viens de demander, et quand
         self._casting: int | None = None  # sort dont on attend la ligne de dégâts pour connaître l'élément
         self._mine = False  # ce sort est un sort que j'ai lancé, et pas un poison qui se déclenche
+        self.map_id: int | None = None  # carte où se trouve le joueur, donc celle du combat en cours
+        self.confusion: int | None = None  # ma confusion en degrés horaires (0, 90, 180, 270), si j'en ai une
 
     def feed(self, when: float, direction: str, key: str, body: bytes, me: int | None = None) -> bool:
         """Prend un message de la capture ; vrai s'il concernait le combat."""
@@ -55,12 +63,18 @@ class Tracker:
             if key == journal.ORDER and (spell := journal.number(fields, "1")) is not None:
                 self._ordered = (spell, when)
             return
+        if key == MAP_CHANGE:
+            self.map_id = journal.number(fields, "1")
+            return
+        if key == EFFECT:
+            self._effect(fields)
+            return
         fighting = self.reader.current is not None
         item = self.reader.feed(when, direction, key, fields)
         if item is None:
             return
         if item.kind == "start":
-            self.element, self._casting = None, None
+            self.element, self._casting, self.confusion = None, None, None
         elif item.kind == "cast":
             self._cast(item, when)
         elif item.kind == "trigger":
@@ -87,6 +101,16 @@ class Tracker:
         if item.spell in self.known:
             self.element = self.known[item.spell]
 
+    def _effect(self, fields: journal.Fields) -> None:
+        """Une confusion posée sur moi : celle de début de tour remplace, les suivantes s'ajoutent."""
+        unit = CONFUSION.get(journal.number(fields, "1.2"))
+        if unit is None or self.reader.current is None or journal.number(fields, "1.1.8") != self.me:
+            return
+        degrees = unit * (journal.number(fields, "1.1.10") or 0)
+        base = 0 if journal.number(fields, "1.1.16") == COMTOISE or self.confusion is None else self.confusion
+        self.confusion = (base + degrees) % 360
+        self.dirty = True
+
     def state(self) -> dict:
         """Ce que la fenêtre d'affichage a besoin de savoir ; remet `dirty` à zéro."""
         self.dirty = False
@@ -99,8 +123,12 @@ class Tracker:
             fighters.append({
                 "kind": kind, "monster": tally.monster, "life": tally.life, "max_life": tally.max_life,
                 "shield": tally.shield, "dead": tally.dead, "cell": tally.cell,
+                "mine": tally.summoner is not None and tally.summoner == self.me,
             })  # fmt: skip
-        return {"active": True, "round": fight.rounds, "element": self.element, "fighters": fighters}
+        return {
+            "active": True, "round": fight.rounds, "element": self.element, "fighters": fighters,
+            "map": self.map_id, "confusion": self.confusion,
+        }  # fmt: skip
 
 
 def load_known(path: Path = SPELLS_PATH) -> dict[int, str]:

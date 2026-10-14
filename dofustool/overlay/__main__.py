@@ -23,7 +23,9 @@ from pathlib import Path
 from .. import db
 from ..fight import live
 from . import Board, Feed, Sale, is_game, kamas, place
+from . import aim
 from . import render as draw
+from ..fight import grid, harebourg
 
 POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
@@ -160,6 +162,146 @@ class Layer:
             self.shown = False
 
 
+KEYS = {"XBUTTON1": 0x05, "XBUTTON2": 0x06, "MBUTTON": 0x04, "SHIFT": 0x10, "CTRL": 0x11, "ALT": 0x12, "CAPSLOCK": 0x14, "TAB": 0x09}
+KEYS |= {f"F{n}": 0x6F + n for n in range(1, 25)}
+RECALIBRATE_S = 3.0  # touche maintenue sur son propre personnage : on refait le calibrage
+
+
+def key_code(name: str) -> int | None:
+    """Code Windows d'une touche nommée dans la configuration : XBUTTON2 (souris 5), F8, ALT, une lettre…"""
+    name = (name or "").strip().upper()
+    if name in KEYS:
+        return KEYS[name]
+    if len(name) == 1 and (name.isalpha() or name.isdigit()):
+        return ord(name)
+    return None
+
+
+def key_down(code: int) -> bool:
+    """La touche est enfoncée en ce moment. Simple lecture de l'état du clavier : rien n'est envoyé ni retenu."""
+    return bool(ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000)
+
+
+def cursor() -> tuple[int, int]:
+    point = _Point(0, 0)
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+    return point.x, point.y
+
+
+VERDICT_SHORT = {
+    "SAFE": "sans danger", "SWAP_FIRE": "échange : 81 à 100 dommages Feu à vous deux", "DELOCK": "délock",
+    "DELOCK_SUMMON": "délock : ton invocation explose (alliés à 3 cases ou moins)", "WIPE": "AIR DU TEMPS : NE FRAPPE PAS",
+}  # fmt: skip
+
+
+class AimHelper:
+    """Visée du Comte Harebourg : touche maintenue, la case survolée, la case où cliquer et la case d'arrivée.
+
+    Ne s'occupe que de lire la position de la souris et l'état d'une touche ; ne clique ni n'appuie jamais."""
+
+    def __init__(self, root: tk.Tk, key: int, scale: float) -> None:
+        window = tk.Toplevel(root)
+        window.overrideredirect(True)
+        window.withdraw()
+        self.layer, self.key, self.scale = Layer(window), key, scale
+        self.layout = grid.load("comte")
+        self.points: list[tuple[int, float, float]] = []  # calibrage en cours : (case, x, y)
+        self.was_down = False
+        self.down_since = 0.0
+        self.drawn = None
+        self.message = ""
+
+    def tick(self, now: float, area, state: dict) -> bool:
+        """Vrai tant que la touche est enfoncée (la fenêtre se redessine alors souvent)."""
+        in_fight = state.get("active") and state.get("map") == aim.COMTE_MAP
+        down = bool(area) and in_fight and key_down(self.key)
+        pressed = down and not self.was_down
+        self.was_down = down
+        if not down:
+            self.layer.hide()
+            self.drawn = None
+            return False
+        if pressed:
+            self.down_since = now
+        left, top, right, bottom = area
+        size = (right - left, bottom - top)
+        x, y = cursor()
+        at = (x - left, y - top)
+        frame = aim.load_frame(size)
+        me = next((f.get("cell") for f in state.get("fighters", []) if f.get("kind") == "moi"), None)
+        comte = next((f.get("cell") for f in state.get("fighters", []) if f.get("monster") == aim.COMTE_MONSTER), None)
+        if frame is not None and me is not None and frame.cell_at(*at) == me and now - self.down_since >= RECALIBRATE_S:
+            frame, self.points, self.message = None, [], "Calibrage recommencé."
+            aim.save_frame(size, aim.Frame(0, 0, 0))  # efface l'ancien : il sera remplacé au prochain calibrage
+        if frame is None or frame.width <= 0:
+            self._calibrate(pressed, at, size, me, comte)
+            self._show(size, [], self._calibration_lines(), at, left, top)
+            return True
+        self._show_plan(frame, at, size, state, left, top)
+        return True
+
+    def _calibrate(self, pressed: bool, at, size, me, comte) -> None:
+        if not pressed:
+            return
+        wanted = me if not self.points else comte
+        if wanted is None:
+            self.message = "Position inconnue : attends le début du combat."
+            return
+        self.points.append((wanted, *at))
+        if len(self.points) < 2:
+            return
+        try:
+            frame, error = aim.calibrate(self.points)
+        except ValueError:
+            frame, error = None, 1.0
+        if frame is None or error > aim.MAX_RESIDUAL or frame.width < 20:
+            self.points, self.message = [], "Calibrage raté : recommence, bien au centre des cases."
+            return
+        aim.save_frame(size, frame)
+        self.points, self.message = [], "Calibrage enregistré."
+
+    def _calibration_lines(self) -> list[tuple[str, tuple]]:
+        step = "survole le centre de TON personnage et appuie" if not self.points else "survole le centre du COMTE et appuie"
+        lines = [(f"Calibrage {len(self.points) + 1}/2 : {step}", draw.TEXT)]
+        if self.message:
+            lines.append((self.message, draw.MUTED))
+        return lines
+
+    def _show_plan(self, frame: aim.Frame, at, size, state: dict, left: int, top: int) -> None:
+        target = frame.cell_at(*at)
+        plan = aim.plan(state, target, self.layout) if target is not None else None
+        key = (target, plan, state.get("confusion"), state.get("round"), size)
+        if key == self.drawn:
+            return
+        self.drawn = key
+        rotation = state.get("confusion")
+        parity = "impair : celui qui frappe le Comte part" if int(state.get("round") or 1) % 2 else "pair : le Comte part"
+        lines = [(f"Confusion {rotation}° horaire" if rotation else "Pas de confusion", draw.TEXT),
+                 (f"Tour {state.get('round')} · {parity}", draw.MUTED)]  # fmt: skip
+        cells = []
+        if target is not None:
+            cells.append((frame.diamond(target), (255, 255, 255), 0, ""))
+        if plan is not None:
+            same = plan.aim is not None and plan.aim == plan.landing  # viser la case même où l'autre va arriver
+            if plan.aim is not None and not same:
+                cells.append((frame.diamond(plan.aim), draw.AIM_GOLD, 110, "VISE ICI"))
+            if not plan.aim_ok:
+                lines.append(("La case à viser n'est pas une case du sol", draw.AIM_FIRE))
+            for c in plan.blast:
+                cells.append((frame.diamond(c), draw.AIM_DEATH, 40, ""))
+            if plan.landing is not None and plan.verdict is not None:
+                colour = draw.VERDICT_COLOURS[plan.verdict.name]
+                label = ("TU ARRIVES" if plan.mover == "toi" else "LE COMTE ARRIVE") if plan.verdict.name != "WIPE" else "AIR DU TEMPS"
+                cells.append((frame.diamond(plan.landing), colour, 130, f"VISE ICI · {label}" if same else label))
+                lines.append((f"Frapper le Comte : {plan.mover} -> {VERDICT_SHORT[plan.verdict.name]}", colour))
+            if plan.me_in_blast:
+                lines.append(("Tu es dans l'explosion de ton invocation !", draw.AIM_DEATH))
+        self._show(size, cells, lines, at, left, top)
+
+    def _show(self, size, cells, lines, at, left: int, top: int) -> None:
+        self.layer.show(draw.aim_image(size, cells, lines, at, self.scale), left, top)
+
+
 class Items:
     """Nom et image d'un item, depuis la base et le cache d'images du tableau de bord."""
 
@@ -195,7 +337,7 @@ class Items:
 
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
-                 element: bool = False, demo_element: str | None = None) -> None:  # fmt: skip
+                 element: bool = False, demo_element: str | None = None, aim_key: int | None = None) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
         self.is_demo = demo is not None
         self.show_element, self.element = element, demo_element  # pastille de l'élément de mon dernier sort, en combat
@@ -209,6 +351,8 @@ class Window:
         self.root.overrideredirect(True)
         self.root.withdraw()
         self.layer = Layer(self.root)
+        self.aim = AimHelper(self.root, aim_key, self.scale) if aim_key is not None else None
+        self.fight: dict = {"active": False}
         self.root.after(POLL_MS, self.tick)
 
     def tick(self) -> None:
@@ -225,10 +369,12 @@ class Window:
                 sales.append(self.demo.pop(0)[1])
             for sale in sales:
                 self.board.add(sale, now)
-            if self.show_element and not self.is_demo:
+            if (self.show_element or self.aim) and not self.is_demo:
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
-                self.element = fight.get("element") if fight.get("active") and fresh else None
+                self.fight = fight if fight.get("active") and fresh else {"active": False}
+                if self.show_element:
+                    self.element = self.fight.get("element")
             self.area = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()) if self.anywhere else game_area(self.game)
         if self.area is None:
             self.board.hold(now)
@@ -236,10 +382,12 @@ class Window:
         else:
             self.board.expire(now)
             self.paint(now)
+        aiming = self.aim.tick(now, self.area, self.fight) if self.aim is not None else False
         if self.is_demo and not self.demo and not self.board.banners:
             self.root.destroy()  # démonstration terminée
             return
-        self.root.after(FRAME_MS if self.board.banners and self.area else POLL_MS, self.tick)
+        fast = aiming or (self.board.banners and self.area) or (self.aim is not None and self.fight.get("map") == aim.COMTE_MAP)
+        self.root.after(FRAME_MS if fast else POLL_MS, self.tick)
 
     def paint(self, now: float) -> None:
         views = [
@@ -324,7 +472,11 @@ def main() -> int:
         print(f"Base absente : {db.MARKET_PATH}")
         return 1
     cfg = config.load()
-    Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, element=cfg.fight_element).run()
+    key = key_code(cfg.aim_key) if cfg.harebourg_aim else None
+    if cfg.harebourg_aim and key is None:
+        print(f"Touche de visée inconnue : « {cfg.aim_key} ». Exemples : XBUTTON2 (souris 5), XBUTTON1, F8, ALT, une lettre.")
+    Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, element=cfg.fight_element,
+           aim_key=key).run()  # fmt: skip
     return 0
 
 

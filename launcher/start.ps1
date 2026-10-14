@@ -92,7 +92,7 @@ try {
     # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, élément du dernier sort en combat.
     #        Une fenêtre à part, qui ne fait qu'afficher.
     Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if ($cfg.sale_notifications -or $cfg.fight_element) {
+    if ($cfg.sale_notifications -or $cfg.fight_element -or $cfg.harebourg_aim) {
         $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }

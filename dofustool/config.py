@@ -29,6 +29,8 @@ class Config:
     start_dashboard: bool = True
     sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
     fight_element: bool = False  # en combat, pastille de l'élément de mon dernier sort (Huppermage)
+    harebourg_aim: bool = False  # combat du Comte Harebourg : touche maintenue, la case à viser s'affiche sur le jeu
+    aim_key: str = "XBUTTON2"  # touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre…
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -66,6 +68,8 @@ def _from_raw(raw: dict) -> Config:
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
         sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
         fight_element=bool(launcher.get("fight_element", defaults.fight_element)),
+        harebourg_aim=bool(launcher.get("harebourg_aim", defaults.harebourg_aim)),
+        aim_key=str(launcher.get("aim_key", defaults.aim_key) or defaults.aim_key),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -146,6 +150,8 @@ def from_values(values: dict) -> Config:
         start_dashboard=bool(values.get("start_dashboard")),
         sale_notifications=bool(values.get("sale_notifications", True)),
         fight_element=bool(values.get("fight_element", False)),
+        harebourg_aim=bool(values.get("harebourg_aim", False)),
+        aim_key=_text(values, "aim_key", "Touche de visée", 20) or "XBUTTON2",
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -218,6 +224,10 @@ start_dashboard = {"true" if cfg.start_dashboard else "false"}
 sale_notifications = {"true" if cfg.sale_notifications else "false"}
 # En combat, afficher par-dessus le jeu l'élément de mon dernier sort.
 fight_element = {"true" if cfg.fight_element else "false"}
+# Combat du Comte Harebourg : en maintenant la touche de visée sur une case, la case à viser s'affiche sur le jeu.
+harebourg_aim = {"true" if cfg.harebourg_aim else "false"}
+# Touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre...
+aim_key = {_quoted(cfg.aim_key)}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

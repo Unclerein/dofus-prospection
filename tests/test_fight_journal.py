@@ -73,3 +73,16 @@ def test_preview_before_the_fight():
     seen = journal.preview(key, fields)
     assert (seen.map_id, seen.fight_map, seen.sides) == (111, 222, ([258, 271], [230, 243]))
     assert journal.preview("jsq", fields) is None
+
+
+def test_placement_moves_fighters_before_and_during_the_fight():
+    text = f"""
+    0.300 s2c jwj 90 | 1.1={ME} 1.2.3=300
+    0.300 s2c jwj 90 | 1.1={FOE} 1.2.3=310 1.3.4.6.3.3=489
+    0.500 s2c kjl 32 | 2.2={ME} 2.3=244 2.4=3 2.2={FOE} 2.3=311 2.4=7
+    1.000 s2c jxr 0 |
+    1.100 s2c kjl 14 | 2.2={ME} 2.3=245 2.4=5
+    """
+    (fight,) = journal.read_extract(text)
+    assert (fight.fighters[ME].cell, fight.fighters[FOE].cell) == (245, 311)
+    assert journal.placements([("2.2", "7"), ("2.3", "9"), ("2.4", "1"), ("2.2", "-1"), ("2.3", "12")]) == [(7, 9), (-1, 12)]

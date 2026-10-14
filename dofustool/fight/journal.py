@@ -17,6 +17,7 @@ MOVE = "jnz"  # déplacement à pied : le chemin, case par case ; absent pour un
 # Cases de départ des deux équipes : à l'entrée en combat, et avant le combat quand le joueur demande l'aperçu (touche L).
 START_CELLS, PREVIEW = "jxk", "jvk"
 ORDER = "jsr"  # du client vers le serveur : le joueur lance un sort (1 : sort, 2 : case)
+PLACEMENT = "kjl"  # cases des combattants pendant le placement et à son terme (2.2 : combattant, 2.3 : case, répétés)
 SHIELD_STAT = 96
 
 # Les points de vie de départ sont la somme de deux stats de la fiche, toutes parts confondues
@@ -78,6 +79,18 @@ def life(fields: Fields, prefix: str) -> int | None:
     return total if found else None
 
 
+def placements(fields: Fields) -> list[tuple[int, int]]:
+    """(combattant, case) de chaque entrée d'un message de placement, dans l'ordre."""
+    out, fighter = [], None
+    for name, value in fields:
+        if name == "2.2":
+            fighter = int(value)
+        elif name == "2.3" and fighter is not None:
+            out.append((fighter, int(value)))
+            fighter = None
+    return out
+
+
 def cells(fields: Fields, path: str) -> list[int]:
     """Liste de cases de ce champ (« [352,366] » dans un extrait)."""
     for name, value in fields:
@@ -103,7 +116,7 @@ def preview(key: str, fields: Fields) -> Preview | None:
 @dataclass
 class Event:
     when: float
-    kind: str  # start, end, turn, sheet, life, sides, move, cast, trigger, damage, heal, shield, death, summon, push, teleport, invisible, spent
+    kind: str  # start, end, turn, sheet, life, sides, placed, move, cast, trigger, damage, heal, shield, death, summon, push, teleport, invisible, spent
     source: int | None = None
     target: int | None = None
     amount: int | None = None  # dégâts, soin, points de vie, points de bouclier, PA ou PM dépensés, selon l'événement
@@ -130,6 +143,9 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
                      spell=number(fields, "1.3.4.6.3.3"), cell=number(fields, "1.2.3"))
     if key == MY_LIFE:
         return Event(when, "life", amount=number(fields, "3"))
+    if key == PLACEMENT:
+        placed = placements(fields)
+        return Event(when, "placed", path=([f for f, _ in placed], [c for _, c in placed])) if placed else None
     if key == START_CELLS:
         return Event(when, "sides", path=(cells(fields, "1.1"), cells(fields, "1.2")))
     if key == MOVE:
@@ -260,6 +276,12 @@ class Reader:
                 self.current.add(self._sides)
             self._sheets, self._sides = {}, None
             self.current.events.append(item)
+        elif item.kind == "placed":
+            for fighter, cell in zip(*item.path):
+                if self.current is not None:
+                    self.current.fighters[fighter].cell = cell
+                elif fighter in self._sheets:
+                    self._sheets[fighter].cell = cell
         elif self.current is None:
             if item.kind == "sheet" and item.target is not None:
                 self._sheets[item.target] = item
