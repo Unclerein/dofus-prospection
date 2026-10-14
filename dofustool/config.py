@@ -29,6 +29,7 @@ class Config:
     start_dashboard: bool = True
     sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
     harebourg_aim: bool = False  # combat du Comte Harebourg : touche maintenue, la case à viser s'affiche sur le jeu
+    huppermage_rune: bool = False  # en combat, pastille de l'élément de ma dernière rune (Huppermage)
     aim_key: str = "XBUTTON2"  # touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre…
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
@@ -67,6 +68,7 @@ def _from_raw(raw: dict) -> Config:
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
         sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
         harebourg_aim=bool(launcher.get("harebourg_aim", defaults.harebourg_aim)),
+        huppermage_rune=bool(launcher.get("huppermage_rune", defaults.huppermage_rune)),
         aim_key=str(launcher.get("aim_key", defaults.aim_key) or defaults.aim_key),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
@@ -148,6 +150,7 @@ def from_values(values: dict) -> Config:
         start_dashboard=bool(values.get("start_dashboard")),
         sale_notifications=bool(values.get("sale_notifications", True)),
         harebourg_aim=bool(values.get("harebourg_aim", False)),
+        huppermage_rune=bool(values.get("huppermage_rune", False)),
         aim_key=_text(values, "aim_key", "Touche de visée", 20) or "XBUTTON2",
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
@@ -221,6 +224,8 @@ start_dashboard = {"true" if cfg.start_dashboard else "false"}
 sale_notifications = {"true" if cfg.sale_notifications else "false"}
 # Combat du Comte Harebourg : en maintenant la touche de visée sur une case, la case à viser s'affiche sur le jeu.
 harebourg_aim = {"true" if cfg.harebourg_aim else "false"}
+# Huppermage : en combat, afficher par-dessus le jeu l'élément de ma dernière rune.
+huppermage_rune = {"true" if cfg.huppermage_rune else "false"}
 # Touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre...
 aim_key = {_quoted(cfg.aim_key)}
 

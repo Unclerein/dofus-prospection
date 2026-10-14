@@ -25,6 +25,9 @@ WATCHED = frozenset({
 # 770 à 772 : horaire en degrés, en quarts de tour, en huitièmes de tour ; 773 à 775 : de même, contre horaire.
 CONFUSION = {770: 1, 771: 90, 772: 45, 773: -1, 774: -90, 775: -45}
 COMTOISE = 3646  # sort de début de tour qui fixe la confusion ; les autres (Pendultimatum) s'y ajoutent
+ADD_STATE = 950  # code d'effet : pose un état (1.1.1 : numéro de l'état)
+# Huppermage : le jeu pose lui-même sur le lanceur l'état « Dernière rune : Feu » (et Eau, Terre, Air) à chaque rune.
+RUNE_STATES = {701: "feu", 702: "eau", 703: "terre", 704: "air"}
 ORDER_WINDOW_S = 5.0  # un sort annoncé par le serveur plus tard que ça après ma demande n'est pas le mien
 
 
@@ -41,6 +44,7 @@ class Tracker:
         self._ordered: tuple[int, float] | None = None  # sort que je viens de demander, et quand
         self.map_id: int | None = None  # carte où se trouve le joueur, donc celle du combat en cours
         self.confusion: int | None = None  # ma confusion en degrés horaires (0, 90, 180, 270), si j'en ai une
+        self.rune: str | None = None  # élément de ma dernière rune (Huppermage)
 
     def feed(self, when: float, direction: str, key: str, body: bytes, me: int | None = None) -> bool:
         """Prend un message de la capture ; vrai s'il concernait le combat."""
@@ -67,7 +71,7 @@ class Tracker:
         if item is None:
             return
         if item.kind == "start":
-            self.confusion = None
+            self.confusion, self.rune = None, None
         elif item.kind == "cast":
             self._cast(item, when)
         if fighting or self.reader.current is not None:
@@ -83,9 +87,15 @@ class Tracker:
             self.me = item.source
 
     def _effect(self, fields: journal.Fields) -> None:
-        """Une confusion posée sur moi : celle de début de tour remplace, les suivantes s'ajoutent."""
-        unit = CONFUSION.get(journal.number(fields, "1.2"))
-        if unit is None or self.reader.current is None or journal.number(fields, "1.1.8") != self.me:
+        """Un effet posé sur moi : ma dernière rune, ou une confusion (celle de début de tour remplace, les suivantes s'ajoutent)."""
+        if self.reader.current is None or journal.number(fields, "1.1.8") != self.me:
+            return
+        action = journal.number(fields, "1.2")
+        if action == ADD_STATE and journal.number(fields, "1.1.1") in RUNE_STATES:
+            self.rune, self.dirty = RUNE_STATES[journal.number(fields, "1.1.1")], True
+            return
+        unit = CONFUSION.get(action)
+        if unit is None:
             return
         degrees = unit * (journal.number(fields, "1.1.10") or 0)
         base = 0 if journal.number(fields, "1.1.16") == COMTOISE or self.confusion is None else self.confusion
@@ -108,7 +118,7 @@ class Tracker:
             })  # fmt: skip
         return {
             "active": True, "round": fight.rounds, "fighters": fighters,
-            "map": self.map_id, "confusion": self.confusion,
+            "map": self.map_id, "confusion": self.confusion, "rune": self.rune,
         }  # fmt: skip
 
 

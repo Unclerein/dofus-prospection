@@ -89,10 +89,10 @@ try {
         }
     }
 
-    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, visée du Comte Harebourg.
+    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, visée du Comte Harebourg, dernière rune du Huppermage.
     #        Une fenêtre à part, qui ne fait qu'afficher.
     Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if ($cfg.sale_notifications -or $cfg.harebourg_aim) {
+    if ($cfg.sale_notifications -or $cfg.harebourg_aim -or $cfg.huppermage_rune) {
         $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }

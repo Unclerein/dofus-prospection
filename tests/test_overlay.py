@@ -104,3 +104,14 @@ def test_long_names_are_cut():
     cut = render.fit(pen, "Anneau au nom vraiment beaucoup trop long pour tenir", face, 120)
     assert cut.endswith("…") and pen.textlength(cut, font=face) <= 120
     assert render.fit(pen, "Court", face, 120) == "Court"
+
+def test_rune_pill_alone_or_above_the_banners():
+    from dofustool.overlay import render
+
+    banner = render.View(name="Laine", quantity=1, gain="+ 5 kamas", icon=None, age=3.0, left=2.0, total=3.0, bumped=99.0)
+    alone = render.render([], rune="feu")
+    assert alone is not None and alone.height == render.PILL_HEIGHT + 2 * render.PAD
+    both, only_banner = render.render([banner], rune="feu"), render.render([banner])
+    assert both.height == only_banner.height + render.PILL_HEIGHT + render.GAP
+    edge = alone.getpixel((alone.width - render.PAD - render.PILL_WIDTH // 2, render.PAD))
+    assert edge[:3] == render.ELEMENT_COLOURS["feu"] and alone.getpixel((2, alone.height // 2))[3] == 0

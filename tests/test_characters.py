@@ -114,6 +114,7 @@ VALUES = {
     "start_dashboard": True,
     "sale_notifications": True,
     "harebourg_aim": False,
+    "huppermage_rune": False,
     "aim_key": "XBUTTON2",
 }
 

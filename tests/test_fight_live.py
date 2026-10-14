@@ -90,3 +90,19 @@ def test_confusion_of_the_comte_fight():
     feed(tracker, "    9.000 s2c jwp 50 | 1=3")
     feed(tracker, f"   10.000 s2c juh 70 | 1.1.8={ME} 1.1.10=1 1.1.16=3643 1.2=771 1.3=-5")  # hors combat
     assert tracker.state() == {"active": False}
+
+
+def test_last_rune_of_the_huppermage():
+    tracker = live.Tracker()
+    feed(tracker, START, me=ME)
+    # rune de feu, puis d'air : l'état « Dernière rune » posé sur moi par le jeu
+    feed(tracker, f"    2.000 s2c juh 78 | 1.1.1=701 1.1.6=214000 1.1.8={ME} 1.1.16=13744 1.2=950 1.3={ME}")
+    assert tracker.state()["rune"] == "feu"
+    feed(tracker, f"    3.000 s2c juh 78 | 1.1.1=704 1.1.6=214003 1.1.8={ME} 1.1.16=13744 1.2=950 1.3={ME}")
+    assert tracker.rune == "air"
+    feed(tracker, f"    3.500 s2c juh 78 | 1.1.1=702 1.1.8={OTHER} 1.1.16=13744 1.2=950 1.3={OTHER}")  # celle d'un autre joueur
+    feed(tracker, f"    3.600 s2c juh 78 | 1.1.1=999 1.1.8={ME} 1.1.16=1 1.2=950 1.3={ME}")  # un autre état
+    assert tracker.rune == "air"
+    feed(tracker, "    9.000 s2c jwp 50 | 1=3")
+    feed(tracker, START.replace("0.300", "10.300").replace("1.000", "11.000").replace("1.100", "11.100"))
+    assert tracker.rune is None  # nouveau combat : plus de dernière rune

@@ -2718,7 +2718,8 @@ async function pageConfig() {
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
         h('label', { class: 'check' }, h('input', { id: 'c-aim', type: 'checkbox', checked: !!d.harebourg_aim, onchange: (e) => { d.harebourg_aim = e.target.checked; sync(); } }), 'Comte Harebourg : afficher sur le jeu la case à viser quand je maintiens la touche de visée'),
-        text('c-aimkey', 'Touche de visée', 'aim_key', 140, 'XBUTTON2'))));
+        text('c-aimkey', 'Touche de visée', 'aim_key', 140, 'XBUTTON2'),
+        h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'))));
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),
