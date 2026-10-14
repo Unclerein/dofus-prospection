@@ -182,38 +182,3 @@ def render(views: list[View], scale: float = 1.0, rune: str | None = None, rune_
         slide = s(18 * (1 - shown))  # glisse depuis la droite en apparaissant
         canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, offset + row * step))
     return canvas
-
-
-# --- visée du Comte Harebourg : dessinée sur toute la zone de jeu ------------------------------------
-
-AIM_GOLD, AIM_SAFE, AIM_DELOCK, AIM_FIRE, AIM_DEATH = ACCENT, (88, 196, 236), (92, 200, 140), (240, 150, 70), (232, 72, 64)
-VERDICT_COLOURS = {"SAFE": AIM_SAFE, "SWAP_FIRE": AIM_FIRE, "DELOCK": AIM_DELOCK, "DELOCK_SUMMON": AIM_DELOCK, "WIPE": AIM_DEATH}
-
-
-def aim_image(size: tuple[int, int], cells: list[tuple[list, tuple, int, str]], lines: list[tuple[str, tuple]],
-              at: tuple[float, float], scale: float = 1.0) -> Image.Image:  # fmt: skip
-    """Image de la taille de la zone de jeu : des losanges sur des cases, et un cartouche de texte près du curseur.
-
-    cells : (coins du losange, couleur, opacité du fond 0-255, étiquette) ; lines : (texte, couleur)."""
-    s = lambda v: round(v * scale)  # noqa: E731
-    image = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    for corners, colour, fill, label in cells:
-        draw.polygon(corners, fill=(*colour, fill), outline=(*colour, 255), width=max(2, s(2)))
-        if label:
-            cx = sum(x for x, _ in corners) / 4
-            top = min(y for _, y in corners)
-            face = font(s(12), bold=True)
-            w = draw.textlength(label, font=face)
-            draw.rounded_rectangle((cx - w / 2 - s(6), top - s(22), cx + w / 2 + s(6), top - s(4)), s(6), fill=(*SURFACE, 235))
-            draw.text((cx, top - s(13)), label, font=face, fill=(*colour, 255), anchor="mm")
-    if lines:
-        face = font(s(13), bold=True)
-        width = max(draw.textlength(text, font=face) for text, _ in lines) + s(20)
-        height = s(10) + len(lines) * s(19)
-        x = min(at[0] + s(24), size[0] - width - s(4))
-        y = min(at[1] + s(24), size[1] - height - s(4))
-        draw.rounded_rectangle((x, y, x + width, y + height), s(8), fill=(*SURFACE, 238), outline=(*LINE, 255), width=max(1, s(1)))
-        for row, (text, colour) in enumerate(lines):
-            draw.text((x + s(10), y + s(5) + row * s(19)), text, font=face, fill=(*colour, 255))
-    return image

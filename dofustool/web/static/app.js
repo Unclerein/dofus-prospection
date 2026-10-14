@@ -2144,10 +2144,9 @@ async function pageItem(r) {
 const FIGHT_CELL = { w: 34, h: 17 };
 const VERDICT_TEXT = {
   SAFE: 'sans danger',
-  SWAP_FIRE: 'échange avec une entité : 81 à 100 dommages Feu à vous deux',
-  DELOCK: 'le Comte prend la place d’une entité et perd son invulnérabilité',
-  DELOCK_SUMMON: 'le Comte prend la place d’une invocation et perd son invulnérabilité ; elle explose et tue les alliés à 3 cases ou moins',
-  WIPE: 'Air du temps : toute l’équipe meurt',
+  OCCUPIED: 'case occupée (effet à confirmer)',
+  RISKY: "destination impossible pour toi (effet à confirmer)",
+  WIPE: 'Air du Temps : toute l’équipe meurt',
 };
 
 async function pageFight() {
@@ -2717,8 +2716,6 @@ async function pageConfig() {
         } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
-        h('label', { class: 'check' }, h('input', { id: 'c-aim', type: 'checkbox', checked: !!d.harebourg_aim, onchange: (e) => { d.harebourg_aim = e.target.checked; sync(); } }), 'Comte Harebourg : afficher sur le jeu la case à viser quand je maintiens la touche de visée'),
-        text('c-aimkey', 'Touche de visée', 'aim_key', 140, 'XBUTTON2'),
         h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'))));
 
   return [
@@ -2872,6 +2869,11 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 17, date: '15 octobre 2026', title: 'Huppermage : la dernière rune par-dessus le jeu', hash: '#/config', go: 'Ouvrir la configuration', points: [
+    ['Dernière rune :', 'en combat, l\u2019icône de l\u2019élément de ta dernière rune (feu, eau, terre ou air) s\u2019affiche dans l\u2019angle haut droit de la fenêtre du jeu, et s\u2019allume un instant quand elle change. Elle disparaît à la fin du combat.'],
+    ['Pour l\u2019activer :', 'coche « Huppermage : afficher en combat l\u2019élément de ma dernière rune » dans Config, puis relance par le raccourci Dofus + Prospection.'],
+    ['Combat lu en direct :', 'la capture suit désormais le combat pendant qu\u2019il se joue (positions, PV, effets). C\u2019est ce qui permet la dernière rune, et ce sur quoi s\u2019appuieront les prochaines aides en combat.'],
+  ] },
   { id: 16, date: '13 octobre 2026', title: 'Capture : toutes les cartes réseau écoutées', hash: '#/status', go: 'Voir l\u2019état', points: [
     ['Carte réseau :', 'la capture écoute désormais toutes les cartes réseau du PC à la fois, au lieu de la seule carte « par défaut » de Windows. Après un changement de matériel, de box, ou avec un VPN, elle n\u2019écoute plus dans le vide. Le champ « Interface réseau » de Config reste là pour en imposer une.'],
     ['Alerte :', 'la page État indique quand le dernier paquet du jeu a été entendu, et prévient si la capture tourne depuis dix minutes sans rien entendre.'],

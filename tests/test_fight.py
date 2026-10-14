@@ -124,15 +124,9 @@ def test_swap_by_round_parity():
     assert hb.swap(SMALL, 2, (3, 2), (3, 3)).verdict is Verdict.WIPE
     assert hb.swap(SMALL, 4, (0, 3), (0, 2)).verdict is Verdict.WIPE  # dans le trou
     assert hb.swap(SMALL, 2, (4, 2), (2, 2)).verdict is Verdict.WIPE  # hors de l'arène
-    # Tour impair : c'est l'attaquant qui part ; renvoyé hors du sol, toute l'équipe meurt aussi.
-    assert hb.swap(SMALL, 3, (1, 2), (0, 2)).verdict is Verdict.WIPE
-    assert hb.swap(SMALL, 1, (2, 3), comte, frozenset({(2, 1)})).verdict is Verdict.SWAP_FIRE
-    # Tour pair : le Comte prend la place d'une entité et perd son invulnérabilité.
-    assert hb.swap(SMALL, 2, (2, 3), comte, frozenset({(2, 4)})).verdict is Verdict.DELOCK
-    boom = hb.swap(SMALL, 2, (2, 3), comte, frozenset({(2, 4)}), summons=frozenset({(2, 4)}))
-    assert boom.verdict is Verdict.DELOCK_SUMMON
-    assert comte in boom.blast and (2, 3) in boom.blast and (3, 1) not in boom.blast  # l'obstacle n'est pas une case du sol
-    assert all(abs(c[0] - 2) + abs(c[1] - 2) <= 3 for c in boom.blast)
+    # Tour impair : c'est l'attaquant qui part ; destination impossible signalée, effet à confirmer.
+    assert hb.swap(SMALL, 3, (1, 2), (0, 2)).verdict is Verdict.RISKY
+    assert hb.swap(SMALL, 2, (2, 3), comte, frozenset({(2, 4)})).verdict is Verdict.OCCUPIED
 
 
 def test_swap_map_and_mi_temps():
