@@ -28,6 +28,8 @@ LINES = f"""# en-tête
     5.000 s2c jvj 15 | 2=430 3={ME} 4=150 7=2
     6.000 s2c jsq 30 | 5.1={FOE} 5.2=100 5.3=128 22=5 36={PET}
     6.000 s2c jsq 30 | 22=80 36={PET} 37.4=-1 37.5={FOE} 37.6=30
+    6.050 s2c jsq 20 | 20.1=340 20.2={PET} 22=4 36={PET}
+    6.060 s2c jsq 20 | 4.1={PET} 4.2=340 4.3=231 22=8 36={FOE}
     6.100 s2c jsq 24 | 3.2={FOE} 22=103 36={PET}
     7.000 s2c jwp 50 | 1=3
     8.000 s2c jsq 30 | 22=100 36={FOE} 37.5={ME} 37.6=999
@@ -45,7 +47,7 @@ def test_fight_is_read_turn_by_turn():
     (fight,) = journal.read_extract(LINES)
     assert fight.ended and fight.rounds == 2
     kinds = [e.kind for e in fight.events]
-    assert kinds == ["sheet", "sheet", "sides", "start", "turn", "move", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "shield", "shield", "damage", "trigger", "turn", "push", "damage", "death", "end"]
+    assert kinds == ["sheet", "sheet", "sides", "start", "turn", "move", "cast", "spent", "damage", "heal", "summon", "turn", "damage", "shield", "shield", "damage", "trigger", "turn", "push", "damage", "teleport", "teleport", "death", "end"]
     cast = fight.events[6]
     assert (cast.source, cast.target, cast.spell, cast.cell) == (ME, FOE, 111, 203)
     assert [e.element for e in fight.events if e.kind == "damage"] == ["air", "neutre", "neutre", "poussée"]

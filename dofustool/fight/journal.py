@@ -26,6 +26,7 @@ SHEET_STATS, SUMMON_STATS = "1.3.4.7.4.", "12.2.1.2.4."
 
 # Champ 22 d'une action : ce qu'elle fait.
 CAST, DEATH, SUMMON, INVISIBLE = 300, 103, 181, 150
+TELEPORT, SWAP = 4, 8  # téléportation sur une case (20.1 case, 20.2 combattant) ; changement de case (4.1 combattant, 4.2 départ, 4.3 arrivée)
 POISON = 3793  # un poison ou un effet posé plus tôt se déclenche ; la ligne de dégâts suit
 AP_USED, MP_USED = 102, 129
 # Champ 37.4 d'une ligne de dégâts ; absent pour le neutre. Le code d'action dit la même chose
@@ -102,7 +103,7 @@ def preview(key: str, fields: Fields) -> Preview | None:
 @dataclass
 class Event:
     when: float
-    kind: str  # start, end, turn, sheet, life, sides, move, cast, trigger, damage, heal, shield, death, summon, push, invisible, spent
+    kind: str  # start, end, turn, sheet, life, sides, move, cast, trigger, damage, heal, shield, death, summon, push, teleport, invisible, spent
     source: int | None = None
     target: int | None = None
     amount: int | None = None  # dégâts, soin, points de vie, points de bouclier, PA ou PM dépensés, selon l'événement
@@ -161,6 +162,10 @@ def event(when: float, direction: str, key: str, fields: Fields) -> Event | None
         return Event(when, "heal", source, number(fields, "39.2"), amount=number(fields, "39.4"))
     if number(fields, "5.3") is not None:
         return Event(when, "push", source, number(fields, "5.1"), cell=number(fields, "5.3"))
+    if action == TELEPORT:
+        return Event(when, "teleport", source, number(fields, "20.2"), cell=number(fields, "20.1"))
+    if action == SWAP:
+        return Event(when, "teleport", source, number(fields, "4.1"), cell=number(fields, "4.3"))
     return None
 
 
@@ -203,7 +208,7 @@ class Fight:
             self.sides = item.path
         elif kind == "end":
             self.ended = True
-        if item.target is None or kind not in ("sheet", "summon", "damage", "heal", "shield", "death", "push", "move"):
+        if item.target is None or kind not in ("sheet", "summon", "damage", "heal", "shield", "death", "push", "move", "teleport"):
             return
         tally = self.fighters[item.target]
         if kind in ("sheet", "summon"):
@@ -224,7 +229,7 @@ class Fight:
             tally.shield = item.amount
         elif kind == "death":
             tally.dead = True
-        else:  # poussée ou déplacement
+        elif item.cell is not None and item.cell >= 0:  # poussée, déplacement ou téléportation
             tally.cell = item.cell
 
 
