@@ -337,10 +337,9 @@ class Items:
 
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
-                 element: bool = False, demo_element: str | None = None, aim_key: int | None = None) -> None:  # fmt: skip
+                 aim_key: int | None = None) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
         self.is_demo = demo is not None
-        self.show_element, self.element = element, demo_element  # pastille de l'élément de mon dernier sort, en combat
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
         self.board = Board()
         self.clock = 0.0  # temps de la démonstration : il n'avance que lorsque les bandeaux peuvent se voir
@@ -369,12 +368,10 @@ class Window:
                 sales.append(self.demo.pop(0)[1])
             for sale in sales:
                 self.board.add(sale, now)
-            if (self.show_element or self.aim) and not self.is_demo:
+            if self.aim is not None and not self.is_demo:
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
                 self.fight = fight if fight.get("active") and fresh else {"active": False}
-                if self.show_element:
-                    self.element = self.fight.get("element")
             self.area = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()) if self.anywhere else game_area(self.game)
         if self.area is None:
             self.board.hold(now)
@@ -398,7 +395,7 @@ class Window:
             )
             for banner in self.board.banners
         ]  # fmt: skip
-        image = draw.render(views, self.scale, self.element if self.show_element else None)
+        image = draw.render(views, self.scale)
         if image is None:
             self.layer.hide()
             return
@@ -444,7 +441,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--demo", action="store_true", help="affiche des ventes inventées ; rien n'est écrit dans la base")
     parser.add_argument("--anywhere", action="store_true", help="dans l'angle de l'écran, même si le jeu n'est pas la fenêtre active")
-    parser.add_argument("--element", choices=live.ELEMENTS, help="avec --demo : montre aussi la pastille de cet élément")
     parser.add_argument("--probe", action="store_true", help="dit pendant douze secondes si la fenêtre active est reconnue comme le jeu")
     args = parser.parse_args()
     if sys.platform != "win32":
@@ -466,7 +462,7 @@ def main() -> int:
         script, names = demo_sales(conn)
         items = Items(conn, icon_dir)
         items.demo_names = names
-        Window(None, items, script, anywhere=args.anywhere, game=game, element=bool(args.element), demo_element=args.element).run()
+        Window(None, items, script, anywhere=args.anywhere, game=game).run()
         return 0
     if conn is None:
         print(f"Base absente : {db.MARKET_PATH}")
@@ -475,8 +471,7 @@ def main() -> int:
     key = key_code(cfg.aim_key) if cfg.harebourg_aim else None
     if cfg.harebourg_aim and key is None:
         print(f"Touche de visée inconnue : « {cfg.aim_key} ». Exemples : XBUTTON2 (souris 5), XBUTTON1, F8, ALT, une lettre.")
-    Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, element=cfg.fight_element,
-           aim_key=key).run()  # fmt: skip
+    Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, aim_key=key).run()
     return 0
 
 

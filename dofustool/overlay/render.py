@@ -128,45 +128,13 @@ def card(view: View, scale: float) -> Image.Image:
     return image
 
 
-PILL_WIDTH, PILL_HEIGHT = 178, 46
-ELEMENT_COLOURS = {"terre": (176, 124, 68), "feu": (226, 88, 62), "eau": (74, 160, 232), "air": (96, 200, 110)}
-
-
-@lru_cache(maxsize=16)
-def element_pill(element: str, scale: float) -> Image.Image:
-    """Pastille « dernier élément » : un disque de la couleur de l'élément, et son nom."""
-    s = lambda v: round(v * scale)  # noqa: E731
-    colour = ELEMENT_COLOURS.get(element, MUTED)
-    size = (s(PILL_WIDTH + 2 * PAD), s(PILL_HEIGHT + 2 * PAD))
-    box = (s(PAD), s(PAD), s(PAD + PILL_WIDTH) - 1, s(PAD + PILL_HEIGHT) - 1)
-    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).rounded_rectangle((box[0], box[1] + s(3), box[2], box[3] + s(3)), s(PILL_HEIGHT / 2), fill=(0, 0, 0, 150))
-    image = shadow.filter(ImageFilter.GaussianBlur(s(6)))
-    top = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(top)
-    draw.rounded_rectangle(box, s(PILL_HEIGHT / 2), fill=(*SURFACE, 245), outline=(*colour, 255), width=max(1, s(1.5)))
-    centre = (box[0] + s(PILL_HEIGHT / 2), box[1] + s(PILL_HEIGHT / 2))
-    draw.ellipse((centre[0] - s(13), centre[1] - s(13), centre[0] + s(13), centre[1] + s(13)), fill=(*colour, 255))
-    draw.text((centre[0], centre[1] - s(1)), element[:1].upper(), font=font(s(14), bold=True), fill=(*GROUND, 255), anchor="mm")
-    text_x = box[0] + s(PILL_HEIGHT + 4)
-    draw.text((text_x, box[1] + s(7)), "DERNIER ÉLÉMENT", font=font(s(9), bold=True), fill=(*MUTED, 255))
-    draw.text((text_x, box[1] + s(19)), element.capitalize(), font=font(s(15), bold=True), fill=(*TEXT, 255))
-    image.alpha_composite(top)
-    return image
-
-
-def render(views: list[View], scale: float = 1.0, element: str | None = None) -> Image.Image | None:
-    """La pastille d'élément s'il y en a une, puis les bandeaux, le plus récent en haut. None s'il n'y a rien à montrer."""
-    if not views and not element:
+def render(views: list[View], scale: float = 1.0) -> Image.Image | None:
+    """Tous les bandeaux, le plus récent en haut. None s'il n'y a rien à montrer."""
+    if not views:
         return None
     s = lambda v: round(v * scale)  # noqa: E731
     step = s(HEIGHT + GAP)
-    pill = element_pill(element, scale) if element else None
-    offset = pill.height - s(2 * PAD) + s(GAP) if pill is not None else 0
-    height = offset + (s(2 * PAD + HEIGHT) + step * (len(views) - 1) if views else s(2 * PAD) - s(GAP))
-    canvas = Image.new("RGBA", (s(WIDTH + 2 * PAD), height), (0, 0, 0, 0))
-    if pill is not None:
-        canvas.alpha_composite(pill, (canvas.width - pill.width, 0))
+    canvas = Image.new("RGBA", (s(WIDTH + 2 * PAD), s(2 * PAD + HEIGHT) + step * (len(views) - 1)), (0, 0, 0, 0))
     for row, view in enumerate(reversed(views)):
         shown = visibility(view)
         if shown <= 0:
@@ -175,7 +143,7 @@ def render(views: list[View], scale: float = 1.0, element: str | None = None) ->
         if shown < 1:
             image.putalpha(image.getchannel("A").point(lambda a: round(a * shown)))
         slide = s(18 * (1 - shown))  # glisse depuis la droite en apparaissant
-        canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, offset + row * step))
+        canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, row * step))
     return canvas
 
 

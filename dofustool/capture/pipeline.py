@@ -67,7 +67,7 @@ class Pipeline:
     ) -> None:
         # fight_path : où écrire le combat en cours pour la fenêtre d'affichage. Sans lui, le combat n'est pas suivi.
         self._fight_path = fight_path
-        self.fight = live.Tracker(live.load_known(fight_path.with_name(live.SPELLS_PATH.name))) if fight_path else None
+        self.fight = live.Tracker() if fight_path else None
         if fight_path is not None:
             try:
                 live.write(fight_path, {"active": False, "updated": 0.0})  # efface un combat resté ouvert à l'arrêt précédent
@@ -117,12 +117,9 @@ class Pipeline:
                 self._log_error_once(exc)
 
     def _write_fight(self, now: float) -> None:
-        """Écrit le combat en cours pour la fenêtre d'affichage, et les éléments de sorts appris."""
+        """Écrit le combat en cours pour la fenêtre d'affichage."""
         try:
             live.write(self._fight_path, {**self.fight.state(), "updated": now})
-            if self.fight.learnt:
-                self.fight.learnt = False
-                live.write(self._fight_path.with_name(live.SPELLS_PATH.name), {str(spell): element for spell, element in self.fight.known.items()})
         except OSError as exc:
             self._log_error_once(exc)
 

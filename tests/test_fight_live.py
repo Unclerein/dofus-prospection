@@ -1,4 +1,4 @@
-"""Combat suivi en direct : mon dernier élément lancé, état écrit pour l'affichage. Nombres inventés."""
+"""Combat suivi en direct : état écrit pour l'affichage. Nombres inventés."""
 from dofustool.fight import journal, live
 
 ME, OTHER, FOE = 900, 700, -1
@@ -19,51 +19,6 @@ START = f"""
 """
 
 
-def test_last_element_follows_my_own_casts_only():
-    tracker = live.Tracker()
-    feed(tracker, START, me=ME)
-    assert tracker.state() == {"active": True, "round": 1, "element": None, "fighters": [
-        {"kind": "moi", "monster": None, "life": 1000, "max_life": 1000, "shield": 0, "dead": False, "cell": 300, "mine": False},
-        {"kind": "joueur", "monster": None, "life": 900, "max_life": 900, "shield": 0, "dead": False, "cell": 301, "mine": False},
-        {"kind": "monstre", "monster": 489, "life": 80, "max_life": 80, "shield": 0, "dead": False, "cell": 310, "mine": False},
-    ], "map": None, "confusion": None}
-    feed(tracker, f"""
-    2.000 c2s jsr 7 | 1=111 2=310
-    2.100 s2c jsq 40 | 2.2.2=111 2.5=310 2.6={FOE} 22=300 36={ME}
-    2.100 s2c jsq 30 | 22=99 36={ME} 37.4=2 37.5={FOE} 37.6=20
-    """)
-    assert tracker.element == "feu" and tracker.known == {111: "feu"} and tracker.learnt and tracker.dirty
-    # un effet à moi qui se relance seul, le sort d'un autre joueur, un coup reçu : rien ne change
-    feed(tracker, f"""
-    2.200 s2c jsq 40 | 2.2.2=8395 2.5=300 2.6={ME} 22=300 36={ME}
-    2.300 s2c jsq 30 | 22=98 36={ME} 37.4=4 37.5={FOE} 37.6=5
-    3.000 s2c jsq 40 | 2.2.2=222 2.5=310 2.6={FOE} 22=300 36={OTHER}
-    3.000 s2c jsq 30 | 22=96 36={OTHER} 37.4=3 37.5={FOE} 37.6=9
-    3.500 s2c jsq 30 | 22=100 36={FOE} 37.5={ME} 37.6=12
-    """)
-    assert tracker.element == "feu" and tracker.known == {111: "feu"}
-    # un sort déjà connu, lancé dans le vide : pas de ligne de dégâts, l'élément est su quand même
-    tracker.known[333] = "eau"
-    feed(tracker, f"""
-    4.000 c2s jsr 7 | 1=333 2=250
-    4.100 s2c jsq 40 | 2.2.2=333 2.5=250 22=300 36={ME}
-    """)
-    assert tracker.element == "eau"
-
-
-def test_poison_teaches_its_element_without_becoming_the_last_cast():
-    tracker = live.Tracker()
-    feed(tracker, START, me=ME)
-    feed(tracker, f"""
-    2.000 c2s jsr 7 | 1=111 2=310
-    2.100 s2c jsq 40 | 2.2.2=111 2.5=310 2.6={FOE} 22=300 36={ME}
-    2.100 s2c jsq 30 | 22=97 36={ME} 37.4=1 37.5={FOE} 37.6=20
-    5.000 s2c jsq 27 | 22=3793 25.1=444 25.5=310 36={ME}
-    5.000 s2c jsq 30 | 22=98 36={ME} 37.4=4 37.5={FOE} 37.6=30
-    """)
-    assert tracker.element == "terre" and tracker.known == {111: "terre", 444: "air"}
-
-
 def test_my_fighter_is_guessed_from_what_i_ask_for_and_state_ends_with_the_fight():
     tracker = live.Tracker()
     feed(tracker, START)  # personnage inconnu de la capture
@@ -74,7 +29,7 @@ def test_my_fighter_is_guessed_from_what_i_ask_for_and_state_ends_with_the_fight
     2.100 s2c jsq 24 | 3.2={FOE} 22=103 36={ME}
     """)
     state = tracker.state()
-    assert tracker.me == ME and state["element"] == "eau" and not tracker.dirty
+    assert tracker.me == ME and not tracker.dirty
     assert [f["kind"] for f in state["fighters"]] == ["moi", "joueur", "monstre"] and state["fighters"][2]["dead"]
     feed(tracker, "    9.000 s2c jwp 50 | 1=3")
     assert tracker.dirty and tracker.state() == {"active": False}
@@ -85,13 +40,10 @@ def test_my_fighter_is_guessed_from_what_i_ask_for_and_state_ends_with_the_fight
 def test_state_file_round_trip(tmp_path):
     path = tmp_path / "sub" / "fight.json"
     assert live.read(path) == {"active": False}
-    live.write(path, {"active": True, "round": 2, "element": "air", "fighters": []})
-    assert live.read(path)["element"] == "air" and not path.with_suffix(".tmp").exists()
+    live.write(path, {"active": True, "round": 2, "fighters": []})
+    assert live.read(path)["round"] == 2 and not path.with_suffix(".tmp").exists()
     path.write_text("{pas du json", encoding="utf-8")
     assert live.read(path) == {"active": False}
-    spells = tmp_path / "spells.json"
-    live.write(spells, {"111": "feu", "222": "n'importe quoi"})
-    assert live.load_known(spells) == {111: "feu"} and live.load_known(tmp_path / "absent.json") == {}
 
 
 def test_capture_writes_the_fight_for_the_overlay(tmp_path):
@@ -100,7 +52,7 @@ def test_capture_writes_the_fight_for_the_overlay(tmp_path):
     from dofustool.capture.pipeline import Pipeline
 
     path = tmp_path / "fight.json"
-    path.write_text('{"active": true, "element": "feu", "updated": 5}', encoding="utf-8")  # combat resté ouvert à l'arrêt précédent
+    path.write_text('{"active": true, "round": 3, "updated": 5}', encoding="utf-8")  # combat resté ouvert à l'arrêt précédent
     pipeline = Pipeline(Archive(":memory:"), db.connect(":memory:"), {}, fight_path=path)
     assert live.read(path)["active"] is False
     feed(pipeline.fight, START, me=ME)
@@ -111,9 +63,8 @@ def test_capture_writes_the_fight_for_the_overlay(tmp_path):
     """)
     pipeline.tick(50.0)
     state = live.read(path)
-    assert (state["active"], state["element"], state["updated"], len(state["fighters"])) == (True, "air", 50.0, 3)
+    assert (state["active"], state["updated"], len(state["fighters"])) == (True, 50.0, 3)
     assert str(OTHER) not in path.read_text(encoding="utf-8")  # l'identifiant d'un autre joueur ne sort pas
-    assert live.load_known(tmp_path / live.SPELLS_PATH.name) == {111: "air"}
     # sans chemin, rien n'est suivi ni écrit
     assert Pipeline(Archive(":memory:"), db.connect(":memory:"), {}).fight is None
 

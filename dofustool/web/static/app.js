@@ -2717,7 +2717,6 @@ async function pageConfig() {
         } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
-        h('label', { class: 'check' }, h('input', { id: 'c-element', type: 'checkbox', checked: !!d.fight_element, onchange: (e) => { d.fight_element = e.target.checked; sync(); } }), 'En combat, afficher l\u2019élément de mon dernier sort (Huppermage)'),
         h('label', { class: 'check' }, h('input', { id: 'c-aim', type: 'checkbox', checked: !!d.harebourg_aim, onchange: (e) => { d.harebourg_aim = e.target.checked; sync(); } }), 'Comte Harebourg : afficher sur le jeu la case à viser quand je maintiens la touche de visée'),
         text('c-aimkey', 'Touche de visée', 'aim_key', 140, 'XBUTTON2'))));
 
