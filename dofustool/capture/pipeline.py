@@ -107,6 +107,8 @@ class Pipeline:
             watch = self._watch[msg.conn] = _ConnWatch(conn.first_ts, msg.ts, archive_id)
             watch.late = self._started_at is not None and conn.first_ts - self._started_at <= LATE_START_S
             db.set_status(self.market, last_connection_ts=conn.first_ts)
+            if self.fight is not None:
+                self.fight.close()  # nouvelle connexion (reconnexion, autre personnage) : l'ancien combat est fini
         watch.last_ts = msg.ts
         source_id = self.archive.add(watch.archive_id, msg) if watch.archive_id is not None else None
         self._decode(msg, watch, source_id)

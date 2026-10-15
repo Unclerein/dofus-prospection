@@ -61,6 +61,8 @@ class Tracker:
                 self._ordered = (spell, when)
             return
         if key == MAP_CHANGE:
+            # On ne change pas de carte en plein combat : un combat encore ouvert a fini sans qu'on voie sa fin.
+            self.close()
             self.map_id = journal.number(fields, "1")
             return
         if key == EFFECT:
@@ -76,6 +78,12 @@ class Tracker:
             self._cast(item, when)
         if fighting or self.reader.current is not None:
             self.dirty = True
+
+    def close(self) -> None:
+        """Termine le combat en cours, s'il y en a un : plus rien ne doit s'afficher hors combat."""
+        if self.reader.current is not None:
+            self.reader.close()
+            self.confusion, self.rune, self.dirty = None, None, True
 
     def _cast(self, item: journal.Event, when: float) -> None:
         """À défaut de connaître mon personnage : c'est lui qui lance le sort que je viens de demander."""

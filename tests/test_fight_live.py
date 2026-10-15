@@ -106,3 +106,20 @@ def test_last_rune_of_the_huppermage():
     feed(tracker, "    9.000 s2c jwp 50 | 1=3")
     feed(tracker, START.replace("0.300", "10.300").replace("1.000", "11.000").replace("1.100", "11.100"))
     assert tracker.rune is None  # nouveau combat : plus de dernière rune
+
+
+def test_fight_left_without_its_end_is_closed():
+    tracker = live.Tracker()
+    feed(tracker, START, me=ME)
+    feed(tracker, f"    2.000 s2c juh 78 | 1.1.1=701 1.1.8={ME} 1.1.16=13744 1.2=950 1.3={ME}")
+    assert tracker.state()["rune"] == "feu"
+    # pas de fin de combat vue, mais le joueur change de carte : plus de combat, plus de rune
+    feed(tracker, "    5.000 s2c jow 5 | 1=212601347")
+    assert tracker.dirty and tracker.state() == {"active": False} and tracker.rune is None
+    # une nouvelle connexion ferme aussi un combat resté ouvert
+    feed(tracker, START.replace("0.300", "10.300").replace("1.000", "11.000").replace("1.100", "11.100"))
+    assert tracker.state()["active"]
+    tracker.close()
+    assert tracker.state() == {"active": False}
+    tracker.close()  # sans combat : rien à faire
+    assert not tracker.dirty

@@ -27,7 +27,7 @@ from . import render as draw
 
 POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
-STALE_FIGHT_S = 900.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
+STALE_FIGHT_S = 180.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
 
 GWL_EXSTYLE = -20

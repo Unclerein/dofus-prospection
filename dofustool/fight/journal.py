@@ -259,6 +259,12 @@ class Reader:
         self._my_life: int | None = None
         self._sides: Event | None = None
 
+    def close(self) -> None:
+        """Le combat en cours est fini sans que sa fin ait été vue (changement de carte, reconnexion)."""
+        if self.current is not None:
+            self.finished.append(self.current)
+        self.current, self._sheets, self._sides = None, {}, None
+
     def feed(self, when: float, direction: str, key: str, fields: Fields) -> Event | None:
         """L'événement porté par ce message, une fois pris en compte ; None s'il n'en porte pas."""
         item = event(when, direction, key, fields)
