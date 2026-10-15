@@ -86,6 +86,27 @@ function statIcon(asset) {
   return img;
 }
 
+// Ligne de tableau qui mène à une page. Clic : on y va ; clic molette, Ctrl+clic ou Cmd+clic : nouvel onglet.
+const FOCUS_KEY = 'dofustool.forgeFocus';
+const rowLink = (hash, before) => ({ class: 'link', 'data-href': hash, onclick: () => { if (before) before(); location.hash = hash; } });
+const openTab = (hash) => window.open(location.origin + location.pathname + hash, '_blank', 'noopener');
+// Pas sur un bouton, un lien ou un champ de la ligne : ceux-là gardent leur propre clic.
+const rowTarget = (event) => !event.target.closest('button, a, input, select, label') && event.target.closest('tr[data-href]');
+document.addEventListener('click', (event) => {
+  const row = (event.ctrlKey || event.metaKey) && rowTarget(event);
+  if (!row) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openTab(row.dataset.href);
+}, true);
+document.addEventListener('mousedown', (event) => { if (event.button === 1 && rowTarget(event)) event.preventDefault(); }, true);  // pas de défilement automatique
+document.addEventListener('auxclick', (event) => {
+  const row = event.button === 1 && rowTarget(event);
+  if (!row) return;
+  event.preventDefault();
+  openTab(row.dataset.href);
+}, true);
+
 const itemCell = (iconId, name, sub, itemId) =>
   h('div', { class: 'item-cell', ...(itemId ? hoverTip(itemId) : {}) }, tile(iconId, false, itemId), h('div', {}, h('div', { class: 'name' }, name), sub && h('div', { class: 'sub' }, sub)));
 
@@ -795,7 +816,7 @@ async function pageIgnored() {
     h('div', { class: 'panel-head' }, h('h2', {}, `${data.rows.length} objet${data.rows.length > 1 ? 's' : ''} ignoré${data.rows.length > 1 ? 's' : ''}`)),
     h('div', { class: 'scroll' }, h('table', { style: 'min-width: 520px' },
       h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Ignoré'), h('th', {}, ''))),
-      h('tbody', {}, data.rows.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+      h('tbody', {}, data.rows.map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
         h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null].filter(Boolean).join(' · '), row.item_id)),
         h('td', { class: 'muted' }, ago(row.added_at, data.now)),
         h('td', {}, h('button', { class: 'btn', onclick: (event) => { event.stopPropagation(); setIgnored(row.item_id, row.name, false); } }, 'Rétablir'))))))))];
@@ -859,7 +880,7 @@ async function pageCrafts() {
 
   const body = rows.slice(0, ui.limit).map((r) => {
     const tags = (r['Remarques'] || '').split(', ').filter(Boolean);
-    return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+    return h('tr', rowLink(`#/item/${r.item_id}`),
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], null, r.item_id)),
       h('td', { class: 'l soft' }, r['Métier'], h('span', { class: 'muted' }, ` · ${r['Niveau']}`)),
       h('td', r.equipment ? hoverListing(r.item_id, r['Source du prix'], r['Prix de vente']) : {}, h('div', { style: 'font-weight: 500' }, fmt(r['Prix de vente'])), r['Prix de vente'] !== null && sourceLine(r['Source du prix'], r['Âge du prix (h)'], r['Lot du prix'], r['Prix de vente']),
@@ -975,7 +996,7 @@ function stockCrafts(data) {
         h('option', { value: '' }, 'Tous les métiers'), data.jobs.map((j) => h('option', { value: j, selected: j === ui.job }, j)))),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.own, disabled: !data.has_jobs, onchange: (e) => set({ own: e.target.checked }) }), 'Mes métiers seulement'));
 
-  const body = rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+  const body = rows.slice(0, ui.limit).map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
     h('td', { class: 'l' }, itemCell(row.icon, row.name, `${row.job} · ${row.level}`, row.item_id)),
     h('td', hoverListing(row.item_id, row.source, row.sell), row.sell === null ? h('span', { class: 'muted' }, '—')
       : [h('div', { style: 'font-weight: 500' }, fmt(row.sell)), h('div', { class: 'source', title: lotTitle(row.lot, row.sell) }, h('span', { class: 'dot ' + dotClass(row.source) }), shortSource(row.source, row.lot))]),
@@ -1044,7 +1065,7 @@ function stockItems(data) {
       rows.length === 0 ? h('div', { class: 'empty' }, 'Aucun objet ne correspond.')
         : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
           h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Inventaire'), h('th', {}, 'Banque'), h('th', {}, 'Havre-sac'), h('th', { class: ui.sort === 'total' ? 'sorted' : '' }, 'Total'), h('th', {}, 'Prix unitaire'), h('th', { class: ui.sort === 'value' ? 'sorted' : '' }, 'Valeur'), h('th', {}, 'Recettes'))),
-          h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+          h('tbody', {}, rows.slice(0, ui.limit).map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
             h('td', { class: 'l' }, itemCell(row.icon, row.name, [row.type, row.level ? `niv. ${row.level}` : null,
               row.contains ? `contient ${fmt(row.contains.per)} × ${row.contains.name}, soit ${fmt(row.contains.units)}` : null,
               row.packed ? `+ ${fmt(row.packed)} en conteneurs fermés` : null].filter(Boolean).join(' · '), row.item_id)),
@@ -1124,7 +1145,7 @@ async function pageSales() {
     shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun lot ne correspond.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 860px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Lot'), h('th', {}, 'Mon prix'), h('th', {}, 'À l\'unité'), h('th', {}, 'Face à l\'HDV'), h('th', {}, 'Prix moyen du lot'), h('th', {}, 'Expire dans'))),
-        h('tbody', {}, shown.slice(0, 400).map((r, index) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+        h('tbody', {}, shown.slice(0, 400).map((r, index) => h('tr', rowLink(`#/item/${r.item_id}`),
           h('td', { class: 'l', ...hoverLot(r, index) }, itemCell(r.icon, r.name, r.type)),
           h('td', { class: 'soft' }, `x${r.lot}`),
           h('td', { class: 'strong' }, fmt(r.price)),
@@ -1173,7 +1194,7 @@ function craftsJournal(data) {
     h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Quand'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Quantité'), h('th', {}, 'Valeur'), h('th', {}, 'Coût'), h('th', {}, 'Marge'))),
     h('tbody', {}, data.crafts.map((c) => {
       const margin = c.value !== null && c.cost !== null ? c.value * (1 - data.tax) - c.cost : null;
-      return h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${c.item_id}`; } },
+      return h('tr', rowLink(`#/item/${c.item_id}`),
         h('td', { class: 'l soft' }, when(c.ts)), h('td', { class: 'l' }, itemCell(c.icon, c.name, null, c.item_id)), h('td', { class: 'soft' }, `× ${fmt(c.quantity)}`),
         h('td', { class: 'soft' }, fmt(c.value)), h('td', { class: 'soft' }, fmt(c.cost)),
         h('td', { class: 'strong ' + (margin === null ? 'muted' : margin >= 0 ? 'gain' : 'warn') }, margin === null ? '—' : signed(margin)));
@@ -1211,7 +1232,7 @@ function salesJournal(data, ui) {
     shown.length === 0 ? h('div', { class: 'empty' }, 'Aucun mouvement ne correspond.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Quand'), h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, ''), h('th', {}, 'Lot'), h('th', {}, 'Prix du lot'), h('th', {}, 'À l\'unité'), h('th', {}, 'Prix moyen du lot'))),
-        h('tbody', {}, shown.slice(0, 300).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+        h('tbody', {}, shown.slice(0, 300).map((r) => h('tr', rowLink(`#/item/${r.item_id}`),
           h('td', { class: 'l soft' }, when(r.ts)),
           h('td', { class: 'l' }, itemCell(r.icon, r.name, null, r.item_id)),
           h('td', { class: 'l' }, h('span', { class: 'tag ' + (r.kind === 'sale' ? 'good' : 'info'), title: r.offline ? 'Vente conclue pendant ton absence : déduite du lot disparu et des kamas annoncés à la connexion. Heure = celle de la connexion.' : null }, r.kind === 'sale' ? (r.offline ? 'vente hors ligne' : 'vente') : 'achat')),
@@ -1310,7 +1331,7 @@ async function pageJobs() {
           h('td', { class: 'act', style: 'width: 96px' }, h('button', { class: 'btn', title: 'Écarter cet objet support du plan', onclick: () => change(() => { mine.exclude = [...new Set([...mine.exclude, step.item_id])]; }) }, 'Retirer')))))))
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 900px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Niveaux'), h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Crafts'), h('th', {}, 'XP'), h('th', {}, saved.resale ? 'Coût net / craft' : 'Coût / craft'), h('th', {}, 'Coût'), h('th', {}, 'Kamas / XP'), h('th', {}, ''))),
-        h('tbody', {}, plan.steps.map((step) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${step.item_id}`; } },
+        h('tbody', {}, plan.steps.map((step) => h('tr', rowLink(`#/item/${step.item_id}`),
           h('td', { class: 'l', style: 'font-weight: 600' }, `${step.from_level} → ${step.to_level}`),
           h('td', { class: 'l' }, itemCell(step.icon, step.name, `niv. ${step.level} · ${step.ingredients} ingr.` + (step.ratio_pct !== 100 ? ` · XP ×${step.ratio_pct / 100}` : ''), step.item_id)),
           h('td', { style: 'font-weight: 600' }, `× ${fmt(step.crafts)}`),
@@ -1333,7 +1354,7 @@ async function pageJobs() {
     plan.shopping.length === 0 ? h('div', { class: 'empty' }, 'Rien à acheter.')
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 760px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, plan.mage ? 'Rune ou objet' : 'Ingrédient'), h('th', {}, 'Besoin'), h('th', {}, 'En stock'), h('th', {}, 'À acheter'), h('th', {}, 'Prix'), h('th', {}, 'Coût'))),
-        h('tbody', {}, plan.shopping.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+        h('tbody', {}, plan.shopping.map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
           h('td', { class: 'l' }, itemCell(row.icon, row.name, null, row.item_id)),
           h('td', { class: 'soft' }, fmt(row.quantity)),
           h('td', {}, !plan.stock_known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row.quantity)),
@@ -1385,7 +1406,7 @@ function runeTable(runes, title, note) {
     h('div', { class: 'panel-head' }, h('h2', {}, title), note && h('span', { class: 'muted small' }, note)),
     h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 760px' },
       h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Rune'), h('th', {}, 'Passages'), h('th', {}, 'Résultat'), h('th', { title: 'Prix du marché retenu pour chaque rune passée' }, 'Prix unitaire'), h('th', {}, 'Coût'), h('th', { title: 'Prix moyen de tes achats de cette rune, pondéré par les quantités' }, "Mon prix d'achat"))),
-      h('tbody', {}, runes.map((rune) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${rune.id}`; } },
+      h('tbody', {}, runes.map((rune) => h('tr', rowLink(`#/item/${rune.id}`),
         h('td', { class: 'l' }, itemCell(rune.icon, rune.name, null, rune.id)),
         h('td', { style: 'font-weight: 600' }, fmt(rune.count)),
         h('td', {}, outcomeCell(rune)),
@@ -1425,7 +1446,7 @@ async function forgeJournal(uid) {
     h('div', { class: 'scroll' }, h('table', { style: 'min-width: 940px' },
       h('thead', {}, h('tr', {}, sortTh(ui.sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(ui.sort, 'last', 'Dernier passage'), sortTh(ui.sort, 'passes', 'Passages'),
         sortTh(ui.sort, 'runes', 'Runes'), sortTh(ui.sort, 'base', 'Objet de base'), sortTh(ui.sort, 'sale', 'Prix de vente'), sortTh(ui.sort, 'margin', 'Marge', { title: 'Prix de vente, moins la taxe de mise en vente, l\'objet de base et les runes' }))),
-      h('tbody', {}, rows.map((d) => h('tr', { class: 'link' + (current && current.uid === d.uid ? ' on' : ''), onclick: () => { location.hash = `#/forge/journal/${d.uid}`; } },
+      h('tbody', {}, rows.map((d) => h('tr', { ...rowLink(`#/forge/journal/${d.uid}`), class: 'link' + (current && current.uid === d.uid ? ' on' : '') },
         h('td', { class: 'l', ...(d.rolls ? hoverRolls(d.item_id, d.rolls, `fm-${d.uid}`, 'Ton exemplaire, après forgemagie') : hoverTip(d.item_id)) }, itemCell(d.icon, d.name, d.type)),
         h('td', { class: 'soft' }, [h('div', {}, when(d.last_ts)), d.duration_s > 0 && h('div', { class: 'source' }, durationLabel(d.duration_s))]),
         h('td', {}, [h('div', { style: 'font-weight: 600' }, fmt(d.passes)), h('div', { class: 'source', title: 'Succès critiques · succès neutres · échecs' }, `${d.sc} SC · ${d.sn} SN · ${d.ec} EC`)]),
@@ -1545,6 +1566,12 @@ async function forgeItem(id, options) {
   const cheapest = d.listings[0] || null;
   const plain = d.listings.find((l) => l.plain) || null;
   // Arrivée depuis le classement général : le critère cherché là-bas (exo ou over), en plus des critères de l'objet.
+  if (!S.ui.forgeFocus) {
+    try {
+      const left = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null');
+      if (left && left.item === id && Date.now() - left.at < 60000) S.ui.forgeFocus = left;
+    } catch (error) { /* stockage indisponible */ }
+  }
   const focus = S.ui.forgeFocus && S.ui.forgeFocus.item === id ? S.ui.forgeFocus : null;
   const baseMax = Object.fromEntries(d.lines.map((line) => [line.id, line.max]));
   const focused = (l) => {
@@ -1802,12 +1829,12 @@ async function forgeRanking() {
 
   const body = rows.map((r, index) => {
     const value = r[key];
-    return h('tr', { class: 'link', onclick: () => {
-      // Le critère cherché suit le clic : la page de l'objet met en avant les annonces qui y répondent.
-      S.ui.forgeFocus = ui.criterion === 'exo' ? { item: r.item_id, kind: 'exo', effect: ui.exo, value: ui.exoValue, exact: !!ui.exact, hunting: ui.hunting, label, only: true }
-        : ui.criterion === 'over' ? { item: r.item_id, kind: 'over', effect: ui.effect, value: ui.amount, hunting: ui.hunting, label, only: true } : null;
-      location.hash = `#/forge/item/${r.item_id}`;
-    } },
+    // Le critère cherché suit le clic : la page de l'objet met en avant les annonces qui y répondent.
+    const focus = () => ui.criterion === 'exo' ? { item: r.item_id, kind: 'exo', effect: ui.exo, value: ui.exoValue, exact: !!ui.exact, hunting: ui.hunting, label, only: true }
+      : ui.criterion === 'over' ? { item: r.item_id, kind: 'over', effect: ui.effect, value: ui.amount, hunting: ui.hunting, label, only: true } : null;
+    return h('tr', { ...rowLink(`#/forge/item/${r.item_id}`, () => { S.ui.forgeFocus = focus(); }),
+      // Clic molette ou Ctrl+clic : le nouvel onglet retrouve le critère en le relisant ici.
+      onmousedown: () => { try { localStorage.setItem(FOCUS_KEY, JSON.stringify({ ...focus(), at: Date.now() })); } catch (error) { /* stockage indisponible */ } } },
       h('td', { class: 'muted' }, index + 1),
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}niv. ${r['Niveau']}${r.mage ? ' · ' + r.mage : ''} · ${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
@@ -1858,7 +1885,7 @@ async function pageTrends() {
       : h('div', { class: 'scroll' }, h('table', { class: 'dense', style: 'min-width: 600px' },
         h('thead', {}, h('tr', {}, sortTh(ui.sort, 'name', 'Objet', { left: true, first: 1 }), sortTh(ui.sort, 'price', 'Prix'), sortTh(ui.sort, 'ref', 'Comparé à'),
           sortTh(ui.sort, 'kamas', 'Écart en kamas'), sortTh(ui.sort, 'gap', 'Écart'), sortTh(ui.sort, 'recipes', 'Recettes'), h('th', {}, ''))),
-        h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${r.item_id}`; } },
+        h('tbody', {}, rows.slice(0, 150).map((r) => h('tr', rowLink(`#/item/${r.item_id}`),
           h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], [r.type, r['Base']].filter(Boolean).join(' · '), r.item_id)),
           h('td', { style: 'font-weight: 500' }, price(r['Prix'])),
           h('td', {}, h('div', { class: 'soft' }, fmt(reference(r)[0])), h('div', { class: 'muted small' }, reference(r)[1])),
@@ -2114,7 +2141,7 @@ async function pageItem(r) {
         d.owned.known && kpi('Faisable en stock', c.craftable > 0 ? `× ${fmt(c.craftable)}` : '0', null, c.craftable > 0 ? 'gain' : '')),
       h('div', { class: 'scroll' }, h('table', { style: 'min-width: 720px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Ingrédient'), h('th', {}, 'Quantité'), h('th', {}, 'En stock'), h('th', {}, 'Prix unitaire'), h('th', { class: 'l' }, 'Obtenu par'), h('th', {}, 'Sous-total'))),
-        h('tbody', {}, c.ingredients.map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+        h('tbody', {}, c.ingredients.map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
           h('td', { class: 'l' }, itemCell(row.icon, row['Ingrédient'], row['Source'] ? [row['Source'], lotLabel(row['Lot']), ageLabel(row['Âge (h)'])].filter(Boolean).join(' · ') : null, row.item_id)),
           h('td', { class: 'soft' }, fmt(row['Quantité'])),
           h('td', {}, !d.owned.known ? h('span', { class: 'muted' }, '—') : haveTag(row.have, row['Quantité'])),
@@ -2131,7 +2158,7 @@ async function pageItem(r) {
     d.used_in.length === 0 ? h('div', { class: 'empty' }, "Aucune recette.")
       : h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
         h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', { class: 'l' }, 'Métier'), h('th', {}, 'Quantité utilisée'), h('th', {}, 'Prix de vente'), h('th', {}, 'Marge'))),
-        h('tbody', {}, d.used_in.slice(0, 80).map((row) => h('tr', { class: 'link', onclick: () => { location.hash = `#/item/${row.item_id}`; } },
+        h('tbody', {}, d.used_in.slice(0, 80).map((row) => h('tr', rowLink(`#/item/${row.item_id}`),
           h('td', { class: 'l' }, itemCell(row.icon, row['Objet'], null, row.item_id)), h('td', { class: 'l soft' }, row['Métier'], h('span', { class: 'muted' }, ` · ${row['Niveau']}`)),
           h('td', { class: 'soft' }, fmt(row['Quantité utilisée'])), h('td', {}, fmt(row['Prix de vente'])),
           h('td', { class: 'strong ' + (row['Marge'] === null ? 'muted' : row['Marge'] >= 0 ? 'gain' : 'warn') }, signed(row['Marge']))))))));
@@ -2609,7 +2636,7 @@ async function pageWelcome() {
     ['status', 'État', 'La capture fonctionne-t-elle, que vaut le prix estimé, où en est le partage.'],
   ];
   const tour = h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Les onglets')),
-    h('table', {}, h('tbody', {}, tabs.map(([page, name, text]) => h('tr', { class: 'link', onclick: () => { location.hash = `#/${page}`; } },
+    h('table', {}, h('tbody', {}, tabs.map(([page, name, text]) => h('tr', rowLink(`#/${page}`),
       h('td', { class: 'l', style: 'font-weight: 600; width: 150px' }, name), h('td', { class: 'l soft wrap' }, text))))));
 
   return [
