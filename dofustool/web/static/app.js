@@ -2896,6 +2896,10 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 18, date: '15 octobre 2026', title: 'Ouvrir plusieurs objets en onglets', hash: '#/forge/ranking', go: 'Voir le classement', points: [
+    ['Nouvel onglet :', 'dans tous les tableaux, un clic molette ou Ctrl+clic sur une ligne l’ouvre dans un nouvel onglet. Le clic normal ne change pas.'],
+    ['Forgemagie :', 'depuis le classement, le critère cherché (exo, over) suit dans l’onglet ouvert, comme avec un clic normal.'],
+  ] },
   { id: 17, date: '15 octobre 2026', title: 'Huppermage : la dernière rune par-dessus le jeu', hash: '#/config', go: 'Ouvrir la configuration', points: [
     ['Dernière rune :', 'en combat, l\u2019icône de l\u2019élément de ta dernière rune (feu, eau, terre ou air) s\u2019affiche dans l\u2019angle haut droit de la fenêtre du jeu, et s\u2019allume un instant quand elle change. Elle disparaît à la fin du combat.'],
     ['Pour l\u2019activer :', 'coche « Huppermage : afficher en combat l\u2019élément de ma dernière rune » dans Config, puis relance par le raccourci Dofus + Prospection.'],
