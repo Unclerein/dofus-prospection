@@ -186,6 +186,8 @@ td.strong { font-weight: 700; }
 
 .item-cell { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .item-cell .name { font-weight: 600; }
+a.name { display: block; color: inherit; }
+a.name:hover { text-decoration: underline; }
 .item-cell .sub { color: var(--muted); font-size: 12px; }
 .tile {
   width: 40px; height: 40px; border-radius: 9px; background: var(--raised); border: 1px solid var(--line-strong);

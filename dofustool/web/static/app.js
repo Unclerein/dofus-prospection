@@ -100,6 +100,16 @@ document.addEventListener('click', (event) => {
   openTab(row.dataset.href);
 }, true);
 document.addEventListener('mousedown', (event) => { if (event.button === 1 && rowTarget(event)) event.preventDefault(); }, true);  // pas de défilement automatique
+// Le nom de l'objet devient un vrai lien : là, le navigateur ouvre l'onglet lui-même, en arrière-plan,
+// et propose « Ouvrir dans un nouvel onglet » au clic droit. Ailleurs sur la ligne, l'ouverture passe par openTab.
+const linkNames = (root) => root.querySelectorAll('tr[data-href] .item-cell .name:not(a)').forEach((name) => {
+  const link = document.createElement('a');
+  link.className = 'name';
+  link.href = name.closest('tr').dataset.href;
+  link.append(...name.childNodes);
+  name.replaceWith(link);
+});
+new MutationObserver(() => linkNames(document)).observe(document.body, { childList: true, subtree: true });
 document.addEventListener('auxclick', (event) => {
   const row = event.button === 1 && rowTarget(event);
   if (!row) return;
