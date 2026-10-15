@@ -6,6 +6,8 @@ $git = Get-Command git -ErrorAction SilentlyContinue
 if (-not $git -or -not (Test-Path (Join-Path $Root '.git'))) { return }
 $python = Join-Path $Root '.venv\Scripts\python.exe'
 try {
+    # Dépôt devenu privé : le hub donne l'accès aux joueurs qu'il connaît (voir dofustool/share/repo.py).
+    if (Test-Path $python) { & $python -m dofustool.share.repo 2>$null | ForEach-Object { Write-Host $_ } }
     $before = & git -C $Root rev-parse HEAD 2>$null
     # Abandonne vite si le réseau ne répond pas ; --ff-only refuse toute fusion hasardeuse.
     & git -C $Root -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=8 pull --ff-only --quiet 2>$null | Out-Null

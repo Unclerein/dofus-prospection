@@ -1,6 +1,7 @@
 """Hub de partage : reçoit les relevés de chaque joueur et les redistribue aux autres.
 
-Un seul point d'entrée, POST /sync, protégé par un jeton par joueur. Le hub ne garde que le dernier
+Deux points d'entrée, protégés par un jeton par joueur : POST /sync pour les relevés, et POST /repo
+qui donne l'accès au dépôt du code quand il est privé (voir share/repo.py). Le hub ne garde que le dernier
 enregistrement de chaque objet (data/hub.sqlite) et ne connaît rien de personnel.
 
 Usage : lancé par « python -m dofustool.web » quand host_hub est activé dans la configuration.
@@ -17,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .. import config, db
-from . import validate
+from . import repo, validate
 
 log = logging.getLogger("dofustool.share")
 
@@ -153,7 +154,22 @@ def make_handler(hub: Hub, config_path: Path = config.CONFIG_PATH) -> type[BaseH
         def do_GET(self) -> None:  # noqa: N802
             self._reply(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
 
+        def _repo(self) -> None:
+            cfg = config.load(config_path)
+            token = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+            if member_of(token, cfg.share_members) is None:
+                return self._reply(HTTPStatus.UNAUTHORIZED, {"error": "jeton inconnu"})
+            if not cfg.share_repo_token:
+                return self._reply(HTTPStatus.NOT_FOUND, {"error": "aucun accès au dépôt n'est prévu sur ce hub"})
+            self._reply(HTTPStatus.OK, {"repo": repo.REPO, "token": cfg.share_repo_token})
+
         def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/repo":
+                try:
+                    self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 1024))
+                    return self._repo()
+                except (ValueError, OSError):
+                    return self._reply(HTTPStatus.BAD_REQUEST, {"error": "requête invalide"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if self.path != "/sync" or not 0 < length <= MAX_BODY:
@@ -219,8 +235,19 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="lister les joueurs autorisés et leur dernier passage")
     parser.add_argument("--server", metavar="NOM", help="nom du serveur de jeu partagé (les autres sont refusés)")
     parser.add_argument("--purge", metavar="PSEUDO", help="retirer du hub tout ce que ce joueur a envoyé")
+    parser.add_argument("--repo-token", action="store_true", help="enregistrer le jeton GitHub en lecture seule (demandé au clavier)")
     args = parser.parse_args()
 
+    if args.repo_token:
+        import getpass
+
+        token = getpass.getpass("Jeton GitHub en lecture seule (rien ne s'affiche pendant la saisie) : ").strip()
+        if token and not repo.TOKEN.match(token):
+            print("Ce n'est pas un jeton GitHub (ghp_… ou github_pat_…).")
+            return 1
+        config.save(dataclasses.replace(config.load(), share_repo_token=token))
+        print("Jeton enregistré : les joueurs le recevront à leur prochaine mise à jour." if token else "Jeton retiré.")
+        return 0
     if args.server is not None:
         config.save(dataclasses.replace(config.load(), server_name=args.server.strip()))
         print(f"Serveur de jeu partagé : {args.server.strip() or '(tous)'}")
@@ -237,6 +264,10 @@ def main() -> int:
         _edit_members(lambda members: members.update({pseudo: token}))
         print(f"Joueur ajouté : {pseudo}")
         print(f"Son jeton (à lui envoyer en privé, il ne sera plus affiché) : {token}")
+        repo_token = config.load().share_repo_token
+        if repo_token:
+            print("Le dépôt est privé : pour l'installation, il remplace la commande « git clone » du guide par :")
+            print(f"  {repo.clone_line(repo_token)}")
         return 0
     if args.remove:
         if args.remove not in config.load().share_members:

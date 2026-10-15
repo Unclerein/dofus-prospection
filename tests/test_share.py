@@ -159,7 +159,8 @@ def test_a_shared_keymap_only_fills_what_is_missing_on_the_same_build(tmp_path):
 @pytest.fixture
 def hub_url(tmp_path):
     path = tmp_path / "hub.toml"
-    host = config.from_values({**BASE, "share_members": {"alice": "jeton-alice-0123456789", "bob": "jeton-bob-0123456789xx"}})
+    host = config.from_values({**BASE, "share_members": {"alice": "jeton-alice-0123456789", "bob": "jeton-bob-0123456789xx"},
+                               "share_repo_token": "github_pat_lecture_seule_0123456789"})  # fmt: skip
     config.save(host, path)
     server = serve(0, Hub(":memory:"), path)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -229,3 +230,43 @@ def test_changing_token_resends_everything(hub_url):
     # Nouveau jeton : tout est proposé de nouveau au hub, qui ne garde que ce qu'il n'avait pas.
     assert client.sync_once(conn, member(hub_url, "jeton-alice-0123456789")) == {"sent": 1, "received": 4}
     assert client.get_state(conn)["push_mark"] != "0"
+
+
+# --- accès au dépôt privé, donné par le hub ------------------------------------------
+
+
+def test_hub_gives_the_repo_token_to_members_only(hub_url):
+    from dofustool.share import repo
+
+    assert repo.ask_hub(hub_url, "jeton-alice-0123456789") == "github_pat_lecture_seule_0123456789"
+    assert repo.ask_hub(hub_url, "mauvais-jeton-0123456789") is None
+    assert repo.ask_hub("http://127.0.0.1:9", "jeton-alice-0123456789") is None  # hub injoignable
+
+
+def test_repo_access_is_only_touched_when_the_repo_does_not_answer():
+    from dofustool.share import repo
+
+    urls = []
+    state = {"ok": True}
+    check = lambda: state["ok"]  # noqa: E731
+    ask = lambda url, token: "github_pat_nouveau_0123456789" if token == "bon" else None  # noqa: E731
+
+    def set_url(url):
+        urls.append(url)
+        state["ok"] = True
+
+    assert repo.refresh("https://hub", "bon", check, ask, set_url) == "" and urls == []  # dépôt public ou PC déjà identifié
+    state["ok"] = False
+    assert "rétabli" in repo.refresh("https://hub", "bon", check, ask, set_url)
+    assert urls == ["https://x-access-token:github_pat_nouveau_0123456789@github.com/Unclerein/dofus-prospection.git"]
+    state["ok"] = False
+    assert "pas donné" in repo.refresh("https://hub", "mauvais", check, ask, set_url)
+    assert "partage n'est pas configuré" in repo.refresh("", "", check, ask, set_url)
+    assert repo.clone_line("github_pat_x").startswith("git clone https://x-access-token:github_pat_x@github.com/")
+    assert repo.TOKEN.match("github_pat_11ABCDEFG0123456789_abcdefghijklmnop") and not repo.TOKEN.match("mot de passe")
+
+
+def test_repo_token_survives_a_settings_round_trip(tmp_path):
+    cfg = config.from_values({**BASE, "share_repo_token": "github_pat_lecture_seule_0123456789"})
+    config.save(cfg, tmp_path / "c.toml")
+    assert config.load(tmp_path / "c.toml").share_repo_token == "github_pat_lecture_seule_0123456789"

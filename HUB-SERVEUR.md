@@ -149,6 +149,33 @@ sont conservés.
 **Changer de serveur** : installer le hub sur le nouveau, recréer les jetons, puis chaque joueur
 change l'adresse dans Config. Chaque appli renvoie d'elle-même ses relevés récents.
 
+## Dépôt GitHub privé
+
+Les mises à jour automatiques font un `git pull` sur GitHub. Si le dépôt est privé, le hub donne
+lui-même l'accès aux joueurs qu'il connaît : rien à faire de leur côté.
+
+1. **Mettre le hub à jour** (étapes 3 et 4) avec une version qui connaît `--repo-token`.
+2. **Créer le jeton sur GitHub** : *Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token*. Accès au seul dépôt `dofus-prospection`, permission
+   **Contents : Read-only**, rien d'autre. Choisir la durée la plus longue proposée.
+3. **Le donner au hub** : `prospection-hub --repo-token`, puis coller le jeton (rien ne s'affiche
+   pendant la saisie).
+4. **Passer le dépôt en privé** sur GitHub.
+
+À la mise à jour suivante, chaque appli voit que le dépôt ne répond plus, demande l'accès au hub avec
+son jeton de partage, l'inscrit, et la mise à jour passe. Le PC du propriétaire, déjà identifié sur
+GitHub, n'est pas touché.
+
+| Besoin | Que faire |
+|---|---|
+| Ajouter un joueur | `prospection-hub --add SonPseudo` affiche aussi la ligne `git clone` à lui donner pour l'installation |
+| Renouveler le jeton GitHub (expiré, ou un joueur retiré) | en créer un nouveau, `prospection-hub --repo-token`, puis révoquer l'ancien : les applis prennent le nouveau d'elles-mêmes |
+| Ne plus donner d'accès | `prospection-hub --repo-token`, puis Entrée sans rien coller |
+
+Le jeton GitHub finit dans le dossier de Prospection de chaque joueur (dans `.git\config`). Il ne
+permet que de lire le code. Un joueur retiré du hub garde celui qu'il a déjà : le renouveler si
+besoin.
+
 ## En cas de problème
 
 | Ce qui se passe | Quoi faire |

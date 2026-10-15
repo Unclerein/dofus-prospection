@@ -36,6 +36,7 @@ class Config:
     share_host: bool = False  # ce PC héberge le hub
     share_port: int = 8610
     share_members: dict[str, str] = field(default_factory=dict)  # pseudo -> jeton, côté hub
+    share_repo_token: str = ""  # côté hub : jeton GitHub en lecture seule, donné aux joueurs si le dépôt est privé
     onboarded: bool = False  # le tutoriel de premier démarrage a été vu
 
 
@@ -72,6 +73,7 @@ def _from_raw(raw: dict) -> Config:
         share_host=bool(share.get("host", False)),
         share_port=int(share.get("port", defaults.share_port)),
         share_members={str(k): str(v) for k, v in share.get("members", {}).items()},
+        share_repo_token=str(share.get("repo_token", "")),
         onboarded=bool(raw.get("app", {}).get("onboarded", False)),
     )
 
@@ -152,6 +154,7 @@ def from_values(values: dict) -> Config:
         share_host=bool(values.get("share_host", False)),
         share_port=_number({"v": values.get("share_port", 8610)}, "v", "Port du hub", 1024, 65535, integer=True),
         share_members=members,
+        share_repo_token=str(values.get("share_repo_token", "")),
         onboarded=bool(values.get("onboarded", False)),
     )
 
@@ -232,6 +235,8 @@ token = {_quoted(cfg.share_token)}
 # Ce PC héberge le hub : il écoute sur ce port, joignable depuis les autres PC.
 host = {"true" if cfg.share_host else "false"}
 port = {cfg.share_port}
+# Côté hub : jeton GitHub en lecture seule, donné aux joueurs pour les mises à jour si le dépôt est privé.
+repo_token = {_quoted(cfg.share_repo_token)}
 
 [share.members]
 # Côté hub : un jeton par ami autorisé (pseudo = jeton).

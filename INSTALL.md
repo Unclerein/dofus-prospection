@@ -30,6 +30,9 @@ Fermer ensuite PowerShell et en rouvrir un, pour que Git et Python soient reconn
 git clone https://github.com/Unclerein/dofus-prospection.git C:\prospection
 ```
 
+Si cette commande répond que le dépôt est introuvable, il est privé : utiliser à la place la ligne
+`git clone …` envoyée par la personne qui gère le hub, telle quelle.
+
 ## 3. Lancer l'installation
 
 ```powershell
