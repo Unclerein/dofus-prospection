@@ -88,7 +88,12 @@ function statIcon(asset) {
 
 // Ligne de tableau qui mène à une page. Clic : on y va ; clic molette, Ctrl+clic ou Cmd+clic : nouvel onglet.
 const FOCUS_KEY = 'dofustool.forgeFocus';
-const rowLink = (hash, before) => ({ class: 'link', 'data-href': hash, onclick: () => { if (before) before(); location.hash = hash; } });
+const rowLink = (hash, before) => ({ class: 'link', 'data-href': hash, onclick: (event) => {
+  // Ctrl, Cmd ou Maj : le navigateur ouvre déjà un onglet ou une fenêtre (sur le nom de l'objet), la page ne bouge pas.
+  if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (before) before();
+  location.hash = hash;
+} });
 const openTab = (hash) => window.open(location.origin + location.pathname + hash, '_blank', 'noopener');
 // Pas sur un bouton, un lien ou un champ de la ligne : ceux-là gardent leur propre clic.
 const rowTarget = (event) => !event.target.closest('button, a, input, select, label') && event.target.closest('tr[data-href]');
