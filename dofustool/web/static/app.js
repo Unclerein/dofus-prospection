@@ -97,6 +97,8 @@ const rowLink = (hash, before) => ({ class: 'link', 'data-href': hash, onclick: 
 const openTab = (hash) => window.open(location.origin + location.pathname + hash, '_blank', 'noopener');
 // Pas sur un bouton, un lien ou un champ de la ligne : ceux-là gardent leur propre clic.
 const rowTarget = (event) => !event.target.closest('button, a, input, select, label') && event.target.closest('tr[data-href]');
+// Clic molette : le nom de l'objet suit le même chemin que le reste de la ligne, le navigateur n'y ouvrant pas toujours l'onglet.
+const middleTarget = (event) => !event.target.closest('button, input, select, label, a:not(.name)') && event.target.closest('tr[data-href]');
 document.addEventListener('click', (event) => {
   const row = (event.ctrlKey || event.metaKey) && rowTarget(event);
   if (!row) return;
@@ -104,7 +106,7 @@ document.addEventListener('click', (event) => {
   event.stopPropagation();
   openTab(row.dataset.href);
 }, true);
-document.addEventListener('mousedown', (event) => { if (event.button === 1 && rowTarget(event)) event.preventDefault(); }, true);  // pas de défilement automatique
+document.addEventListener('mousedown', (event) => { if (event.button === 1 && middleTarget(event)) event.preventDefault(); }, true);  // pas de défilement automatique
 // Le nom de l'objet devient un vrai lien : là, le navigateur ouvre l'onglet lui-même, en arrière-plan,
 // et propose « Ouvrir dans un nouvel onglet » au clic droit. Ailleurs sur la ligne, l'ouverture passe par openTab.
 const linkNames = (root) => root.querySelectorAll('tr[data-href] .item-cell .name:not(a)').forEach((name) => {
@@ -116,7 +118,7 @@ const linkNames = (root) => root.querySelectorAll('tr[data-href] .item-cell .nam
 });
 new MutationObserver(() => linkNames(document)).observe(document.body, { childList: true, subtree: true });
 document.addEventListener('auxclick', (event) => {
-  const row = event.button === 1 && rowTarget(event);
+  const row = event.button === 1 && middleTarget(event);
   if (!row) return;
   event.preventDefault();
   openTab(row.dataset.href);
