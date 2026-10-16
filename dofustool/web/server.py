@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import re
+import socket
 import urllib.error
 import urllib.request
 from http import HTTPStatus
@@ -287,6 +288,21 @@ def serve(port: int = DEFAULT_PORT, db_path: Path | str = db.MARKET_PATH) -> Thr
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
     server.api = api  # pour la préparation en arrière-plan (warm)
     return server
+
+
+class _LocalIPv6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def serve_ipv6(api: Api, port: int) -> ThreadingHTTPServer | None:
+    """La même interface sur l'adresse IPv6 de ce PC (::1), toujours inaccessible depuis le réseau.
+
+    Windows essaie « localhost » d'abord en IPv6 : sans cette écoute, chaque demande du navigateur attendait
+    deux secondes avant de se rabattre sur l'IPv4. None si l'IPv6 n'est pas disponible."""
+    try:
+        return _LocalIPv6Server(("::1", port), make_handler(api))
+    except OSError:
+        return None
 
 
 def warm(api: Api) -> None:
