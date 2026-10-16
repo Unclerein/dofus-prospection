@@ -119,3 +119,17 @@ def test_the_workshop_banner_picks_the_mission_that_suits_the_placed_item(tmp_pa
     placed.write_text(json.dumps({"placed": 1200.0, "item_id": 99, "effects": []}), encoding="utf-8")
     assert board.mission(1201.0)["id"] == "orbes"
     assert collecte.pick(missions, {}) == missions[0]  # sans rien savoir de l'objet : la mission du moment
+
+
+def test_a_pass_whose_sheets_are_missing_waits_instead_of_counting_as_an_exo():
+    from dofustool.staticdata import effects as base_effects
+
+    conn = forge([(0.0, 40, 1)])
+    conn.execute("DELETE FROM item_effects WHERE item_id = 20")  # la fiche de la rune n'est pas encore arrivée
+    state = collecte.compute(conn, DENSITY)
+    assert state.rows[0].line_kind == "?" and collecte.cells_of(state.rows[0]) == []
+    assert sum(sum(b.counts.values()) for b in state.blocks) == 0
+    # L'objet et la rune du passage sont à demander à DofusDB, comme les objets vus à l'HDV.
+    assert base_effects.forged_items(conn) == [10, 20]
+    conn.execute("INSERT INTO item_effects_fetched VALUES (10, 0)")
+    assert base_effects.forged_items(conn) == [20]

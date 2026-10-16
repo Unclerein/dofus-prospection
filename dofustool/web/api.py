@@ -169,7 +169,7 @@ class Api:
                 base_effects.mark_refreshed(conn)
             except Exception as exc:  # DofusDB injoignable : retenté au prochain passage
                 log.warning("Conteneurs de ressources non lus : %s", exc)
-        missing = set(base_effects.missing_items(conn))
+        missing = set(base_effects.missing_items(conn)) | set(base_effects.forged_items(conn))
         done = refreshed = 0
         for item_id in base_effects.pending_items(conn, now):
             if not self.ensure_template(conn, item_id, refresh=item_id not in missing):
@@ -1794,8 +1794,11 @@ class Api:
     # --- collecte de forgemagie -------------------------------------------------
 
     def _collecte_state(self, conn: sqlite3.Connection) -> tuple[collecte.State, list]:
-        """Le calcul de la collecte, refait seulement quand un passage arrive (le sien ou celui d'un autre)."""
-        signature = share_client.score_signature(conn) + ":" + str(int(time.time() // 3600))
+        """Le calcul de la collecte, refait seulement quand un passage arrive (le sien ou celui d'un autre) ou une fiche d'objet."""
+        if base_effects.forged_items(conn):
+            self.fetch_missing_templates()  # en arrière-plan : les passages sans fiche restent de côté en attendant
+        fetched = conn.execute("SELECT COUNT(*) FROM item_effects_fetched").fetchone()[0]
+        signature = share_client.score_signature(conn) + f":{fetched}:" + str(int(time.time() // 3600))
         with self._lock:
             if self._collecte is None or self._collecte[0] != signature:
                 state = collecte.compute(conn, self.densities())

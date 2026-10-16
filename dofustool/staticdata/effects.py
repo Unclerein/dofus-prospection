@@ -156,7 +156,7 @@ def contradicted_items(conn: sqlite3.Connection, now: float) -> list[int]:
 def pending_items(conn: sqlite3.Connection, now: float, all_equipment: bool = False) -> list[int]:
     """Tout ce qu'il faut demander à DofusDB : fiches manquantes, puis contredites, puis périmées."""
     out: dict[int, None] = {}
-    for item_id in (*missing_items(conn, all_equipment), *contradicted_items(conn, now), *stale_items(conn, all_equipment)):
+    for item_id in (*forged_items(conn), *missing_items(conn, all_equipment), *contradicted_items(conn, now), *stale_items(conn, all_equipment)):
         out.setdefault(item_id)
     return list(out)
 
@@ -168,6 +168,19 @@ def missing_items(conn: sqlite3.Connection, all_equipment: bool = False) -> list
         for row in conn.execute(
             "SELECT i.id FROM items i WHERE i.category_id = 0 AND i.exchangeable "
             f"AND i.id NOT IN (SELECT item_id FROM item_effects_fetched) {scope} ORDER BY i.id"
+        )
+    ]
+
+
+def forged_items(conn: sqlite3.Connection) -> list[int]:
+    """Objets et runes des passages de forgemagie (les siens et ceux reçus du groupe) dont la fiche manque :
+    sans elle, on ne sait ni le max des lignes ni ce qu'ajoute la rune."""
+    return [
+        row[0]
+        for row in conn.execute(
+            "SELECT id FROM (SELECT item_id AS id FROM fm_passes UNION SELECT rune_id FROM fm_passes "
+            "UNION SELECT item_id FROM shared_fm_passes UNION SELECT rune_id FROM shared_fm_passes) "
+            "WHERE id NOT IN (SELECT item_id FROM item_effects_fetched) AND id IN (SELECT id FROM items) ORDER BY id"
         )
     ]
 

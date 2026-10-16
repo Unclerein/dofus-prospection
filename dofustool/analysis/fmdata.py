@@ -52,7 +52,7 @@ class Pass:
     line_after: int
     line_min: int | None  # bornes de base de la ligne ; None : la ligne n'existe pas de base (exo)
     line_max: int | None
-    line_kind: str  # « exo », « over » (au-delà du max), « max », « haut » (80 à 100 % du max), « bas »
+    line_kind: str  # « exo », « over » (au-delà du max), « max », « haut » (80 à 100 % du max), « bas » ; « ? » sans fiche
     line_weight_before: float  # poids de la ligne visée avant le passage
     item_weight_before: float  # poids de toutes les lignes positives avant le passage
     item_weight_max: float  # poids des lignes de base à leur jet max
@@ -143,7 +143,7 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
             ts=ts, source=source, object=obj, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
             rune_effect=rune_effect, rune_value=rune_value,
             rune_weight=round(rune_value * density.get(rune_effect, 0.0), 3) if rune_effect is not None and rune_value is not None else None,
-            line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high),
+            line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high) if rune_effect is not None and base else "?",
             line_weight_before=round(line_before * density.get(rune_effect, 0.0), 3) if rune_effect is not None else 0.0,
             item_weight_before=round(weight_of(before, density), 3),
             item_weight_max=round(sum(h * density.get(e, 0.0) for e, (_, h) in base.items() if h > 0), 3),
