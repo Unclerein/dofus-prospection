@@ -69,6 +69,7 @@ class Pass:
     line_max_weight: float | None = None  # poids de la ligne visée à son max de base ; None pour un exo
     exo_lost: int = 0  # une ligne exo (autre que la visée) a perdu des points
     has_exo: int = 0  # l'objet portait un exo (autre que la ligne visée) avant le passage
+    rune_tier: str = ""  # taille de la rune : « simple », « Pa » ou « Ra »
     character_id: int | None = None  # personnage, pour les passages captés sur ce PC
 
 
@@ -78,6 +79,12 @@ def densities(path: Path = STATIC_PATH) -> dict[int, float]:
         return {row[0]: float(row[1]) for row in source.execute("SELECT id, effectPowerRate FROM EffectData") if row[1]}
     finally:
         source.close()
+
+
+def rune_tier(name: str) -> str:
+    """Taille d'une rune d'après son nom : « Rune Pa Fo » est une Pa, « Rune Ra Fo » une Ra, « Rune Fo » une simple."""
+    words = name.split()
+    return words[1] if len(words) > 2 and words[0] == "Rune" and words[1] in ("Pa", "Ra") else "simple"
 
 
 def line_kind(value: int, low: int | None, high: int | None) -> str:
@@ -109,6 +116,7 @@ def extra_weight(effects: dict[int, int], base: dict[int, tuple[int, int]], dens
 
 def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
     items = {row[0]: (row[1], row[2] or "") for row in market.execute("SELECT id, level, type_name FROM items")}
+    tiers = {row[0]: rune_tier(row[1]) for row in market.execute("SELECT id, name FROM items WHERE type_name = 'Rune de forgemagie'")}
     templates: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
     for item_id, effect, low, high in market.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         templates[item_id][effect] = (low, high)
@@ -145,8 +153,8 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
             rune = templates.get(rune_id, {})
             effect, (value, _) = next(iter(rune.items())) if len(rune) == 1 else (None, (None, None))
             weight = round(value * density.get(effect, 0.0), 3) if effect is not None and value is not None else None
-            per_rune[rune_id] = (effect, value, weight, density.get(effect, 0.0) if effect is not None else 0.0)
-        rune_effect, rune_value, rune_weight, unit = per_rune[rune_id]
+            per_rune[rune_id] = (effect, value, weight, density.get(effect, 0.0) if effect is not None else 0.0, tiers.get(rune_id, ""))
+        rune_effect, rune_value, rune_weight, unit, tier = per_rune[rune_id]
         if item_id not in per_item:
             base = templates.get(item_id, {})
             level, type_name = items.get(item_id, (None, ""))
@@ -169,7 +177,7 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
             extra_before=round(extra_weight(before, base, density), 3), extra_after=round(extra_weight(after, base, density), 3),
             line_max_weight=round(high * unit, 3) if high else None,
             exo_lost=int(any(e not in base for e in lost)) if lost else 0, character_id=character,
-            has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())),
+            has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())), rune_tier=tier,
         ))  # fmt: skip
     return out
 

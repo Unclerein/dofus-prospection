@@ -204,6 +204,11 @@ MISSIONS = [
     Mission("over-charge", "Premier over, objet chargé", "50 premiers overs (ligne au max) sur un objet qui porte déjà entre 8 et 25 de poids over/exo ailleurs.",
             50, 400, "rang-over", lambda r: "" if over_rank(r) == 1 and LOADED <= other_extra(r) < 25 else None, lambda it: it.weight < 400,
             lambda c: c == "r|1|chargé", "Par exemple : un objet avec un exo ou un over déjà passé, et une autre ligne montée à son max ; on tente l'over sur celle-ci."),
+    Mission("petite-grosse", "Petite contre grosse", "300 runes simples et 300 runes Ra sur des lignes déjà à 80 % de leur max ou plus.",
+            300, 400, "taille-rune",
+            lambda r: (r.rune_tier if r.rune_tier in ("simple", "Ra") and not _extra(r) and r.line_max and r.line_before >= 0.8 * r.line_max else None),
+            lambda it: it.weight < 400, lambda c: c.startswith("n|80–100 %"),
+            "Le plus parlant : sur le même objet et la même ligne, alterner une rune simple et sa Ra (Fo et Ra Fo, Ine et Ra Ine…).", ("simple", "Ra")),
     Mission("duel-crit", "Le duel des critiques", "50 tentatives d'over en % critique sur un objet à 4 % max, et 50 sur un objet à 7 % max.", 50, 500, "petit-max",
             lambda r: (f"{r.line_max} %" if r.rune_effect == CRIT and r.line_kind == "over" and r.line_max in (4, 7) else None),
             lambda it: it.crit in (4, 7), lambda c: c.startswith("o|over|"),
@@ -465,6 +470,36 @@ def judge_over_rank(ctx):
     return "refute", text + " Un 1er over sur un objet chargé passe aussi mal qu'un 2e over : c'est le poids déjà porté qui compte, pas le rang.", a[1] + b[1] + c[1], 0.6
 
 
+TIER_BANDS = ((0.8, 0.95, "arrivée entre 80 et 95 %"), (0.95, 1.05, "arrivée entre 95 et 105 %"))
+
+
+def judge_rune_size(ctx):
+    """Réussite des runes simples, Pa et Ra, à hauteur égale de la ligne après la rune."""
+    rates: dict = {}
+    for low, high, label in TIER_BANDS:
+        for tier in ("simple", "Pa", "Ra"):
+            rows = [r for r in ctx.rows if r.rune_tier == tier and not _extra(r) and r.line_max and r.rune_value
+                    and low <= (r.line_before + r.rune_value) / r.line_max < high]  # fmt: skip
+            rates[(label, tier)] = (sum(r.outcome != "ec" for r in rows), len(rows))
+    show = lambda x: f"{pct(x[0] / x[1])} ({x[1]})" if x[1] else "— (0)"  # noqa: E731
+    text = " ; ".join(f"{label} : simple {show(rates[(label, 'simple')])}, Pa {show(rates[(label, 'Pa')])}, Ra {show(rates[(label, 'Ra')])}" for _, _, label in TIER_BANDS) + "."
+    gaps, cases = [], 0
+    for _, _, label in TIER_BANDS:
+        small = rates[(label, "simple")]
+        for tier in ("Pa", "Ra"):
+            big = rates[(label, tier)]
+            cases += big[1]
+            if min(small[1], big[1]) >= 200:
+                gaps.append(gap(small, big))
+    if len(gaps) < 4:
+        return "verifier", text + " Il faut au moins 200 runes de chaque taille dans chaque tranche.", cases, 0.3
+    if all(z >= 2 for z in gaps):
+        return "probable", text, cases, min(1.0, min(gaps) / 4)
+    if all(abs(z) < 2 for z in gaps):
+        return "refute", text + " À hauteur égale de la ligne, la taille de la rune ne change rien : seule compte la hauteur où elle arrive.", cases, 0.7
+    return "verifier", text + " Résultats partagés selon la taille : à creuser.", cases, 0.4
+
+
 def judge_item_weight(ctx):
     normal = [r for r in ctx.rows if not _extra(r) and r.item_weight_max]
     light = [r for r in normal if r.item_weight_before / r.item_weight_max < 0.6]
@@ -523,6 +558,8 @@ RULES = [
          "Communauté", judge_beyond_25, "au-dela-25"),
     Rule("neutre-50", "La part de neutres ne dépend pas de la ligne", "Sur une ligne normale, la part des succès qui coûtent quelque chose (lignes ou puits) est la même, ligne basse ou presque au max.",
          "Mesuré sur nos passages", judge_neutral, "lignes-basses"),
+    Rule("taille-rune", "Les grosses runes passent moins bien", "À hauteur égale de la ligne après la rune, une Pa ou une Ra passe moins souvent qu'une rune simple. "
+         "Sinon, c'est seulement que la grosse rune pousse la ligne plus haut.", "Théorie à vérifier", judge_rune_size, "petite-grosse"),
     Rule("rang-over", "Chaque over de plus sur la même ligne est plus dur", "Le 2e point au-delà du max d'une ligne passe bien moins souvent que le 1er, sur un objet sous 25 de poids over/exo.",
          "Théorie à vérifier", judge_over_rank, "over-charge"),
     Rule("puits-aide", "Le puits aide over et exo", "Une tentative d'over ou d'exo passe plus souvent quand l'objet a assez de puits pour la payer.", "Théorie à vérifier", judge_pool_helps, "exo-sec"),

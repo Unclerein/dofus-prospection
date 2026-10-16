@@ -133,3 +133,10 @@ def test_a_pass_whose_sheets_are_missing_waits_instead_of_counting_as_an_exo():
     assert base_effects.forged_items(conn) == [10, 20]
     conn.execute("INSERT INTO item_effects_fetched VALUES (10, 0)")
     assert base_effects.forged_items(conn) == [20]
+
+
+def test_rune_size_is_read_from_its_name():
+    from dofustool.analysis import fmdata
+
+    assert [fmdata.rune_tier(n) for n in ("Rune Fo", "Rune Pa Fo", "Rune Ra Fo", "Rune Pa Ré Pme", "Rune Ré Per Air", "Rune Pa")] == [
+        "simple", "Pa", "Ra", "Pa", "simple", "simple"]
