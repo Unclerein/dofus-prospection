@@ -661,3 +661,5 @@ table.mage-steps td.act { width: 88px; }
 .collect-items td.l:first-child { white-space: normal; min-width: 200px; }
 .collect-items td.l:last-child { white-space: normal; }
 .collect-items td, .collect-items th { padding-left: 10px; padding-right: 10px; }
+.mission-winners { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mission-winners .tag.mine { margin-left: 0; }

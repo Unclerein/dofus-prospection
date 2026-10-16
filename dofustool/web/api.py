@@ -1862,6 +1862,14 @@ class Api:
             icons = dict(conn.execute("SELECT item_id, icon_id FROM item_icons"))
             names = dict(conn.execute("SELECT id, name FROM items"))
             cfg = config.load(self.config_path)
+            # Qui a réussi chaque mission, dans l'ordre : soi, et les autres d'après leur score reçu par le hub.
+            mine = cfg.share_pseudo or "moi"
+            winners: dict[str, list[dict]] = {}
+            for mission_id, (at, _) in state.done.items():
+                winners.setdefault(mission_id, []).append({"pseudo": mine, "character": collecte.main_character(conn), "at": at, "me": True})
+            for pseudo, character, raw in conn.execute("SELECT pseudo, character, missions FROM shared_fm_scores"):
+                for mission_id, at in json.loads(raw):
+                    winners.setdefault(mission_id, []).append({"pseudo": pseudo, "character": character, "at": at, "me": False})
             missions = []
             for entry in state.missions:
                 mission = entry["mission"]
@@ -1871,6 +1879,7 @@ class Api:
                     "id": mission.id, "title": mission.title, "text": mission.text, "target": mission.target, "bonus": mission.bonus,
                     "parts": entry["parts"], "worth": entry["worth"], "hint": mission.hint, "rule": mission.rule,
                     "done_at": done[0] if done else None, "items": [self._collecte_item(it, icons, mission.id) for it in fitting[:5]], "total": len(fitting),
+                    "winners": sorted(winners.get(mission.id, []), key=lambda w: w["at"]),
                 })  # fmt: skip
             me = {
                 "pseudo": cfg.share_pseudo or "moi", "character": collecte.main_character(conn), "points": state.points,

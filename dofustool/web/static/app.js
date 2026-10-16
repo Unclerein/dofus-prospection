@@ -1473,6 +1473,8 @@ async function missionCard(m, ui) {
       h('div', { class: 'mission-reward' }, done ? h('span', { class: 'tag good' }, `Réussie le ${when(m.done_at, false)}`) : h('span', { class: 'tag mine' }, `+${fmt(m.bonus)} pts`),
         h('div', { class: 'muted small', title: 'Points que rapporte en ce moment un passage qui fait avancer cette mission : plus les cases visées sont vides, plus c’est haut.' }, `≈ ${String(m.worth).replace('.', ',')} pts par passage`))),
     h('div', { class: 'mission-parts' }, parts),
+    m.winners.length > 0 && h('div', { class: 'mission-winners small' }, h('span', { class: 'muted' }, 'Réussie par'),
+      m.winners.map((w) => h('span', { class: 'tag ' + (w.me ? 'mine' : 'good'), title: `${w.character ? w.character + ' · ' : ''}le ${when(w.at)}` }, w.pseudo))),
     m.hint && h('p', { class: 'note small' }, m.hint),
     m.items.length ? (open ? await collecteMissionList(m, ui) : collecteItems(m.items, m)) : h('p', { class: 'muted small' }, 'Aucun objet adapté avec un prix connu pour l’instant.'),
     m.total > 5 && h('div', { class: 'mission-foot' }, toggle));
