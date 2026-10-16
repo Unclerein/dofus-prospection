@@ -1552,6 +1552,13 @@ async function forgeCollecte() {
   return [hero, kpis, blocks, missions, rules, board];
 }
 
+/** Les exos les plus recherchés d'abord (PA, PM, PO, invocation), puis les autres du plus au moins vu à l'HDV. */
+const TOP_EXOS = ['PA', 'PM', 'Portée (PO)', 'Invocation (invo)'];
+function sortExos(exos) {
+  const rank = (x) => { const i = TOP_EXOS.indexOf(x.name); return i < 0 ? TOP_EXOS.length : i; };
+  return [...exos].sort((a, b) => rank(a) - rank(b) || b.count - a.count);
+}
+
 // ---------------------------------------------------------------- page Forgemagie
 
 async function pageForge(r) {
@@ -1813,7 +1820,7 @@ async function forgeItem(id, options) {
       h('div', { class: 'field' }, h('label', { for: 'exo-pick' }, 'Exo'),
         h('select', { id: 'exo-pick', class: f.exo ? 'exo-set' : '', onchange: (e) => change((x) => { x.exo = e.target.value === '' ? null : Number(e.target.value); }) },
           h('option', { value: '', selected: f.exo === null }, 'Peu importe'), h('option', { value: 0, selected: f.exo === 0 }, 'Aucun exo'),
-          d.exos.map((x) => h('option', { value: x.id, selected: f.exo === x.id }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
+          sortExos(d.exos).map((x) => h('option', { value: x.id, selected: f.exo === x.id }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
       h('div', { class: 'field' }, h('label', { for: 'exo-min', style: 'text-align: right' }, 'Minimum'),
         h('input', { id: 'exo-min', type: 'number', min: 1, value: f.exo_min, disabled: !f.exo, class: f.exo ? 'exo-set' : '', onchange: (e) => change((x) => { x.exo_min = Math.max(1, Number(e.target.value) || 1); }) }))),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Rune de transcendance'),
@@ -1988,7 +1995,7 @@ async function forgeRanking() {
       segmented('Amélioration comparée', [['exo', 'Un exo'], ['over', 'Un over'], ['saved', 'Mes critères par objet']], ui.criterion, (criterion) => set({ criterion }))),
     ui.criterion === 'exo' && h('div', { class: 'field', style: 'flex: 0 1 280px' }, h('label', { for: 'rank-exo' }, 'Exo'),
       h('select', { id: 'rank-exo', class: 'exo-set', onchange: (e) => set({ exo: Number(e.target.value) }) },
-        first.exos.map((x) => h('option', { value: x.id, selected: x.id === ui.exo }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
+        sortExos(first.exos).map((x) => h('option', { value: x.id, selected: x.id === ui.exo }, `${x.name} · ${x.count} annonce${x.count > 1 ? 's' : ''}`)))),
     ui.criterion === 'exo' && h('div', { class: 'field', style: 'flex: 0 1 130px' }, h('label', { for: 'rank-exo-value' }, 'Valeur'),
       h('input', { id: 'rank-exo-value', type: 'number', min: 1, placeholder: 'toutes', value: ui.exoValue || '', class: ui.exoValue ? 'set' : '',
         onchange: (e) => set({ exoValue: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : null }) })),
