@@ -18,6 +18,8 @@ log = logging.getLogger("dofustool.share")
 
 SYNC_EVERY_S = 60.0
 CHUNK = 300
+# Monte quand le client apprend à lire un nouveau type d'enregistrement (2 : passages et scores de forgemagie).
+PULL_VERSION = 2
 TIMEOUT_S = 30
 
 
@@ -72,6 +74,11 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         state = {}
         set_state(conn, hub=identity, cursor=0, push_mark=0)
         forget_fm_sent(conn)
+    if state.get("pull_version") != str(PULL_VERSION):
+        # Version qui sait lire des enregistrements de plus : ceux que l'ancienne a reçus sans les comprendre
+        # (et donc ignorés) sont toujours sur le hub ; on relit tout depuis le début, une fois.
+        state["cursor"] = "0"
+        set_state(conn, cursor=0, pull_version=PULL_VERSION)
     cursor = int(state.get("cursor", 0))
     started = time.time()
     records = collect(conn, float(state.get("push_mark", 0)), keymap_path)

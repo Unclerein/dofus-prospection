@@ -357,3 +357,15 @@ def test_the_collect_score_is_filed_under_its_author_and_reaches_the_others(hub_
     assert share.validate(record)
     for change in ({"character": "<b>"}, {"character": "a" * 40}, {"points": -1}, {"missions": [["DROP TABLE", NOW]]}, {"pseudo": "x"}):
         assert not share.validate({**record, "data": {**record["data"], **change}})
+
+
+def test_a_client_that_learns_new_records_reads_the_hub_again_from_the_start(hub_url):
+    """Un PC resté sur une ancienne version a reçu des passages de forgemagie sans les comprendre : il les relit une fois à jour."""
+    alice, bob = forge_db(), db.connect(":memory:")
+    client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))
+    client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))
+    bob.execute("DELETE FROM shared_fm_passes")  # comme s'il les avait ignorés…
+    client.set_state(bob, pull_version=1)  # … avec une version d'avant
+    client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))
+    assert bob.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
+    assert client.get_state(bob)["pull_version"] == str(client.PULL_VERSION)
