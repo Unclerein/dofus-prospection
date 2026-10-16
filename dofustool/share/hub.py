@@ -2,7 +2,8 @@
 
 Deux points d'entrée, protégés par un jeton par joueur : POST /sync pour les relevés, et POST /repo
 qui donne l'accès au dépôt du code quand il est privé (voir share/repo.py). Le hub ne garde que le dernier
-enregistrement de chaque objet (data/hub.sqlite) et ne connaît rien de personnel.
+enregistrement de chaque objet (data/hub.sqlite), sauf les passages de forgemagie qu'il garde tous, et
+ne connaît rien de personnel.
 
 Usage : lancé par « python -m dofustool.web » quand host_hub est activé dans la configuration.
 """
@@ -27,6 +28,7 @@ MAX_BODY = 16 * 1024 * 1024
 MAX_RECORDS = 2000
 PULL_BYTES = 3 * 1024 * 1024
 # Au-delà, un enregistrement n'est plus distribué : chaque joueur garde son propre historique.
+# Les passages de forgemagie n'y sont pas : ils restent tous, un nouveau venu les reçoit aussi.
 KEEP_S = {"hdv": 3 * 86400.0, "prices": 3 * 86400.0, "market": 60 * 86400.0, "keymap": 60 * 86400.0}
 
 _SCHEMA = """

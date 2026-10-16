@@ -11,6 +11,9 @@ forgemagie entrent : potions, éclats, orbes et transcendances ne ratent jamais.
 Un succès est neutre dès que l'objet a payé quelque chose, avec ses lignes ou avec son puits ;
 critique seulement s'il n'a rien payé.
 
+Les passages des autres joueurs, reçus par le hub (table shared_fm_passes), entrent aussi : la colonne
+source dit d'où vient chaque ligne, et l'exemplaire n'y est qu'une empreinte.
+
 Le fichier écrit (data/fm_dataset.csv) reste sur ce PC : il décrit les objets du joueur.
 
 Usage : python -m dofustool.analysis.fmdata [--out data/fm_dataset.csv]
@@ -25,6 +28,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .. import db
+from ..share import fm_key, object_token
 
 STATIC_PATH = db.MARKET_PATH.parent / "static" / "dofus.sqlite"
 OUT_PATH = db.MARKET_PATH.parent / "fm_dataset.csv"
@@ -35,8 +39,8 @@ POOL_DOWN = 2  # messages.fm.POOL_DOWN
 @dataclass
 class Pass:
     ts: float
-    connection: int
-    uid: int
+    source: str  # « moi » : capté sur ce PC ; « partage » : reçu par le hub
+    object: str  # empreinte de l'exemplaire travaillé (share.object_token)
     item_id: int
     item_level: int | None
     item_type: str
@@ -89,12 +93,22 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
     templates: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
     for item_id, effect, low, high in market.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         templates[item_id][effect] = (low, high)
-    rows = market.execute(
-        "SELECT p.ts, p.uid, p.item_id, p.rune_id, p.passed, p.pool, p.pool_change, p.pool_before, p.before, p.after "
-        "FROM fm_passes p WHERE p.kind = 'rune' AND p.before IS NOT NULL AND p.after IS NOT NULL ORDER BY p.ts, p.source_id"
-    )
+    rows, mine = [], set()
+    for ts, uid, *rest in market.execute(
+        "SELECT ts, uid, item_id, rune_id, passed, pool, pool_change, pool_before, before, after FROM fm_passes "
+        "WHERE kind = 'rune' AND before IS NOT NULL AND after IS NOT NULL ORDER BY ts, source_id"
+    ):
+        mine.add(fm_key("fm", uid, ts, rest[1]))
+        rows.append((ts, "moi", object_token(uid), *rest))
+    for key, at, *rest in market.execute(
+        "SELECT key, at, object, item_id, rune_id, passed, pool, pool_change, pool_before, before, after "
+        "FROM shared_fm_passes WHERE kind = 'rune' ORDER BY at, key"
+    ):
+        if key not in mine:  # nos propres passages revenus par le hub (après un changement de jeton)
+            rows.append((at, "partage", *rest))
+    rows.sort(key=lambda row: row[0])
     out: list[Pass] = []
-    for ts, uid, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
+    for ts, source, obj, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
         before = {e: v for e, v in json.loads(raw_before) if v is not None}
         after = {e: v for e, v in json.loads(raw_after) if v is not None}
         rune = templates.get(rune_id, {})
@@ -107,7 +121,7 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
         outcome = EC if not passed else (SN if paid else SC)
         level, type_name = items.get(item_id, (None, ""))
         out.append(Pass(
-            ts=ts, connection=0, uid=uid, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
+            ts=ts, source=source, object=obj, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
             rune_effect=rune_effect, rune_value=rune_value,
             rune_weight=round(rune_value * density.get(rune_effect, 0.0), 3) if rune_effect is not None and rune_value is not None else None,
             line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high),

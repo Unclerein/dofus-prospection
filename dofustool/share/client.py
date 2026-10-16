@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import config, db
-from . import apply, collect, get_state, set_state
+from . import apply, collect, collect_fm, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
 
 log = logging.getLogger("dofustool.share")
 
@@ -71,17 +71,32 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     if state.get("hub") != identity:
         state = {}
         set_state(conn, hub=identity, cursor=0, push_mark=0)
+        forget_fm_sent(conn)
     cursor = int(state.get("cursor", 0))
     started = time.time()
     records = collect(conn, float(state.get("push_mark", 0)), keymap_path)
+    chunks: list[tuple[list, list]] = [(records[i : i + CHUNK], []) for i in range(0, len(records), CHUNK)]
+    # Passages de forgemagie : à part, marqués envoyés seulement quand le hub les a pris.
+    passes, broken = [], []
+    for record, kind, source_id in collect_fm(conn):
+        (passes if validate(record) else broken).append((record, (kind, source_id)))
+    mark_fm_sent(conn, [mark for _, mark in broken])  # jamais valables : inutile de les reproposer
+    for i in range(0, len(passes), CHUNK):
+        part = passes[i : i + CHUNK]
+        chunks.append(([record for record, _ in part], [mark for _, mark in part]))
+    chunks = chunks or [([], [])]
     sent = received = 0
     members: list = []
-    chunks = [records[i : i + CHUNK] for i in range(0, len(records), CHUNK)] or [[]]
     more = True
     while chunks or more:
-        chunk = chunks.pop(0) if chunks else []
+        chunk, marks = chunks.pop(0) if chunks else ([], [])
         reply = post(cfg.share_hub_url, cfg.share_token, {"server": cfg.server_name, "cursor": cursor, "records": chunk})
         sent += int(reply.get("accepted", 0))
+        if marks:
+            if int(reply.get("rejected", 0)) == 0:
+                mark_fm_sent(conn, marks)
+            else:  # hub d'avant le partage de la forgemagie : on réessaiera après sa mise à jour
+                chunks = [(c, m) for c, m in chunks if not m]
         for record in reply.get("records", []):
             received += bool(apply(conn, record, keymap_path))
         cursor = int(reply.get("cursor", cursor))

@@ -1,17 +1,23 @@
 """Partage des relevés de marché entre quelques joueurs du même serveur.
 
-Ce qui circule : les annonces HDV, les cours du marché, les relevés de prix moyens et la table des
-clés du build. Rien de personnel : ni l'archive brute (elle contient le chat), ni l'inventaire, la
-banque, les ventes, les personnages ou la configuration.
+Ce qui circule : les annonces HDV, les cours du marché, les relevés de prix moyens, la table des
+clés du build et les passages de forgemagie. Rien de personnel : ni l'archive brute (elle contient le
+chat), ni l'inventaire, la banque, les ventes, les personnages, les prix payés ou la configuration.
 
 Un « enregistrement » est un dictionnaire JSON {kind, key, at, data} :
   - hdv     : les annonces en vente d'un objet au moment `at` ;
   - market  : le cours du marché d'un objet relevé à `at` ;
   - prices  : un relevé de prix moyens (clé = empreinte de son contenu) ;
-  - keymap  : la table des clés d'un build (clé = signature du message des prix moyens).
+  - keymap  : la table des clés d'un build (clé = signature du message des prix moyens) ;
+  - fm      : un passage de forgemagie (objet avant et après, ce qui a été posé, puits avant et après) ;
+  - fm_refusal : un passage refusé par le serveur.
+Les passages de forgemagie servent à retrouver les chances du jeu : le hub les garde tous, chacun range
+ceux des autres à part de son propre journal (tables shared_fm_*). L'exemplaire n'y figure que par une
+empreinte, et la date est arrondie à la minute.
 Tout enregistrement reçu est validé (types, bornes) avant d'être appliqué, avec les mêmes règles de
 fusion que la capture : le relevé le plus récent gagne.
 """
+import hashlib
 import json
 import sqlite3
 import time
@@ -21,11 +27,17 @@ from .. import db, identify
 from ..db import GRAIN_DAY, GRAIN_HOUR
 from ..messages.hdv_listings import HdvListings, Listing
 
-KINDS = ("hdv", "market", "prices", "keymap")
+KINDS = ("hdv", "market", "prices", "keymap", "fm", "fm_refusal")
+FM_KINDS = ("fm", "fm_refusal")
+FM_TOOLS = ("rune", "transcendance", "potion", "eclat", "gravure", "gemme", "orbe")  # messages.fm.TOOL_TYPES
+FM_FIELDS = {"object", "item_id", "rune_id", "tool", "passed", "pool_before", "pool_after", "pool_change", "before", "after"}
+REFUSAL_FIELDS = {"object", "item_id", "rune_id", "status", "code", "before"}
+MAX_POOL = 10_000.0
 MAX_PRICE = 10**12
 MAX_ITEM_ID = 10**7
 FUTURE_S = 900.0  # tolérance sur l'horloge d'un autre PC
 MAX_AGE_S = 400 * 86400.0
+FM_MAX_AGE_S = 3650 * 86400.0  # un passage reste utile à l'étude des chances, quel que soit son âge
 # Chevauchement à l'envoi : un relevé peut être écrit en base un peu après sa date de capture.
 OVERLAP_S = 120.0
 
@@ -34,8 +46,32 @@ def _is_int(value, low: int = 0, high: int = MAX_PRICE) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
 
 
-def _is_time(value, now: float) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and now - MAX_AGE_S <= value <= now + FUTURE_S
+def _is_time(value, now: float, max_age: float = MAX_AGE_S) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and now - max_age <= value <= now + FUTURE_S
+
+
+def _is_pool(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= MAX_POOL
+
+
+def _is_effects(effects) -> bool:
+    if not isinstance(effects, list) or len(effects) > 100:
+        return False
+    for pair in effects:
+        if not isinstance(pair, list) or len(pair) != 2:
+            return False
+        effect_id, value = pair
+        if not _is_int(effect_id, 0, 10**6) or not (value is None or _is_int(value, -(10**9), 10**9)):
+            return False
+    return True
+
+
+def _is_object(value) -> bool:
+    return isinstance(value, str) and len(value) == 16 and all(c in "0123456789abcdef" for c in value)
+
+
+def _is_flag(value, allowed: tuple) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value in allowed
 
 
 def validate(record, now: float | None = None) -> bool:
@@ -44,10 +80,29 @@ def validate(record, now: float | None = None) -> bool:
     if not isinstance(record, dict) or record.get("kind") not in KINDS:
         return False
     key, at, data = record.get("key"), record.get("at"), record.get("data")
-    if not isinstance(key, str) or not 0 < len(key) <= 200 or not _is_time(at, now) or not isinstance(data, dict):
-        return False
     kind = record["kind"]
+    max_age = FM_MAX_AGE_S if kind in FM_KINDS else MAX_AGE_S
+    if not isinstance(key, str) or not 0 < len(key) <= 200 or not _is_time(at, now, max_age) or not isinstance(data, dict):
+        return False
     try:
+        if kind == "fm":
+            return (
+                set(data) == FM_FIELDS and _is_object(data["object"])
+                and _is_int(data["item_id"], 1, MAX_ITEM_ID) and _is_int(data["rune_id"], 1, MAX_ITEM_ID)
+                and data["tool"] in FM_TOOLS and _is_flag(data["passed"], (0, 1))
+                and (data["pool_before"] is None or _is_pool(data["pool_before"]))
+                and (data["pool_after"] is None or _is_pool(data["pool_after"]))
+                and _is_flag(data["pool_change"], (0, 1, 2))
+                and _is_effects(data["before"]) and _is_effects(data["after"])
+            )  # fmt: skip
+        if kind == "fm_refusal":
+            return (
+                set(data) == REFUSAL_FIELDS and (data["object"] is None or _is_object(data["object"]))
+                and (data["item_id"] is None or _is_int(data["item_id"], 1, MAX_ITEM_ID))
+                and (data["rune_id"] is None or _is_int(data["rune_id"], 1, MAX_ITEM_ID))
+                and _is_int(data["status"], 0, 10**6) and (data["code"] is None or _is_int(data["code"], 0, 10**9))
+                and (data["before"] is None or _is_effects(data["before"]))
+            )  # fmt: skip
         if kind == "hdv":
             listings = data["listings"]
             if key != str(data["item_id"]) or not _is_int(data["item_id"], 1, MAX_ITEM_ID):
@@ -149,6 +204,69 @@ def collect(conn: sqlite3.Connection, since: float, keymap_path: Path | None = N
     return records
 
 
+def object_token(uid: int) -> str:
+    """Empreinte d'un exemplaire : relie ses passages sans donner son identifiant en jeu."""
+    return hashlib.sha256(f"prospection-fm:{uid}".encode()).hexdigest()[:16]
+
+
+def fm_key(prefix: str, uid, ts: float, rune_id) -> str:
+    return hashlib.sha256(f"{prefix}:{uid}:{ts!r}:{rune_id}".encode()).hexdigest()[:24]
+
+
+def _minute(ts: float) -> float:
+    return float(round(ts / 60) * 60)
+
+
+_SENT = "CREATE TABLE IF NOT EXISTS share_fm_sent (kind TEXT NOT NULL, source_id INTEGER NOT NULL, PRIMARY KEY (kind, source_id))"
+
+
+def collect_fm(conn: sqlite3.Connection, limit: int = 100_000) -> list[tuple[dict, str, int]]:
+    """Passages de forgemagie pas encore pris par le hub : (enregistrement, kind, source_id).
+
+    Suivis à part des autres relevés : tout l'historique part au premier envoi, et un passage n'est
+    marqué envoyé que quand le hub l'a pris (un hub d'avant ce partage le refuse).
+    """
+    conn.execute(_SENT)
+    out = []
+    for source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, tool, pool_before, before, after in conn.execute(
+        "SELECT source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, kind, pool_before, before, after FROM fm_passes p "
+        "WHERE before IS NOT NULL AND after IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM share_fm_sent s WHERE s.kind = 'fm' AND s.source_id = p.source_id) ORDER BY ts LIMIT ?",
+        (limit,),
+    ).fetchall():
+        data = {
+            "object": object_token(uid), "item_id": item_id, "rune_id": rune_id, "tool": tool, "passed": int(passed),
+            "pool_before": pool_before, "pool_after": pool, "pool_change": pool_change,
+            "before": json.loads(before), "after": json.loads(after),
+        }  # fmt: skip
+        out.append(({"kind": "fm", "key": fm_key("fm", uid, ts, rune_id), "at": _minute(ts), "data": data}, "fm", source_id))
+    for source_id, ts, uid, item_id, rune_id, status, code, before in conn.execute(
+        "SELECT source_id, ts, uid, item_id, rune_id, status, code, before FROM fm_refusals r "
+        "WHERE NOT EXISTS (SELECT 1 FROM share_fm_sent s WHERE s.kind = 'fm_refusal' AND s.source_id = r.source_id) ORDER BY ts LIMIT ?",
+        (limit,),
+    ).fetchall():
+        data = {
+            "object": None if uid is None else object_token(uid), "item_id": item_id, "rune_id": rune_id,
+            "status": status, "code": code, "before": None if before is None else json.loads(before),
+        }  # fmt: skip
+        record = {"kind": "fm_refusal", "key": fm_key("refus", uid, ts, rune_id), "at": _minute(ts), "data": data}
+        out.append((record, "fm_refusal", source_id))
+    return out
+
+
+def mark_fm_sent(conn: sqlite3.Connection, marks: list[tuple[str, int]]) -> None:
+    conn.execute(_SENT)
+    with conn:
+        conn.executemany("INSERT OR IGNORE INTO share_fm_sent VALUES (?, ?)", marks)
+
+
+def forget_fm_sent(conn: sqlite3.Connection) -> None:
+    """Autre hub ou autre joueur : tous les passages repartent."""
+    conn.execute(_SENT)
+    with conn:
+        conn.execute("DELETE FROM share_fm_sent")
+
+
 # --- ce que ce PC reçoit -------------------------------------------------------
 
 
@@ -157,7 +275,22 @@ def apply(conn: sqlite3.Connection, record: dict, keymap_path: Path | None = Non
     if not validate(record):
         return False
     kind, at, data = record["kind"], record["at"], record["data"]
-    if kind == "hdv":
+    if kind == "fm":
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO shared_fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["tool"], data["passed"],
+                 data["pool_before"], data["pool_after"], data["pool_change"],
+                 json.dumps(data["before"], separators=(",", ":")), json.dumps(data["after"], separators=(",", ":"))),
+            )  # fmt: skip
+    elif kind == "fm_refusal":
+        before = None if data["before"] is None else json.dumps(data["before"], separators=(",", ":"))
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO shared_fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["status"], data["code"], before),
+            )
+    elif kind == "hdv":
         listings = tuple(
             Listing(uid, (p1, p10, p100, p1000), tuple((e, v) for e, v in effects))
             for uid, p1, p10, p100, p1000, effects in data["listings"]

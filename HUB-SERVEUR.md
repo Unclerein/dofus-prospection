@@ -189,6 +189,12 @@ besoin.
 
 ## Ce que le serveur contient
 
-Uniquement des relevés de marché : annonces HDV (3 jours), cours du marché (60 jours), prix moyens
-(3 jours), et la table des clés du build. Ni chat, ni stock, ni ventes, ni personnages. Les seules
-données nominatives sont les pseudos choisis et la date du dernier passage de chacun.
+Des relevés de marché : annonces HDV (3 jours), cours du marché (60 jours), prix moyens (3 jours),
+et la table des clés du build. Et tous les passages de forgemagie de chacun, gardés sans limite de
+durée pour l'étude des chances : l'objet avant et après, ce qui a été posé, le puits ; l'exemplaire
+n'y est qu'une empreinte et l'heure est arrondie à la minute. Ni chat, ni stock, ni ventes, ni prix
+payés, ni personnages. Les seules données nominatives sont les pseudos choisis et la date du dernier
+passage de chacun.
+
+Un hub d'avant le partage de la forgemagie refuse ces passages : les applis les gardent et les
+renvoient d'elles-mêmes une fois le hub mis à jour.

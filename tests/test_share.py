@@ -270,3 +270,71 @@ def test_repo_token_survives_a_settings_round_trip(tmp_path):
     cfg = config.from_values({**BASE, "share_repo_token": "github_pat_lecture_seule_0123456789"})
     config.save(cfg, tmp_path / "c.toml")
     assert config.load(tmp_path / "c.toml").share_repo_token == "github_pat_lecture_seule_0123456789"
+
+
+# --- passages de forgemagie ---------------------------------------------------------
+
+
+def forge_db(passes=3):
+    conn = db.connect(":memory:")
+    for i in range(passes):
+        before, after = [[118, 40 + i], [125, 150]], [[118, 41 + i], [125, 150]]
+        conn.execute(
+            "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after) "
+            "VALUES (?, ?, 77, 10, 20, 1, 0, 2.0, 0, 'rune', 2.0, ?, ?)",
+            (100 + i, NOW - 600 + i, json.dumps(before), json.dumps(after)),
+        )
+    conn.execute("INSERT INTO fm_refusals VALUES (900, ?, 77, 10, 21, 0, NULL, ?)", (NOW - 30, json.dumps([[118, 43]])))
+    conn.commit()
+    return conn
+
+
+def test_forge_passes_go_out_without_the_object_id_and_validate():
+    out = share.collect_fm(forge_db())
+    assert [kind for _, kind, _ in out] == ["fm", "fm", "fm", "fm_refusal"]
+    record = out[0][0]
+    assert record["at"] % 60 == 0 and "77" not in json.dumps(record) and share.validate(record)
+    assert record["data"]["object"] == share.object_token(77) and record["data"]["before"] == [[118, 40], [125, 150]]
+    assert share.validate(out[3][0])
+    for change in ({"passed": True}, {"pool_after": 1e9}, {"object": "Bob"}, {"tool": "astrale"}, {"name": "x"}, {"before": [[1, "a"]]}):
+        assert not share.validate({**record, "data": {**record["data"], **change}})
+    # Un vieux passage reste valable : il sert toujours à l'étude des chances.
+    assert share.validate({**record, "at": NOW - 600 * 86400})
+
+
+def test_forge_passes_reach_the_others_once_and_enter_their_dataset(hub_url):
+    from dofustool.analysis import fmdata
+
+    alice, bob = forge_db(), db.connect(":memory:")
+    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 4
+    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 0
+    assert client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))["received"] == 4
+    assert bob.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
+    assert bob.execute("SELECT status, before FROM shared_fm_refusals").fetchone() == (0, "[[118,43]]")
+    bob.executemany("INSERT INTO item_effects VALUES (?, ?, ?, ?)", [(10, 118, 30, 50), (20, 118, 1, 1)])
+    rows = fmdata.build(bob, {118: 1.0, 125: 0.2})
+    # Date arrondie à la minute : l'ordre se retrouve par l'objet avant et après, pas par l'heure.
+    assert sorted((r.source, r.line_before) for r in rows) == [("partage", 40), ("partage", 41), ("partage", 42)]
+    assert len({r.object for r in rows}) == 1
+    # Chez Alice, ses propres passages ne comptent qu'une fois.
+    assert [r.source for r in fmdata.build(alice, {118: 1.0})] == ["moi"] * 3
+
+
+def test_a_hub_that_does_not_know_forge_passes_gets_them_after_its_update():
+    conn, seen = forge_db(), []
+
+    def old_hub(url, token, payload):
+        fm = [r for r in payload["records"] if r["kind"] in share.FM_KINDS]
+        seen.append(len(fm))
+        return {"cursor": 0, "records": [], "accepted": len(payload["records"]) - len(fm), "rejected": len(fm)}
+
+    cfg = member("http://hub", "jeton-alice-0123456789")
+    client.sync_once(conn, cfg, post=old_hub)
+    client.sync_once(conn, cfg, post=old_hub)
+    assert seen == [4, 4]  # refusés, donc reproposés
+
+    def new_hub(url, token, payload):
+        return {"cursor": 0, "records": [], "accepted": len(payload["records"]), "rejected": 0}
+
+    assert client.sync_once(conn, cfg, post=new_hub)["sent"] == 4
+    assert client.sync_once(conn, cfg, post=new_hub)["sent"] == 0

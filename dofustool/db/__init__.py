@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS gone_lots (
     price      INTEGER NOT NULL,
     noticed_at REAL NOT NULL
 );
--- Passages de rune en forgemagie. Donnée personnelle, jamais partagée.
+-- Passages de rune en forgemagie. Partagés par le hub sans l'identifiant de l'exemplaire (share.collect_fm).
 CREATE TABLE IF NOT EXISTS fm_passes (
     source_id   INTEGER PRIMARY KEY,
     ts          REAL NOT NULL,
@@ -313,6 +313,31 @@ CREATE TABLE IF NOT EXISTS fm_refusals (
     status    INTEGER NOT NULL,   -- 0 : refus sans contenu ; autre : état renvoyé par le serveur
     code      INTEGER,            -- numéro renvoyé avec cet état
     before    TEXT                -- effets de l'objet au moment du refus (JSON), s'ils sont connus
+);
+-- Passages de forgemagie des autres joueurs, reçus par le hub : anonymes, pour l'étude des chances.
+CREATE TABLE IF NOT EXISTS shared_fm_passes (
+    key         TEXT PRIMARY KEY,
+    at          REAL NOT NULL,     -- date arrondie à la minute
+    object      TEXT NOT NULL,     -- empreinte de l'exemplaire : relie les passages d'un même objet
+    item_id     INTEGER NOT NULL,
+    rune_id     INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    passed      INTEGER NOT NULL,
+    pool_before REAL,
+    pool        REAL,
+    pool_change INTEGER NOT NULL,
+    before      TEXT NOT NULL,
+    after       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shared_fm_refusals (
+    key     TEXT PRIMARY KEY,
+    at      REAL NOT NULL,
+    object  TEXT,
+    item_id INTEGER,
+    rune_id INTEGER,
+    status  INTEGER NOT NULL,
+    code    INTEGER,
+    before  TEXT
 );
 -- Un dossier par exemplaire forgemagé : ses jets avant et après, et ce qu'il est devenu.
 CREATE TABLE IF NOT EXISTS fm_items (
