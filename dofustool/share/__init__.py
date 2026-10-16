@@ -1,8 +1,9 @@
 """Partage des relevés de marché entre quelques joueurs du même serveur.
 
 Ce qui circule : les annonces HDV, les cours du marché, les relevés de prix moyens, la table des
-clés du build et les passages de forgemagie. Rien de personnel : ni l'archive brute (elle contient le
-chat), ni l'inventaire, la banque, les ventes, les personnages, les prix payés ou la configuration.
+clés du build, les passages de forgemagie et le score de collecte de chacun, avec le nom du personnage
+qui forge. Rien d'autre de personnel : ni l'archive brute (elle contient le chat), ni l'inventaire, la
+banque, les ventes, les autres personnages, les prix payés ou la configuration.
 
 Un « enregistrement » est un dictionnaire JSON {kind, key, at, data} :
   - hdv     : les annonces en vente d'un objet au moment `at` ;
@@ -10,7 +11,9 @@ Un « enregistrement » est un dictionnaire JSON {kind, key, at, data} :
   - prices  : un relevé de prix moyens (clé = empreinte de son contenu) ;
   - keymap  : la table des clés d'un build (clé = signature du message des prix moyens) ;
   - fm      : un passage de forgemagie (objet avant et après, ce qui a été posé, puits avant et après) ;
-  - fm_refusal : un passage refusé par le serveur.
+  - fm_refusal : un passage refusé par le serveur ;
+  - fm_score : le score de collecte d'un joueur (points, passages, kamas investis, missions réussies)
+    et le nom de son personnage, pour le classement ; le hub le range sous le pseudo de son auteur.
 Les passages de forgemagie servent à retrouver les chances du jeu : le hub les garde tous, chacun range
 ceux des autres à part de son propre journal (tables shared_fm_*). L'exemplaire n'y figure que par une
 empreinte, et la date est arrondie à la minute.
@@ -19,6 +22,7 @@ fusion que la capture : le relevé le plus récent gagne.
 """
 import hashlib
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -27,8 +31,11 @@ from .. import db, identify
 from ..db import GRAIN_DAY, GRAIN_HOUR
 from ..messages.hdv_listings import HdvListings, Listing
 
-KINDS = ("hdv", "market", "prices", "keymap", "fm", "fm_refusal")
-FM_KINDS = ("fm", "fm_refusal")
+KINDS = ("hdv", "market", "prices", "keymap", "fm", "fm_refusal", "fm_score")
+FM_KINDS = ("fm", "fm_refusal", "fm_score")
+SCORE_FIELDS = {"character", "points", "passes", "kamas", "missions"}
+CHARACTER = re.compile(r"^[^\W\d_][\w'-]{1,29}$")  # noms de personnage : lettres, tiret, apostrophe
+MISSION = re.compile(r"^[a-z0-9-]{1,40}$")
 FM_TOOLS = ("rune", "transcendance", "potion", "eclat", "gravure", "gemme", "orbe")  # messages.fm.TOOL_TYPES
 FM_FIELDS = {"object", "item_id", "rune_id", "tool", "passed", "pool_before", "pool_after", "pool_change", "before", "after"}
 REFUSAL_FIELDS = {"object", "item_id", "rune_id", "status", "code", "before"}
@@ -94,6 +101,15 @@ def validate(record, now: float | None = None) -> bool:
                 and (data["pool_after"] is None or _is_pool(data["pool_after"]))
                 and _is_flag(data["pool_change"], (0, 1, 2))
                 and _is_effects(data["before"]) and _is_effects(data["after"])
+            )  # fmt: skip
+        if kind == "fm_score":
+            missions = data["missions"]
+            return (
+                set(data) == SCORE_FIELDS and (data["character"] is None or (isinstance(data["character"], str) and bool(CHARACTER.match(data["character"]))))
+                and isinstance(data["points"], (int, float)) and not isinstance(data["points"], bool) and 0 <= data["points"] <= 1e9
+                and _is_int(data["passes"], 0, 10**8) and _is_int(data["kamas"], 0, 10**13)
+                and isinstance(missions, list) and len(missions) <= 50
+                and all(isinstance(m, list) and len(m) == 2 and isinstance(m[0], str) and MISSION.match(m[0]) and _is_time(m[1], now, FM_MAX_AGE_S) for m in missions)
             )  # fmt: skip
         if kind == "fm_refusal":
             return (
@@ -275,6 +291,15 @@ def apply(conn: sqlite3.Connection, record: dict, keymap_path: Path | None = Non
     if not validate(record):
         return False
     kind, at, data = record["kind"], record["at"], record["data"]
+    if kind == "fm_score":
+        with conn:
+            conn.execute(
+                "INSERT INTO shared_fm_scores VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (pseudo) DO UPDATE SET at = excluded.at, "
+                "character = excluded.character, points = excluded.points, passes = excluded.passes, kamas = excluded.kamas, "
+                "missions = excluded.missions WHERE excluded.at >= shared_fm_scores.at",
+                (record["key"], at, data["character"], data["points"], data["passes"], data["kamas"], json.dumps(data["missions"])),
+            )
+        return True
     if kind == "fm":
         with conn:
             conn.execute(

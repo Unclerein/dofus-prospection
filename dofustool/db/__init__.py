@@ -300,11 +300,34 @@ CREATE TABLE IF NOT EXISTS fm_passes (
     kind        TEXT NOT NULL DEFAULT 'rune',  -- ce qui a été posé : messages.fm.TOOL_TYPES
     pool_before REAL,              -- puits avant le passage, s'il a été vu
     before      TEXT,              -- effets de l'objet juste avant (JSON), s'ils ont été vus
-    after       TEXT               -- effets de l'objet juste après (JSON)
+    after       TEXT,              -- effets de l'objet juste après (JSON)
+    character_id INTEGER           -- personnage connecté pendant le passage, s'il est connu
 );
 CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
 -- Rattrapage des passages depuis l'archive : version du dernier fait (voir db.backfill.FM_BACKFILL_VERSION).
 CREATE TABLE IF NOT EXISTS fm_backfill (version INTEGER NOT NULL);
+-- Collecte de forgemagie : missions réussies sur ce PC, et statut de chaque règle à son dernier calcul.
+CREATE TABLE IF NOT EXISTS fm_missions_done (
+    mission_id   TEXT PRIMARY KEY,
+    at           REAL NOT NULL,    -- date du passage qui l'a réussie
+    character_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS fm_rule_status (
+    rule_id    TEXT PRIMARY KEY,
+    status     TEXT NOT NULL,
+    changed_at REAL NOT NULL,
+    was        TEXT              -- statut d'avant le dernier changement ; NULL au premier calcul
+);
+-- Scores de collecte des autres joueurs, reçus par le hub : un par pseudo du hub.
+CREATE TABLE IF NOT EXISTS shared_fm_scores (
+    pseudo    TEXT PRIMARY KEY,
+    at        REAL NOT NULL,
+    character TEXT,
+    points    REAL NOT NULL,
+    passes    INTEGER NOT NULL,
+    kamas     INTEGER NOT NULL,
+    missions  TEXT NOT NULL        -- JSON [[mission, date], ...]
+);
 -- Passages refusés par le serveur (rune impossible sur cet objet) : rien n'a bougé.
 CREATE TABLE IF NOT EXISTS fm_refusals (
     source_id INTEGER PRIMARY KEY,
@@ -464,6 +487,8 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
         conn.execute("ALTER TABLE fm_passes ADD COLUMN kind TEXT NOT NULL DEFAULT 'rune'")
         for name, kind in (("pool_before", "REAL"), ("before", "TEXT"), ("after", "TEXT")):
             conn.execute(f"ALTER TABLE fm_passes ADD COLUMN {name} {kind}")
+    if columns and "character_id" not in columns:  # renseigné depuis l'archive au prochain démarrage de la capture
+        conn.execute("ALTER TABLE fm_passes ADD COLUMN character_id INTEGER")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -1123,10 +1148,12 @@ def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts:
 
 
 def save_fm_pass(
-    conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before, kind: str = "rune", pool_before: float | None = None
+    conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before, kind: str = "rune", pool_before: float | None = None,
+    character_id: int | None = None,
 ) -> bool:  # fmt: skip
     """Enregistre un passage (messages.fm.Result). before : effets de l'objet juste avant, s'ils sont connus ;
-    kind : ce qui a été posé (messages.fm.TOOL_TYPES) ; pool_before : puits juste avant, s'il est connu.
+    kind : ce qui a été posé (messages.fm.TOOL_TYPES) ; pool_before : puits juste avant, s'il est connu ;
+    character_id : personnage connecté, s'il est connu.
 
     Renvoie False s'il était déjà connu ; ce qui lui manquait (état d'avant, puits d'avant) est alors complété.
     """
@@ -1139,16 +1166,16 @@ def save_fm_pass(
     encoded_after = json.dumps([list(e) for e in obj.effects])
     with conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after, "
+            "character_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (source_id, ts, obj.uid, obj.item_id, rune_id, int(result.passed), lost, result.pool, result.pool_change,
-             kind, pool_before, encoded_before, encoded_after),
+             kind, pool_before, encoded_before, encoded_after, character_id),
         )  # fmt: skip
         if not cur.rowcount:
             conn.execute(
                 "UPDATE fm_passes SET kind = ?, after = COALESCE(after, ?), before = COALESCE(before, ?), "
-                "pool_before = COALESCE(pool_before, ?), lost = COALESCE(lost, ?) WHERE source_id = ?",
-                (kind, encoded_after, encoded_before, pool_before, lost, source_id),
+                "pool_before = COALESCE(pool_before, ?), lost = COALESCE(lost, ?), character_id = COALESCE(character_id, ?) WHERE source_id = ?",
+                (kind, encoded_after, encoded_before, pool_before, lost, character_id, source_id),
             )
             return False
         conn.execute(

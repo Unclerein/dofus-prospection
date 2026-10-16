@@ -293,7 +293,7 @@ def test_forge_passes_go_out_without_the_object_id_and_validate():
     out = share.collect_fm(forge_db())
     assert [kind for _, kind, _ in out] == ["fm", "fm", "fm", "fm_refusal"]
     record = out[0][0]
-    assert record["at"] % 60 == 0 and "77" not in json.dumps(record) and share.validate(record)
+    assert record["at"] % 60 == 0 and 77 not in record["data"].values() and "uid" not in record["data"] and share.validate(record)
     assert record["data"]["object"] == share.object_token(77) and record["data"]["before"] == [[118, 40], [125, 150]]
     assert share.validate(out[3][0])
     for change in ({"passed": True}, {"pool_after": 1e9}, {"object": "Bob"}, {"tool": "astrale"}, {"name": "x"}, {"before": [[1, "a"]]}):
@@ -306,9 +306,10 @@ def test_forge_passes_reach_the_others_once_and_enter_their_dataset(hub_url):
     from dofustool.analysis import fmdata
 
     alice, bob = forge_db(), db.connect(":memory:")
-    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 4
+    # Quatre passages, plus le score de collecte d'Alice.
+    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 5
     assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 0
-    assert client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))["received"] == 4
+    assert client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))["received"] == 5
     assert bob.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
     assert bob.execute("SELECT status, before FROM shared_fm_refusals").fetchone() == (0, "[[118,43]]")
     bob.executemany("INSERT INTO item_effects VALUES (?, ?, ?, ?)", [(10, 118, 30, 50), (20, 118, 1, 1)])
@@ -336,5 +337,23 @@ def test_a_hub_that_does_not_know_forge_passes_gets_them_after_its_update():
     def new_hub(url, token, payload):
         return {"cursor": 0, "records": [], "accepted": len(payload["records"]), "rejected": 0}
 
-    assert client.sync_once(conn, cfg, post=new_hub)["sent"] == 4
+    assert client.sync_once(conn, cfg, post=new_hub)["sent"] == 5  # et le score
     assert client.sync_once(conn, cfg, post=new_hub)["sent"] == 0
+
+
+def test_the_collect_score_is_filed_under_its_author_and_reaches_the_others(hub_url):
+    alice, bob = forge_db(), db.connect(":memory:")
+    alice.execute("INSERT INTO characters VALUES (5, 'Forgeronne', 200, 1.0)")
+    alice.execute("UPDATE fm_passes SET character_id = 5")
+    alice.commit()
+    cfg = member(hub_url, "jeton-alice-0123456789")
+    cfg = config.from_values({**BASE, "share_hub_url": hub_url, "share_token": "jeton-alice-0123456789", "share_pseudo": "bob"})
+    client.sync_once(alice, cfg)  # le pseudo écrit dans sa config ne compte pas : le hub sait qui envoie
+    client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))
+    pseudo, character, points, passes, missions = bob.execute("SELECT pseudo, character, points, passes, missions FROM shared_fm_scores").fetchone()
+    assert (pseudo, character, passes) == ("alice", "Forgeronne", 3) and points > 0 and json.loads(missions) == []
+
+    record = {"kind": "fm_score", "key": "x", "at": NOW, "data": {"character": "Forgeronne", "points": 12.5, "passes": 3, "kamas": 100, "missions": [["sans-puits", NOW]]}}
+    assert share.validate(record)
+    for change in ({"character": "<b>"}, {"character": "a" * 40}, {"points": -1}, {"missions": [["DROP TABLE", NOW]]}, {"pseudo": "x"}):
+        assert not share.validate({**record, "data": {**record["data"], **change}})

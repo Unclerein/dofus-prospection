@@ -22,10 +22,11 @@ from pathlib import Path
 
 from .. import db
 from ..fight import live
-from . import Board, Feed, Sale, is_game, kamas, place
+from . import Board, Feed, Forge, Sale, is_game, kamas, place
 from . import render as draw
 
 POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
+FORGE_POLL_S = 3.0  # atelier de forgemagie et succès du groupe
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
 STALE_FIGHT_S = 180.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
@@ -168,6 +169,11 @@ class Items:
         self.fetching: set[int] = set()
         self.demo_names: dict[int, str] = {}
 
+    def rune_item(self) -> int:
+        """Une rune de forgemagie, pour l'image du bandeau de mission."""
+        row = self.conn.execute("SELECT id FROM items WHERE name = 'Rune Cri'").fetchone() if self.conn else None
+        return row[0] if row else 0
+
     def name(self, item_id: int) -> str:
         if item_id in self.demo_names:
             return self.demo_names[item_id]
@@ -212,8 +218,11 @@ class Items:
 
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
-                 rune: bool = False, demo_rune: str | None = None) -> None:  # fmt: skip
+                 rune: bool = False, demo_rune: str | None = None, forge: Forge | None = None, me: str | None = None) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
+        self.forge, self.me = forge, me  # forgemagie : mission du moment et succès du groupe
+        self.forge_checked = 0.0
+        self.rune_icon_item = items.rune_item() if forge else 0
         self.is_demo = demo is not None
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
         self.show_rune, self.rune = rune, demo_rune  # carte de ma dernière rune (Huppermage), en combat
@@ -244,6 +253,12 @@ class Window:
                 sales.append(self.demo.pop(0)[1])
             for sale in sales:
                 self.board.add(sale, now)
+            if self.forge is not None and now - self.forge_checked >= FORGE_POLL_S:
+                self.forge_checked = now
+                try:
+                    self.announce(now)
+                except sqlite3.Error:
+                    pass  # base occupée : au prochain passage
             if self.show_rune and not self.is_demo:
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
@@ -264,12 +279,25 @@ class Window:
         fast = fast or (self.show_rune and self.rune and now - self.rune_changed < draw.BUMP_S + 0.2)
         self.root.after(FRAME_MS if fast else POLL_MS, self.tick)
 
+    def announce(self, now: float) -> None:
+        mission = self.forge.mission(now)
+        if mission:
+            progress = f"{mission['count']}/{mission['target']}"
+            text = f"+{mission['bonus']} pts · ≈ {str(mission['worth']).replace('.', ',')} pts par passage"
+            self.board.note("FORGEMAGIE · MISSION DU MOMENT", mission["title"], text, now, item_id=self.rune_icon_item, badge=progress, shown_s=7.0)
+        for who, title, bonus in self.forge.successes(now, self.me):
+            self.board.note("SUCCÈS DÉBLOQUÉ", title, f"{who} · +{bonus} pts", now, star=True, shown_s=7.0)
+
     def paint(self, now: float) -> None:
         views = [
             draw.View(
                 name=self.items.name(banner.item_id), quantity=banner.quantity, gain=f"+ {kamas(banner.kamas)} kamas",
                 icon=self.items.icon(banner.item_id), age=now - banner.born, left=banner.until - now,
                 total=self.board.shown_s, bumped=now - banner.bumped if banner.version else 99.0,
+            ) if banner.label == "VENDU" else draw.View(
+                name=banner.title, quantity=0, gain=banner.text, icon=self.items.icon(banner.item_id) if banner.item_id else None,
+                age=now - banner.born, left=banner.until - now, total=banner.shown_s, bumped=99.0,
+                label=banner.label, badge=banner.badge, star=banner.star,
             )
             for banner in self.board.banners
         ]  # fmt: skip
@@ -348,8 +376,18 @@ def main() -> int:
         print(f"Base absente : {db.MARKET_PATH}")
         return 1
     cfg = config.load()
+    forge = None
+    if cfg.fm_banners:
+        from ..analysis.collecte import FOCUS_PATH, MISSIONS
+        from ..fight.live import FIGHT_PATH
+
+        titles = {m.id: (m.title, m.bonus) for m in MISSIONS}
+        try:
+            forge = Forge(conn, FIGHT_PATH.with_name("forge.json"), FOCUS_PATH, titles, time.time())
+        except sqlite3.Error:
+            forge = None  # base d'avant la collecte : la capture la mettra à jour
     Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game,
-           rune=cfg.huppermage_rune).run()  # fmt: skip
+           rune=cfg.huppermage_rune, forge=forge, me=cfg.share_pseudo or None).run()  # fmt: skip
     return 0
 
 

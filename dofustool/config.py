@@ -29,6 +29,7 @@ class Config:
     start_dashboard: bool = True
     sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
     huppermage_rune: bool = False  # en combat, pastille de l'élément de ma dernière rune (Huppermage)
+    fm_banners: bool = True  # forgemagie : mission du moment à l'atelier, et succès du groupe, par-dessus le jeu
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -67,6 +68,7 @@ def _from_raw(raw: dict) -> Config:
         start_dashboard=bool(launcher.get("start_dashboard", defaults.start_dashboard)),
         sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
         huppermage_rune=bool(launcher.get("huppermage_rune", defaults.huppermage_rune)),
+        fm_banners=bool(launcher.get("fm_banners", defaults.fm_banners)),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -148,6 +150,7 @@ def from_values(values: dict) -> Config:
         start_dashboard=bool(values.get("start_dashboard")),
         sale_notifications=bool(values.get("sale_notifications", True)),
         huppermage_rune=bool(values.get("huppermage_rune", False)),
+        fm_banners=bool(values.get("fm_banners", True)),
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -221,6 +224,8 @@ start_dashboard = {"true" if cfg.start_dashboard else "false"}
 sale_notifications = {"true" if cfg.sale_notifications else "false"}
 # Huppermage : en combat, afficher par-dessus le jeu l'élément de ma dernière rune.
 huppermage_rune = {"true" if cfg.huppermage_rune else "false"}
+# Forgemagie : mission du moment en ouvrant l'atelier, et succès du groupe, par-dessus le jeu.
+fm_banners = {"true" if cfg.fm_banners else "false"}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

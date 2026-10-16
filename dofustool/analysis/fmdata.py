@@ -64,6 +64,12 @@ class Pass:
     lost_weight: float  # poids retiré aux autres lignes
     lost_lines: str  # JSON {caractéristique: points retirés}
     before_known: int  # l'état d'avant a été vu (1) ou manque (0)
+    extra_before: float = 0.0  # poids over et exo de tout l'objet avant le passage (au-delà des max, et lignes exo)
+    extra_after: float = 0.0
+    line_max_weight: float | None = None  # poids de la ligne visée à son max de base ; None pour un exo
+    exo_lost: int = 0  # une ligne exo (autre que la visée) a perdu des points
+    has_exo: int = 0  # l'objet portait un exo (autre que la ligne visée) avant le passage
+    character_id: int | None = None  # personnage, pour les passages captés sur ce PC
 
 
 def densities(path: Path = STATIC_PATH) -> dict[int, float]:
@@ -88,27 +94,40 @@ def weight_of(effects: dict[int, int], density: dict[int, float]) -> float:
     return sum(value * density.get(effect, 0.0) for effect, value in effects.items() if value > 0)
 
 
+def extra_weight(effects: dict[int, int], base: dict[int, tuple[int, int]], density: dict[int, float]) -> float:
+    """Poids over et exo de l'objet : ce qui dépasse les max de base, et les lignes que le modèle n'a pas."""
+    total = 0.0
+    for effect, value in effects.items():
+        if value <= 0:
+            continue
+        if effect not in base:
+            total += value * density.get(effect, 0.0)
+        elif 0 < base[effect][1] < value:
+            total += (value - base[effect][1]) * density.get(effect, 0.0)
+    return total
+
+
 def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
     items = {row[0]: (row[1], row[2] or "") for row in market.execute("SELECT id, level, type_name FROM items")}
     templates: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
     for item_id, effect, low, high in market.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         templates[item_id][effect] = (low, high)
     rows, mine = [], set()
-    for ts, uid, *rest in market.execute(
-        "SELECT ts, uid, item_id, rune_id, passed, pool, pool_change, pool_before, before, after FROM fm_passes "
+    for ts, uid, character, *rest in market.execute(
+        "SELECT ts, uid, character_id, item_id, rune_id, passed, pool, pool_change, pool_before, before, after FROM fm_passes "
         "WHERE kind = 'rune' AND before IS NOT NULL AND after IS NOT NULL ORDER BY ts, source_id"
     ):
         mine.add(fm_key("fm", uid, ts, rest[1]))
-        rows.append((ts, "moi", object_token(uid), *rest))
+        rows.append((ts, "moi", object_token(uid), character, *rest))
     for key, at, *rest in market.execute(
         "SELECT key, at, object, item_id, rune_id, passed, pool, pool_change, pool_before, before, after "
         "FROM shared_fm_passes WHERE kind = 'rune' ORDER BY at, key"
     ):
         if key not in mine:  # nos propres passages revenus par le hub (après un changement de jeton)
-            rows.append((at, "partage", *rest))
+            rows.append((at, "partage", rest[0], None, *rest[1:]))
     rows.sort(key=lambda row: row[0])
     out: list[Pass] = []
-    for ts, source, obj, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
+    for ts, source, obj, character, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
         before = {e: v for e, v in json.loads(raw_before) if v is not None}
         after = {e: v for e, v in json.loads(raw_after) if v is not None}
         rune = templates.get(rune_id, {})
@@ -131,6 +150,10 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
             pool_before=pool_before, pool_after=pool_after, pool_change=pool_change, passed=passed, outcome=outcome,
             lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3),
             lost_lines=json.dumps(lost, separators=(",", ":")), before_known=1,
+            extra_before=round(extra_weight(before, base, density), 3), extra_after=round(extra_weight(after, base, density), 3),
+            line_max_weight=round(high * density.get(rune_effect, 0.0), 3) if high else None,
+            exo_lost=int(any(e not in base for e in lost)), character_id=character,
+            has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())),
         ))  # fmt: skip
     return out
 

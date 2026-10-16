@@ -18,7 +18,7 @@ import pandas as pd
 from .. import ankama, config, db, ganymede
 from ..staticdata import contents as item_contents
 from ..staticdata.source import DOFUS_SQLITE
-from ..analysis import GRAIN_DAY, GRAIN_HOUR, cours, fmjournal, similar, workshop
+from ..analysis import GRAIN_DAY, GRAIN_HOUR, collecte, cours, fmjournal, similar, workshop
 from ..analysis.forgemagie import MARKERS, WEAPON_TYPES, Filter, base_lines, classify
 from ..analysis import jobxp, magexp
 from ..analysis.prices import PriceRef
@@ -126,6 +126,7 @@ class Api:
         self._state: dict | None = None
         self._fetching = threading.Lock()
         self._density: dict[int, float] | None = None  # densité de chaque caractéristique, lue une fois dans les données du jeu
+        self._collecte: tuple[str, collecte.State, list] | None = None  # dernier calcul de la collecte, et le catalogue d'objets
         self.static_path: Path = DOFUS_SQLITE  # remplacé dans les tests
         self.ganymede_dir: Path | None = None  # None : le dossier de données de Ganymède sur ce PC ; remplacé dans les tests
         self._templates_checked = 0.0  # dernier passage en arrière-plan sur les fiches des équipements
@@ -1787,6 +1788,83 @@ class Api:
                     "weapon": state["meta"].get(item_id, (None, None))[0] in WEAPON_TYPES,
                 }
             )
+        finally:
+            conn.close()
+
+    # --- collecte de forgemagie -------------------------------------------------
+
+    def _collecte_state(self, conn: sqlite3.Connection) -> tuple[collecte.State, list]:
+        """Le calcul de la collecte, refait seulement quand un passage arrive (le sien ou celui d'un autre)."""
+        signature = share_client.score_signature(conn) + ":" + str(int(time.time() // 3600))
+        with self._lock:
+            if self._collecte is None or self._collecte[0] != signature:
+                state = collecte.compute(conn, self.densities())
+                collecte.remember(conn, state, focus_path=collecte.FOCUS_PATH)
+                self._collecte = (signature, state, collecte.catalogue(conn, state.density, state.models, time.time()))
+            return self._collecte[1], self._collecte[2]
+
+    @staticmethod
+    def _collecte_item(item: collecte.ItemInfo, icons: dict, mission: str = "") -> dict:
+        rune = item.crit_rune if mission == "duel-crit" else item.exo_rune if mission == "exo-sec" else item.rune
+        return {
+            "item_id": item.id, "name": item.name, "type": item.type, "level": item.level, "icon": icons.get(item.id),
+            "weight": item.weight, "crit": item.crit, "price": item.price, "source": item.source, "on_sale": item.on_sale,
+            "group": item.group, "rune": {"name": rune[0], "price": rune[1]} if rune else None,
+        }  # fmt: skip
+
+    def forge_collecte(self) -> dict:
+        """La page Collecte : pourquoi on collecte, où en est le groupe, missions, règles, classement."""
+        conn = self.connect()
+        try:
+            state, catalogue = self._collecte_state(conn)
+            icons = dict(conn.execute("SELECT item_id, icon_id FROM item_icons"))
+            names = dict(conn.execute("SELECT id, name FROM items"))
+            cfg = config.load(self.config_path)
+            missions = []
+            for entry in state.missions:
+                mission = entry["mission"]
+                fitting = sorted((it for it in catalogue if mission.items(it)), key=lambda it: it.order())
+                done = state.done.get(mission.id)
+                missions.append({
+                    "id": mission.id, "title": mission.title, "text": mission.text, "target": mission.target, "bonus": mission.bonus,
+                    "parts": entry["parts"], "worth": entry["worth"], "hint": mission.hint, "rule": mission.rule,
+                    "done_at": done[0] if done else None, "items": [self._collecte_item(it, icons, mission.id) for it in fitting[:5]], "total": len(fitting),
+                })  # fmt: skip
+            me = {
+                "pseudo": cfg.share_pseudo or "moi", "character": collecte.main_character(conn), "points": state.points,
+                "passes": state.passes, "kamas": collecte.kamas_spent(conn), "missions": len(state.done), "me": True,
+            }  # fmt: skip
+            board = [me] + [
+                {"pseudo": pseudo, "character": character, "points": points, "passes": passes, "kamas": kamas, "missions": len(json.loads(done)), "me": False}
+                for pseudo, character, points, passes, kamas, done in conn.execute(
+                    "SELECT pseudo, character, points, passes, kamas, missions FROM shared_fm_scores")
+            ]  # fmt: skip
+            board.sort(key=lambda row: -row["points"])
+            kamas = sum(row["kamas"] for row in board)
+            points = sum(row["points"] for row in board)
+            view = collecte.overview(state)
+            for block in view["blocks"]:
+                if block.get("top_item"):
+                    block["top_name"] = names.get(block["top_item"], f"#{block['top_item']}")
+            return {
+                "purpose": collecte.PURPOSE, **view, "missions": missions, "rules": collecte.rules(conn, state), "leaderboard": board,
+                "science": {"kamas": kamas, "points": round(points, 1), "per_point": round(kamas / points) if points else None},
+                "statuses": collecte.STATUSES,
+            }  # fmt: skip
+        finally:
+            conn.close()
+
+    def forge_collecte_items(self, mission_id: str) -> dict | None:
+        """Tous les objets qui conviennent à une mission, les plus utiles par kamas d'abord."""
+        mission = next((m for m in collecte.MISSIONS if m.id == mission_id), None)
+        if mission is None:
+            return None
+        conn = self.connect()
+        try:
+            _, catalogue = self._collecte_state(conn)
+            icons = dict(conn.execute("SELECT item_id, icon_id FROM item_icons"))
+            fitting = sorted((it for it in catalogue if mission.items(it)), key=lambda it: it.order())
+            return {"id": mission.id, "title": mission.title, "items": [self._collecte_item(it, icons, mission.id) for it in fitting]}
         finally:
             conn.close()
 

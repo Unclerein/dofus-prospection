@@ -84,6 +84,9 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     for i in range(0, len(passes), CHUNK):
         part = passes[i : i + CHUNK]
         chunks.append(([record for record, _ in part], [mark for _, mark in part]))
+    score = score_record(conn, state, cfg)
+    if score is not None:
+        chunks.append(([score[0]], [("score", score[1])]))
     chunks = chunks or [([], [])]
     sent = received = 0
     members: list = []
@@ -92,7 +95,10 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         chunk, marks = chunks.pop(0) if chunks else ([], [])
         reply = post(cfg.share_hub_url, cfg.share_token, {"server": cfg.server_name, "cursor": cursor, "records": chunk})
         sent += int(reply.get("accepted", 0))
-        if marks:
+        if marks and marks[0][0] == "score":
+            if int(reply.get("rejected", 0)) == 0:
+                set_state(conn, fm_score_sig=marks[0][1])
+        elif marks:
             if int(reply.get("rejected", 0)) == 0:
                 mark_fm_sent(conn, marks)
             else:  # hub d'avant le partage de la forgemagie : on réessaiera après sa mise à jour
@@ -113,6 +119,31 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         received=int(state.get("received", 0)) + received,
     )
     return {"sent": sent, "received": received}
+
+
+def score_signature(conn: sqlite3.Connection) -> str:
+    """Change dès qu'un passage arrive (le sien ou celui d'un autre) : le score est alors à recalculer."""
+    mine = conn.execute("SELECT COUNT(*), MAX(source_id), COUNT(character_id) FROM fm_passes").fetchone()
+    others = conn.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()
+    return f"{mine[0]}:{mine[1]}:{mine[2]}:{others[0]}"
+
+
+def score_record(conn: sqlite3.Connection, state: dict, cfg: config.Config) -> tuple[dict, str] | None:
+    """Le score de collecte de ce PC, à envoyer s'il a changé ; les missions réussies sont inscrites au passage."""
+    signature = score_signature(conn)
+    if state.get("fm_score_sig") == signature or conn.execute("SELECT 1 FROM fm_passes LIMIT 1").fetchone() is None:
+        return None
+    try:
+        from ..analysis import collecte
+
+        result = collecte.compute(conn)
+        collecte.remember(conn, result, focus_path=collecte.FOCUS_PATH)
+        data = collecte.score(conn, result)
+    except (sqlite3.Error, OSError, ValueError) as error:
+        log.warning("Score de collecte non calculé : %s", error)
+        return None
+    record = {"kind": "fm_score", "key": cfg.share_pseudo or "moi", "at": time.time(), "data": data}
+    return (record, signature) if validate(record) else None
 
 
 def status(conn: sqlite3.Connection, cfg: config.Config) -> dict:

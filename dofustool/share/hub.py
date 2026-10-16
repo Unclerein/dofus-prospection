@@ -99,6 +99,8 @@ class Hub:
 
     def _store(self, pseudo: str, record: dict) -> bool:
         """Garde l'enregistrement s'il est plus récent que celui déjà connu pour cet objet."""
+        if record["kind"] == "fm_score":  # un score par joueur, rangé sous son pseudo : nul ne peut écrire celui d'un autre
+            record = {**record, "key": pseudo}
         kind, key = record["kind"], record["key"]
         row = self._db.execute("SELECT at, payload FROM records WHERE kind = ? AND key = ?", (kind, key)).fetchone()
         if kind == "keymap" and row is not None:

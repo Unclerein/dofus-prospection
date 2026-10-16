@@ -192,9 +192,11 @@ besoin.
 Des relevés de marché : annonces HDV (3 jours), cours du marché (60 jours), prix moyens (3 jours),
 et la table des clés du build. Et tous les passages de forgemagie de chacun, gardés sans limite de
 durée pour l'étude des chances : l'objet avant et après, ce qui a été posé, le puits ; l'exemplaire
-n'y est qu'une empreinte et l'heure est arrondie à la minute. Ni chat, ni stock, ni ventes, ni prix
-payés, ni personnages. Les seules données nominatives sont les pseudos choisis et la date du dernier
-passage de chacun.
+n'y est qu'une empreinte et l'heure est arrondie à la minute. Enfin, le score de collecte de chacun
+pour le classement (points, passages, kamas investis, missions réussies) avec le nom du personnage
+qui forge. Ni chat, ni stock, ni ventes, ni prix payés, ni les autres personnages. Les données
+nominatives sont les pseudos choisis, le nom du personnage qui forge et la date du dernier passage de
+chacun.
 
-Un hub d'avant le partage de la forgemagie refuse ces passages : les applis les gardent et les
-renvoient d'elles-mêmes une fois le hub mis à jour.
+Un hub d'avant le partage de la forgemagie (ou d'avant le classement) refuse ces passages ou ces
+scores : les applis les gardent et les renvoient d'elles-mêmes une fois le hub mis à jour.

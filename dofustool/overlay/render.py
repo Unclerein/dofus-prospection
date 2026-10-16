@@ -3,6 +3,7 @@
 Tout est dessiné ici plutôt qu'avec des boutons et des cadres de fenêtre : coins arrondis, ombre
 douce, fondu d'apparition. Les couleurs sont celles du tableau de bord.
 """
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -31,6 +32,9 @@ class View:
     left: float  # secondes avant sa disparition
     total: float  # durée d'affichage après la dernière vente
     bumped: float  # secondes depuis la dernière vente qui l'a complété ; grand si aucune
+    label: str = "VENDU"
+    badge: str | None = None  # None : « ×quantité » ; "" : pas de pastille
+    star: bool = False  # une étoile dorée à la place de l'image
 
 
 @lru_cache(maxsize=32)
@@ -97,7 +101,15 @@ def card(view: View, scale: float) -> Image.Image:
     left, top, right = s(PAD), s(PAD), s(PAD + WIDTH)
     well = (left + s(14), top + s((HEIGHT - WELL) / 2))
     picture = icon_image(view.icon, s(ICON)) if view.icon else None
-    if picture is not None:
+    if view.star:
+        centre = (well[0] + s(WELL / 2), well[1] + s(WELL / 2))
+        points = []
+        for i in range(10):
+            radius = s(19) if i % 2 == 0 else s(8)
+            angle = math.pi / 2 + i * math.pi / 5
+            points.append((centre[0] + radius * math.cos(angle), centre[1] - radius * math.sin(angle)))
+        draw.polygon(points, fill=(*ACCENT, 255))
+    elif picture is not None:
         image.alpha_composite(picture, (well[0] + s((WELL - ICON) / 2), well[1] + s((WELL - ICON) / 2)))
     else:
         centre = (well[0] + s(WELL / 2), well[1] + s(WELL / 2))
@@ -106,19 +118,23 @@ def card(view: View, scale: float) -> Image.Image:
     text_x = well[0] + s(WELL + 12)
     # Pastille de quantité, à droite : elle s'allume un instant quand une vente complète le bandeau.
     badge_face = font(s(13), bold=True)
-    badge = f"×{view.quantity}"
-    badge_w = round(draw.textlength(badge, font=badge_face)) + s(16)
-    badge_box = (right - s(14) - badge_w, top + s(13), right - s(14), top + s(13 + 24))
-    glow = 1 - ease(view.bumped / BUMP_S)
-    fill = tuple(round(RAISED[i] + (ACCENT[i] - RAISED[i]) * glow) for i in range(3))
-    ink = GROUND if glow > 0.3 else ACCENT
-    draw.rounded_rectangle(badge_box, s(12), fill=(*fill, 255))
-    draw.text(((badge_box[0] + badge_box[2]) / 2, (badge_box[1] + badge_box[3]) / 2 - s(1)), badge, font=badge_face, fill=(*ink, 255), anchor="mm")
+    badge = f"×{view.quantity}" if view.badge is None else view.badge
+    if badge:
+        badge_w = round(draw.textlength(badge, font=badge_face)) + s(16)
+        badge_box = (right - s(14) - badge_w, top + s(13), right - s(14), top + s(13 + 24))
+        glow = 1 - ease(view.bumped / BUMP_S)
+        fill = tuple(round(RAISED[i] + (ACCENT[i] - RAISED[i]) * glow) for i in range(3))
+        ink = GROUND if glow > 0.3 else ACCENT
+        draw.rounded_rectangle(badge_box, s(12), fill=(*fill, 255))
+        draw.text(((badge_box[0] + badge_box[2]) / 2, (badge_box[1] + badge_box[3]) / 2 - s(1)), badge, font=badge_face, fill=(*ink, 255), anchor="mm")
+    else:
+        badge_box = (right - s(4), 0, right, 0)
 
-    draw.text((text_x, top + s(12)), "VENDU", font=font(s(10), bold=True), fill=(*MUTED, 255))
+    draw.text((text_x, top + s(12)), view.label, font=font(s(10), bold=True), fill=(*(ACCENT if view.star else MUTED), 255))
     name_face = font(s(15), bold=True)
     draw.text((text_x, top + s(25)), fit(draw, view.name, name_face, badge_box[0] - s(10) - text_x), font=name_face, fill=(*TEXT, 255))
-    draw.text((text_x, top + s(47)), view.gain, font=font(s(14), bold=True), fill=(*ACCENT, 255))
+    gain_face = font(s(14), bold=True)
+    draw.text((text_x, top + s(47)), fit(draw, view.gain, gain_face, right - s(14) - text_x), font=gain_face, fill=(*ACCENT, 255))
 
     # Fil du temps restant, en bas.
     share = min(1.0, max(0.0, view.left / view.total)) if view.total else 0.0

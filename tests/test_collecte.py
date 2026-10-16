@@ -1,0 +1,90 @@
+"""Collecte de forgemagie : cases, points, missions, règles, et ce que la fenêtre d'affichage annonce."""
+import json
+
+from dofustool import db
+from dofustool.analysis import collecte
+from dofustool.overlay import Forge
+
+DENSITY = {118: 1.0, 125: 0.2}
+
+
+def forge(passes, start=1000.0, character=None):
+    """Une base avec un objet (Force 30–50, Vitalité 100–200) et une rune de Force +1 ; passes : (puits avant, force avant, passé)."""
+    conn = db.connect(":memory:")
+    conn.execute("INSERT INTO items VALUES (10, 'Geta', 200, 'Bottes', 1, 1, 0, 0)")
+    conn.execute("INSERT INTO items VALUES (20, 'Rune Fo', 1, 'Rune de forgemagie', 1, 1, 0, 2)")
+    conn.executemany("INSERT INTO item_effects VALUES (?, ?, ?, ?)", [(10, 118, 30, 50), (10, 125, 100, 200), (20, 118, 1, 1)])
+    for i, (pool, strength, passed) in enumerate(passes):
+        before, after = [[118, strength], [125, 150]], [[118, strength + passed], [125, 150]]
+        conn.execute(
+            "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after, character_id) "
+            "VALUES (?, ?, 7, 10, 20, ?, 0, ?, 0, 'rune', ?, ?, ?, ?)",
+            (i, start + i, passed, pool, pool, json.dumps(before), json.dumps(after), character),
+        )
+    conn.commit()
+    return conn
+
+
+def test_a_pass_is_worth_more_where_the_group_has_little():
+    assert collecte.value(0, 600) == 10 and collecte.value(600, 600) == 1 and collecte.value(900, 600) == 1
+    state = collecte.compute(forge([(0.0, 40, 1)] * 3), DENSITY)
+    # Trois passages dans la même case presque vide : un peu moins de 10 points chacun.
+    assert 29.9 <= state.points <= 30 and state.passes == 3
+    cell = state.blocks[0]
+    assert cell.id == "normal" and sum(cell.counts.values()) == 3 and next(iter(cell.counts)).endswith("|sans")
+
+
+def test_a_mission_is_won_on_the_pass_that_completes_it_and_pays_its_bonus(tmp_path):
+    conn = forge([(0.0, 40, 1)] * 300, character=5)
+    conn.execute("INSERT INTO characters VALUES (5, 'Forgeronne', 200, 1.0)")
+    state = collecte.compute(conn, DENSITY)
+    assert state.done["sans-puits"] == (1299.0, 5)
+    sans = next(m for m in collecte.MISSIONS if m.id == "sans-puits")
+    assert state.points > sans.bonus + 300  # 300 passages, au moins 1 point chacun, et le bonus
+    focus = tmp_path / "collecte.json"
+    assert collecte.remember(conn, state, now=2000.0, focus_path=focus) == list(state.done)
+    assert collecte.remember(conn, state, now=2001.0) == []  # déjà inscrite
+    shown = json.loads(focus.read_text(encoding="utf-8"))["mission"]
+    assert shown["id"] not in state.done and shown["worth"] == 10.0
+    score = collecte.score(conn, state)
+    assert score["character"] == "Forgeronne" and score["missions"] == [[m, round(at, 1)] for m, (at, _) in sorted(state.done.items(), key=lambda kv: kv[1][0])]
+
+
+def test_rules_follow_the_evidence():
+    conn = forge([(0.0, 40, 1)] * 5)
+    state = collecte.compute(conn, DENSITY)
+    rules = {r["id"]: r for r in collecte.rules(conn, state, now=100.0)}
+    assert rules["outils-surs"]["status"] == "incertain" and rules["plafond-101"]["status"] == "incertain"
+    assert rules["outils-surs"]["was"] is None  # premier calcul : pas une nouveauté
+    # 40 orbes passés sans un échec : la règle des outils devient certaine, et c'est annoncé comme nouveau.
+    conn.executemany(
+        "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, before, after) "
+        "VALUES (?, ?, 7, 10, 20, 1, 0, 0, 0, 'orbe', '[]', '[]')",
+        [(100 + i, 2000.0 + i) for i in range(40)],
+    )
+    state = collecte.compute(conn, DENSITY)
+    rules = {r["id"]: r for r in collecte.rules(conn, state, now=200.0)}
+    assert rules["outils-surs"]["status"] == "certain" and rules["outils-surs"]["was"] == "Incertain, à trancher"
+    assert state.blocks[4].id == "orbs" and state.blocks[4].counts["orbe"] == 40
+
+
+def test_the_overlay_recalls_the_mission_once_per_workshop_and_announces_fresh_successes(tmp_path):
+    conn = forge([])
+    conn.execute("INSERT INTO characters VALUES (5, 'Forgeronne', 200, 1.0)")
+    conn.execute("INSERT INTO fm_missions_done VALUES ('orbes', 10.0, 5)")  # d'avant le lancement : jamais annoncée
+    conn.commit()
+    placed, focus = tmp_path / "forge.json", tmp_path / "collecte.json"
+    focus.write_text(json.dumps({"mission": {"id": "orbes", "title": "Le hasard des orbes", "text": "", "worth": 10.0, "bonus": 200, "count": 0, "target": 30}}), encoding="utf-8")
+    board = Forge(conn, placed, focus, {"orbes": ("Le hasard des orbes", 200), "duel-crit": ("Le duel des critiques", 500)}, 1000.0)
+    assert board.mission(1000.0) is None and board.successes(1000.0, "Lou") == []
+
+    placed.write_text(json.dumps({"placed": 1005.0, "item_id": 10}), encoding="utf-8")
+    assert board.mission(1010.0)["title"] == "Le hasard des orbes"
+    placed.write_text(json.dumps({"placed": 1100.0, "item_id": 10}), encoding="utf-8")
+    assert board.mission(1101.0) is None  # même séance d'atelier
+
+    conn.execute("INSERT INTO fm_missions_done VALUES ('duel-crit', 1150.0, 5)")
+    conn.execute("INSERT INTO shared_fm_scores VALUES ('xilef', 1160.0, 'Hupper', 10.0, 3, 0, ?)", (json.dumps([["orbes", 1155.0]]),))
+    conn.commit()
+    assert board.successes(1200.0, "Lou") == [("Forgeronne", "Le duel des critiques", 500), ("Hupper", "Le hasard des orbes", 200)]
+    assert board.successes(1201.0, "Lou") == []

@@ -89,10 +89,11 @@ try {
         }
     }
 
-    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, dernière rune du Huppermage.
+    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, dernière rune du Huppermage,
+    #        mission de forgemagie et succès du groupe.
     #        Une fenêtre à part, qui ne fait qu'afficher.
     Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if ($cfg.sale_notifications -or $cfg.huppermage_rune) {
+    if ($cfg.sale_notifications -or $cfg.huppermage_rune -or $cfg.fm_banners) {
         $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }

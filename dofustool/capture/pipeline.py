@@ -66,9 +66,12 @@ class Pipeline:
         keymap_path: Path | None = None,
         started_at: float | None = None,
         fight_path: Path | None = None,
+        forge_path: Path | None = None,
     ) -> None:
         # fight_path : où écrire le combat en cours pour la fenêtre d'affichage. Sans lui, le combat n'est pas suivi.
         self._fight_path = fight_path
+        self._forge_path = forge_path  # où signaler à la fenêtre d'affichage qu'un objet vient d'être posé sur l'atelier
+        self._forge_written = 0.0
         self.fight = live.Tracker() if fight_path else None
         if fight_path is not None:
             try:
@@ -206,6 +209,12 @@ class Pipeline:
                 else:
                     watch.fm_objects[placed.uid] = placed.effects
                     watch.fm_item = (placed.uid, placed.item_id)
+                    if self._forge_path is not None and msg.ts - self._forge_written > 30:
+                        self._forge_written = msg.ts
+                        try:
+                            live.write(self._forge_path, {"placed": msg.ts, "item_id": placed.item_id})
+                        except OSError:
+                            pass
             return
 
         mapping = self.keymap.get("fm_result")
@@ -232,7 +241,7 @@ class Pipeline:
             known = self.market.execute("SELECT 1 FROM fm_items WHERE uid = ?", (uid,)).fetchone()
             kind, pool_before = self._fm_tools()[rune], watch.fm_pools.get(uid)
             watch.fm_pools[uid] = result.pool
-            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid), kind, pool_before):
+            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid), kind, pool_before, watch.character_id):
                 if known is None:
                     row = self.market.execute("SELECT name FROM items WHERE id = ?", (result.object.item_id,)).fetchone()
                     log.info("Forgemagie : premier passage de rune sur %s.", row[0] if row else f"item {result.object.item_id}")

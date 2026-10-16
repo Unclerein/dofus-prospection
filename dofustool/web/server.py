@@ -167,6 +167,11 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(payload) if payload else self._not_found()
                 if path == "/api/forge/journal":
                     return self._json(api.forge_journal())
+                if path == "/api/forge/collecte":
+                    return self._json(api.forge_collecte())
+                if match := re.fullmatch(r"/api/forge/collecte/([a-z0-9-]{1,40})", path):
+                    payload = api.forge_collecte_items(match[1])
+                    return self._json(payload) if payload else self._not_found()
                 if path == "/api/forge/ranking":
                     return self._json(
                         api.forge_ranking(

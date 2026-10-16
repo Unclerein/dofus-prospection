@@ -114,6 +114,7 @@ VALUES = {
     "start_dashboard": True,
     "sale_notifications": True,
     "huppermage_rune": False,
+    "fm_banners": True,
 }
 
 

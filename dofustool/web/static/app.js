@@ -1379,20 +1379,182 @@ async function pageJobs() {
   return [head, controls, excluded, blocked, mageNote, kpis, steps, shopping];
 }
 
+// ---------------------------------------------------------------- Forgemagie : collecte
+
+const STATUS_ORDER = ['certain', 'probable', 'verifier', 'incertain', 'refute'];
+const STATUS_TAG = { certain: 'good', probable: 'info', verifier: '', incertain: 'exo', refute: 'bad' };
+const percent = (x, digits = 0) => `${(x * 100).toFixed(digits).replace('.', ',')} %`;
+
+function meter(fill, cls) {
+  const share = Math.max(0, Math.min(1, fill));
+  return h('span', { class: 'bar' + (cls ? ' ' + cls : ''), role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(share * 100)) },
+    h('span', { style: `width: ${(share * 100).toFixed(1)}%` }));
+}
+
+/** Carte des cases d'un bloc : chaque case se colore à mesure qu'elle se remplit. */
+function collecteHeat(block) {
+  const cells = block.cells.map((c) => ({ ...c, parts: c.cell.split('|') }));
+  // Lignes normales : n|ligne|objet|puits ; over/exo : o|type|poids over|puits.
+  const [splitAt, rowAt, colAt] = block.id === 'normal' ? [3, 1, 2] : [1, 2, 3];
+  const uniq = (i) => [...new Set(cells.map((c) => c.parts[i]))];
+  const grids = uniq(splitAt).map((split) => {
+    const mine = cells.filter((c) => c.parts[splitAt] === split);
+    const rows = uniq(rowAt), cols = uniq(colAt);
+    const title = block.id === 'normal' ? (split === 'sans' ? 'Sans puits' : 'Avec puits') : (split === 'over' ? 'Over' : 'Exo');
+    return h('div', { class: 'heat' },
+      h('div', { class: 'heat-title' }, title),
+      h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, block.id === 'normal' ? 'Ligne \\ objet' : 'Poids over/exo'), cols.map((col) => h('th', {}, col)))),
+        h('tbody', {}, rows.map((row) => h('tr', {}, h('th', {}, row), cols.map((col) => {
+          const c = mine.find((x) => x.parts[rowAt] === row && x.parts[colAt] === col);
+          const fill = c ? Math.min(1, c.count / c.target) : 0;
+          return h('td', { style: `background: rgba(227, 179, 65, ${(0.06 + 0.55 * fill).toFixed(3)})`, title: c ? `${fmt(c.count)} passages sur ${fmt(c.target)} voulus` : '' },
+            c ? (fill >= 1 ? '✓' : fmt(c.count)) : '');
+        }))))));
+  });
+  const axes = block.id === 'normal'
+    ? 'En ligne : remplissage de la ligne visée (valeur / max). En colonne : remplissage de l’objet (poids actuel / poids max).'
+    : 'En ligne : poids over/exo que l’objet porte déjà. En colonne : le puits avant la tentative.';
+  return h('div', { class: 'heat-block' }, h('strong', {}, block.title), h('p', { class: 'muted small' }, axes), h('div', { class: 'heat-grids' }, grids));
+}
+
+function collecteItems(items, mission) {
+  const crit = mission.id === 'duel-crit';
+  return h('div', { class: 'scroll' }, h('table', { class: 'collect-items' },
+    h('thead', {}, h('tr', {}, h('th', { class: 'l' }, 'Objet'), h('th', {}, 'Prix'),
+      h('th', { title: 'Passages du groupe sur ce modèle : un modèle peu forgé rapporte plus' }, 'Groupe'), h('th', { class: 'l', title: 'La rune la moins chère pour l’une de ses lignes' }, 'Rune'))),
+    h('tbody', {}, items.map((it) => h('tr', { ...rowLink(`#/item/${it.item_id}`), class: 'link' },
+      h('td', { class: 'l' }, itemCell(it.icon, it.name, `${it.type} · niv. ${it.level} · poids ${fmt(it.weight)}${crit ? ` · ${it.crit} % crit max` : ''}`, it.item_id)),
+      h('td', {}, [h('div', { class: 'fw' }, fmt(it.price)), h('div', { class: 'source' }, [it.source === 'craft' ? 'fabrication' : 'HDV', it.on_sale && h('span', { class: 'tag good' }, 'en vente')])]),
+      h('td', {}, it.group ? fmt(it.group) : h('span', { class: 'tag exo' }, 'jamais forgé')),
+      h('td', { class: 'l soft' }, it.rune ? [h('div', {}, it.rune.name), h('div', { class: 'source' }, `${fmt(it.rune.price)} k`)] : '—'))))));
+}
+
+async function collecteMissionList(mission, ui) {
+  const data = await cached(`collecte-${mission.id}`, `/api/forge/collecte/${mission.id}`);
+  const f = ui.filters[mission.id] || (ui.filters[mission.id] = { q: '', type: '', max: '' });
+  const types = [...new Set(data.items.map((it) => it.type))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const words = f.q.trim().toLowerCase();
+  const max = Number(f.max) || 0;
+  const shown = data.items.filter((it) => (!words || it.name.toLowerCase().includes(words)) && (!f.type || it.type === f.type) && (!max || (it.price !== null && it.price <= max)));
+  const controls = h('div', { class: 'filters' },
+    h('input', { id: `cq-${mission.id}`, type: 'search', placeholder: 'Chercher un objet…', value: f.q, oninput: (e) => { f.q = e.target.value; refresh(); } }),
+    h('select', { 'aria-label': 'Type d’objet', onchange: (e) => { f.type = e.target.value; refresh(); } },
+      h('option', { value: '' }, 'Tous les types'), types.map((t) => h('option', { value: t, selected: t === f.type }, t))),
+    h('input', { id: `cm-${mission.id}`, type: 'number', min: '0', step: '1000', placeholder: 'Prix max', value: f.max, oninput: (e) => { f.max = e.target.value; refresh(); } }),
+    h('span', { class: 'muted small' }, `${fmt(shown.length)} objet${shown.length > 1 ? 's' : ''}`));
+  return [controls, collecteItems(shown.slice(0, 300), mission), shown.length > 300 && h('p', { class: 'muted small' }, 'Les 300 premiers sont affichés : affine la recherche pour voir les autres.')];
+}
+
+async function missionCard(m, ui) {
+  const done = m.done_at !== null;
+  const open = ui.open.has(m.id);
+  const parts = m.parts.map((p) => h('div', { class: 'mission-part' },
+    p.label && h('span', { class: 'muted small part-label' }, p.label),
+    meter(p.count / m.target),
+    h('span', { class: 'small fw' }, `${fmt(Math.min(p.count, m.target))} / ${fmt(m.target)}`)));
+  const toggle = h('button', { class: 'btn', onclick: () => { if (open) ui.open.delete(m.id); else ui.open.add(m.id); refresh(); } },
+    open ? 'Ne garder que les 5 premiers' : `Voir les ${fmt(m.total)} objets`);
+  return h('article', { class: 'panel mission' + (done ? ' done' : ''), id: `mission-${m.id}` },
+    h('div', { class: 'mission-head' },
+      h('div', {}, h('h3', {}, m.title), h('p', { class: 'soft' }, m.text)),
+      h('div', { class: 'mission-reward' }, done ? h('span', { class: 'tag good' }, `Réussie le ${when(m.done_at, false)}`) : h('span', { class: 'tag mine' }, `+${fmt(m.bonus)} pts`),
+        h('div', { class: 'muted small', title: 'Points que rapporte en ce moment un passage qui fait avancer cette mission : plus les cases visées sont vides, plus c’est haut.' }, `≈ ${String(m.worth).replace('.', ',')} pts par passage`))),
+    h('div', { class: 'mission-parts' }, parts),
+    m.hint && h('p', { class: 'note small' }, m.hint),
+    m.items.length ? (open ? await collecteMissionList(m, ui) : collecteItems(m.items, m)) : h('p', { class: 'muted small' }, 'Aucun objet adapté avec un prix connu pour l’instant.'),
+    m.total > 5 && h('div', { class: 'mission-foot' }, toggle));
+}
+
+function ruleRow(rule, missions) {
+  const mission = rule.mission && missions.find((m) => m.id === rule.mission);
+  return h('div', { class: 'rule' },
+    h('div', { class: 'rule-main' },
+      h('div', { class: 'rule-title' }, h('strong', {}, rule.title), rule.was && h('span', { class: 'tag mine' }, `Nouveau : était « ${rule.was} »`)),
+      h('p', { class: 'soft small' }, rule.text),
+      h('p', { class: 'small' }, rule.evidence),
+      h('div', { class: 'rule-foot' },
+        h('span', { class: 'tag' }, rule.source),
+        mission && h('button', { class: 'linkish small', onclick: () => document.getElementById(`mission-${mission.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, `Mission : ${mission.title}`))),
+    h('div', { class: 'rule-side' },
+      h('span', { class: 'tag ' + STATUS_TAG[rule.status] }, rule.label),
+      h('div', { class: 'rule-confidence', title: 'Confiance dans le statut, d’après le nombre de cas et leur netteté' }, meter(rule.confidence, 'thin'), h('span', { class: 'muted small' }, `${fmt(rule.n)} cas`))));
+}
+
+async function forgeCollecte() {
+  const data = await cached('collecte', '/api/forge/collecte');
+  const ui = S.ui.collecte || (S.ui.collecte = { open: new Set(), filters: {} });
+  const me = data.leaderboard.find((row) => row.me);
+  const rank = data.leaderboard.indexOf(me) + 1;
+
+  const hero = h('section', { class: 'panel pad collect-hero' },
+    h('div', { class: 'collect-why' }, h('h2', {}, 'Pourquoi on collecte'), h('p', { class: 'soft' }, data.purpose)),
+    h('div', { class: 'collect-global' },
+      h('div', { class: 'collect-figure' }, h('span', { class: 'big-number' }, percent(data.overall, 1)), h('span', { class: 'muted' }, 'de la collecte')),
+      meter(data.overall, 'big'),
+      h('p', { class: 'muted small' }, `${fmt(data.passes)} passages rassemblés par le groupe. Chaque case ne compte que jusqu’à son objectif : forger toujours au même endroit ne fait plus avancer la barre.`)));
+
+  const kpis = h('section', { class: 'kpis' },
+    kpi('Mes points', fmt(me.points), `${rank === 1 ? '1er' : rank + 'e'} sur ${data.leaderboard.length}`, 'gain'),
+    kpi('Mes passages', fmt(me.passes), `${me.missions} mission${me.missions > 1 ? 's' : ''} réussie${me.missions > 1 ? 's' : ''}`),
+    kpi('Le coût de la science', fmt(data.science.kamas), data.science.per_point ? `kamas investis par le groupe · ${fmt(data.science.per_point)} k par point` : 'kamas investis par le groupe'));
+
+  const blocks = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Où en est le groupe'), h('span', { class: 'muted small' }, 'Un passage rapporte 10 points dans une case vide, 1 dans une case pleine')),
+    h('div', { class: 'collect-blocks' }, data.blocks.map((b) => h('div', { class: 'collect-block' },
+      h('div', { class: 'collect-block-head' }, h('strong', {}, b.title), h('span', { class: 'fw' }, percent(b.fill))),
+      meter(b.fill),
+      h('p', { class: 'muted small' }, b.explain),
+      h('p', { class: 'small' }, b.id === 'models'
+        ? `${fmt(b.count)} modèle${b.count > 1 ? 's' : ''} sur ${fmt(b.target)}${b.top_name ? ` · ${b.top_name} pèse ${percent(b.top_share)} des passages` : ''}`
+        : `${fmt(b.count)} passages · ${fmt(b.filled)} utiles sur ${fmt(b.target)}`),
+    ))),
+    h('details', { class: 'heat-wrap' }, h('summary', {}, 'Voir le détail des cases'),
+      h('div', { class: 'heat-blocks' }, data.blocks.filter((b) => b.id === 'normal' || b.id === 'extra').map(collecteHeat))));
+
+  const missions = h('section', { class: 'collect-missions', 'aria-label': 'Missions' },
+    h('div', { class: 'section-head' }, h('h2', {}, 'Missions'), h('p', { class: 'muted small' }, 'Personnelles. Chacune pousse vers ce qui manque et rapporte un bonus ; quand quelqu’un en réussit une, tout le groupe le voit passer par-dessus le jeu. Les objets sont triés par intérêt : les moins de 10 000 kamas d’abord, et un modèle que personne n’a forgé compte double.')),
+    h('div', { class: 'mission-grid' }, await Promise.all(data.missions.map((m) => missionCard(m, ui)))));
+
+  const rules = h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Les règles de la forgemagie'), h('span', { class: 'muted small' }, 'Le statut se met à jour à chaque passage du groupe')),
+    STATUS_ORDER.map((status) => {
+      const list = data.rules.filter((r) => r.status === status);
+      return list.length ? h('div', { class: 'rule-group' }, h('h3', {}, data.statuses[status]), list.map((r) => ruleRow(r, data.missions))) : null;
+    }));
+
+  const board = h('section', { class: 'panel collect-board' },
+    h('div', { class: 'panel-head' }, h('h2', {}, 'Classement'), h('span', { class: 'muted small' }, 'Points des passages et bonus des missions')),
+    h('div', { class: 'scroll' }, h('table', { style: 'min-width: 620px' },
+      h('thead', {}, h('tr', {}, h('th', { class: 'l' }, '#'), h('th', { class: 'l' }, 'Personnage'), h('th', {}, 'Points'), h('th', {}, 'Passages'), h('th', {}, 'Missions'), h('th', {}, 'Kamas investis'))),
+      h('tbody', {}, data.leaderboard.map((row, i) => h('tr', { class: row.me ? 'on' : '' },
+        h('td', { class: 'l strong' }, String(i + 1)),
+        h('td', { class: 'l' }, [h('div', { class: 'fw' }, [row.character || row.pseudo, row.me && h('span', { class: 'tag mine' }, 'toi')]), row.character && h('div', { class: 'source' }, row.pseudo)]),
+        h('td', { class: 'strong gain' }, fmt(row.points)),
+        h('td', { class: 'soft' }, fmt(row.passes)),
+        h('td', { class: 'soft' }, fmt(row.missions)),
+        h('td', { class: 'soft' }, fmt(row.kamas))))))));
+
+  return [hero, kpis, blocks, missions, rules, board];
+}
+
 // ---------------------------------------------------------------- page Forgemagie
 
 async function pageForge(r) {
   const options = (await cached('forgeOptions', '/api/forge/options')).items;
   const ranking = r.sub === 'ranking';
   const journal = r.sub === 'journal';
+  const collect = r.sub === 'collecte';
   const tabs = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vue' },
-    h('a', { href: '#/forge', role: 'tab', 'aria-selected': String(!ranking && !journal) }, 'Par objet'),
+    h('a', { href: '#/forge', role: 'tab', 'aria-selected': String(!ranking && !journal && !collect) }, 'Par objet'),
     h('a', { href: '#/forge/ranking', role: 'tab', 'aria-selected': String(ranking) }, 'Classement général'),
-    h('a', { href: '#/forge/journal', role: 'tab', 'aria-selected': String(journal) }, 'Mon journal'));
+    h('a', { href: '#/forge/journal', role: 'tab', 'aria-selected': String(journal) }, 'Mon journal'),
+    h('a', { href: '#/forge/collecte', role: 'tab', 'aria-selected': String(collect) }, 'Collecte'));
   const head = h('header', { class: 'head' },
     h('div', {}, h('h1', {}, 'Forgemagie')),
     tabs);
   if (journal) return [head, ...(await forgeJournal(r.id))];
+  if (collect) return [head, ...(await forgeCollecte())];
   if (!options.length) {
     return [head, h('div', { class: 'panel empty' }, "Aucune annonce d'équipement connue. Ouvre la fiche d'achat d'un équipement à l'HDV pendant une capture.")];
   }
@@ -2611,7 +2773,8 @@ async function pageConfig() {
         } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
-        h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'))));
+        h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'),
+        h('label', { class: 'check' }, h('input', { id: 'c-fm', type: 'checkbox', checked: d.fm_banners !== false, onchange: (e) => { d.fm_banners = e.target.checked; sync(); } }), 'Forgemagie : rappeler la mission du moment en ouvrant l\u2019atelier, et annoncer les succès du groupe'))));
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),
@@ -2690,6 +2853,7 @@ const DESTINATIONS = [
   ['#/forge', 'Forgemagie › Par objet', 'fm exo over jets criteres annonces'],
   ['#/forge/ranking', 'Forgemagie › Classement général', 'fm exo over metier rentable'],
   ['#/forge/journal', 'Forgemagie › Mon journal', 'fm runes passages cout marge puits'],
+  ['#/forge/collecte', 'Forgemagie › Collecte', 'fm collecte missions classement regles points simulateur'],
   ['#/trends', 'Tendances', 'prix hausse baisse signal'],
   ['#/item', 'Fiche objet', 'cours du marche prix historique'],
   ['#/ignored', 'Ignorés', 'masquer objets types'],
@@ -2763,6 +2927,15 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 20, date: '16 octobre 2026', title: 'Forgemagie : la Collecte, missions et classement', hash: '#/forge/collecte', go: 'Ouvrir la Collecte', points: [
+    ['Pourquoi :', 'retrouver par la mesure les vraies chances de la forgemagie, pour un simulateur calé sur de vrais passages. Forgemagie › Collecte rappelle le but et montre où en est le groupe.'],
+    ['Progression :', 'une barre globale et une par situation (lignes normales, over et exo, seuils, objets légers, orbes, diversité des objets). Une case pleine n’avance plus : il faut aller là où ça manque.'],
+    ['Points :', 'un passage rapporte 10 points dans une case vide, 1 dans une case pleine. Les missions rapportent un bonus, et chacune propose tous les objets adaptés, les moins chers et les moins forgés d’abord.'],
+    ['Règles :', 'ce qu’on sait de la forgemagie, du certain à l’incertain, avec les preuves de nos passages, mises à jour à chaque passage du groupe.'],
+    ['Classement :', 'points, passages, missions et kamas investis de chacun. Il affiche le nom du personnage qui forge : c’est la seule nouveauté qui part au hub.'],
+    ['Par-dessus le jeu :', 'en ouvrant l’atelier, la mission du moment ; quand quelqu’un du groupe réussit une mission, un bandeau « Succès débloqué ». Réglable dans Config.'],
+    ['Capture :', 'le rattrapage du journal de forgemagie ne retarde plus l’écoute du jeu.'],
+  ] },
   { id: 19, date: '16 octobre 2026', title: 'Forgemagie : on rassemble les passages pour percer les chances', hash: '#/forge/journal', go: 'Voir mon journal', points: [
     ['Objectif :', 'retrouver par la mesure comment le jeu tire le résultat d’un passage, pour un simulateur de forgemagie calé sur de vrais passages.'],
     ['Partagé entre nous :', 'chaque passage (l’objet avant et après, ce qui a été posé, le puits) part au hub et rejoint ceux des autres. L’exemplaire n’y est qu’une empreinte, l’heure est arrondie à la minute ; ni personnage, ni prix payé. Ton historique part une fois, tout seul.'],

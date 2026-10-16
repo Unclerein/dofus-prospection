@@ -18,14 +18,14 @@ from ..messages import load_runtime_keymap as load_keymap
 OFFLINE_LOGIN_WINDOW_S = 120.0  # comme capture.pipeline : l'annonce des ventes hors ligne arrive au début de la connexion
 
 
-FM_BACKFILL_VERSION = 1
+FM_BACKFILL_VERSION = 2  # 1 : état d'avant et d'après ; 2 : le personnage de chaque passage
 
 
 def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=None) -> dict[str, int]:
     """Rejoue les passages de forgemagie de l'archive : ajoute ceux qui manquent, complète les autres
-    (état d'avant et d'après, puits d'avant, type de ce qui a été posé), et relève les refus."""
+    (état d'avant et d'après, puits d'avant, type de ce qui a été posé, personnage), et relève les refus."""
     keymap = keymap or load_keymap()
-    placed, outcome = keymap.get("fm_object"), keymap.get("fm_result")
+    placed, outcome, select = keymap.get("fm_object"), keymap.get("fm_result"), keymap.get("character_select")
     if placed is None or outcome is None:
         return {}
     counts = {"passages de rune ajoutés": 0, "fabrications ajoutées": 0, "passages refusés relevés": 0}
@@ -34,11 +34,18 @@ def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=
     item: dict[int, tuple[int, int]] = {}  # dernier objet posé, par connexion
     objects: dict[tuple[int, int], tuple] = {}  # derniers effets connus d'un objet, par connexion
     pools: dict[tuple[int, int], float] = {}  # puits d'un objet après son dernier passage, par connexion
+    chosen: dict[int, int] = {}  # personnage choisi, par connexion
     rows = archive.execute(
-        "SELECT id, connection_id, ts, key, body FROM messages WHERE key IN (?, ?) AND direction = 's2c' ORDER BY connection_id, id",
-        (placed.key, outcome.key),
+        "SELECT id, connection_id, ts, key, body, direction FROM messages "
+        "WHERE (key IN (?, ?) AND direction = 's2c') OR (key = ? AND direction = 'c2s') ORDER BY connection_id, id",
+        (placed.key, outcome.key, select.key if select else ""),
     )
-    for source_id, connection_id, ts, key, body in rows:
+    for source_id, connection_id, ts, key, body, direction in rows:
+        if direction == "c2s":
+            character = characters.parse_selection(body, select)
+            if character is not None:
+                chosen[connection_id] = character
+            continue
         if key == placed.key:
             obj = fm.parse_object(body, placed)
             if obj is not None and obj.item_id in tools:
@@ -62,7 +69,7 @@ def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=
         if used is None or result.object.item_id in tools:
             continue
         slot = (connection_id, result.object.uid)
-        if db.save_fm_pass(market, source_id, ts, result, used, objects.get(slot), tools[used], pools.get(slot)):
+        if db.save_fm_pass(market, source_id, ts, result, used, objects.get(slot), tools[used], pools.get(slot), chosen.get(connection_id)):
             counts["passages de rune ajoutés"] += 1
         objects[slot] = result.object.effects
         pools[slot] = result.pool
@@ -73,14 +80,15 @@ def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=
 
 
 def fm_backfill_due(market: sqlite3.Connection) -> bool:
-    """Des passages enregistrés avant que leur état d'avant et d'après ne soit gardé : le rattrapage est à faire.
+    """Des passages enregistrés avant une version qui garde plus de choses (état d'avant et d'après,
+    personnage) : le rattrapage est à faire.
 
-    Une seule fois : un passage dont les messages ne sont plus dans l'archive ne sera jamais complété, et le
-    rattrapage ne doit pas se relancer à chaque démarrage pour lui."""
+    Une seule fois par version : un passage dont les messages ne sont plus dans l'archive ne sera jamais
+    complété, et le rattrapage ne doit pas se relancer à chaque démarrage pour lui."""
     done = market.execute("SELECT MAX(version) FROM fm_backfill").fetchone()[0] or 0
-    if done >= FM_BACKFILL_VERSION:
-        return False
-    return market.execute("SELECT 1 FROM fm_passes WHERE after IS NULL LIMIT 1").fetchone() is not None
+    if done < FM_BACKFILL_VERSION:
+        return market.execute("SELECT 1 FROM fm_passes LIMIT 1").fetchone() is not None
+    return False
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
