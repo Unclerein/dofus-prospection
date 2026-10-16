@@ -406,3 +406,19 @@ def test_stale_templates_are_fetched_again(api, monkeypatch):
     assert api.version()["stamp"] != stamp  # les pages calculées avec l'ancienne fiche sont refaites
     assert api.refresh_templates(conn, pause=0) == 0  # tout est à jour : plus rien à demander
     conn.close()
+
+
+def test_new_market_data_is_prepared_in_the_background_while_pages_answer_at_once(api, monkeypatch):
+    import time as clock
+
+    monkeypatch.setattr(Api, "background_refresh", True)
+    monkeypatch.setattr(Api, "fetch_missing_templates", lambda self: None)
+    conn = api.connect()
+    first = api._load(conn)
+    db.save_snapshot(conn, clock.time(), {289: 99, 500: 1234})  # un nouveau relevé de prix arrive
+    assert api._load(conn) is first  # la page répond tout de suite, avec la préparation d'avant
+    deadline = clock.time() + 10
+    while api._state is first and clock.time() < deadline:
+        clock.sleep(0.05)
+    assert api._state is not first and api._load(conn) is api._state  # la nouvelle est prête pour le clic suivant
+    conn.close()

@@ -124,6 +124,7 @@ class Api:
         self._lock = threading.Lock()
         self._stamp: list | None = None
         self._state: dict | None = None
+        self._rebuilding = False  # préparation commune en cours en arrière-plan
         self._fetching = threading.Lock()
         self._density: dict[int, float] | None = None  # densité de chaque caractéristique, lue une fois dans les données du jeu
         self._collecte: tuple[str, collecte.State, list] | None = None  # dernier calcul de la collecte, et le catalogue d'objets
@@ -250,6 +251,12 @@ class Api:
         stamp = data_stamp(conn, self.config_path)
         with self._lock:
             fresh = self._state is not None and self._stamp is not None
+            if (fresh and self.background_refresh and stamp != self._stamp and stamp[-1] == self._stamp[-1]
+                    and core_stamp(stamp) != core_stamp(self._stamp)):  # fmt: skip
+                # Nouvelles données de marché (capture, partage), réglages inchangés : la page reçoit la
+                # préparation d'il y a quelques secondes, la nouvelle se calcule à côté pour le clic suivant.
+                self._rebuild_soon()
+                return self._state
             if fresh and stamp != self._stamp and core_stamp(stamp) == core_stamp(self._stamp):
                 # Seuls le stock, mes lots ou mon journal ont bougé : les prix et les crafts restent valables.
                 if stamp[STOCK_POSITION] != self._stamp[STOCK_POSITION]:
@@ -261,32 +268,60 @@ class Api:
                     }  # fmt: skip
                 self._stamp = stamp
             if self._state is None or stamp != self._stamp:
-                cfg = config.load(self.config_path)
-                ws = data.build_workspace(conn, cfg, time.time())
-                trends, insufficient = data.trends_frame(conn, cfg, ws)
-                stock = Stock(conn)
-                crafts_from_stock = stock_crafts(conn, ws.calculator, stock)
-                self._state = {
-                    "stock": stock,
-                    "stock_crafts": crafts_from_stock,
-                    "craftable": {c.result.item.id: c.craftable for c in crafts_from_stock if c.craftable},
-                    "cfg": cfg,
-                    "ws": ws,
-                    "crafts": data.crafts_frame(conn, ws),
-                    "trends": trends,
-                    "insufficient": insufficient,
-                    "icons": dict(conn.execute("SELECT item_id, icon_id FROM item_icons")),
-                    "meta": {
-                        item_id: (type_name, CATEGORIES.get(category_id, "Autres"))
-                        for item_id, type_name, category_id in conn.execute("SELECT id, type_name, category_id FROM items")
-                    },
-                    "effects": forge.effect_names(conn),
-                    "assets": forge.effect_assets(conn),
-                    "priorities": forge.effect_priorities(conn),
-                    "recipe_uses": dict(conn.execute("SELECT item_id, COUNT(*) FROM recipe_ingredients GROUP BY item_id")),
-                }
+                self._state = self._build(conn)
                 self._stamp = stamp
             return self._state
+
+    def _rebuild_soon(self) -> None:
+        """Refait la préparation commune en arrière-plan ; une seule à la fois."""
+        if self._rebuilding:
+            return
+        self._rebuilding = True
+
+        def work() -> None:
+            try:
+                conn = self.connect()
+                try:
+                    stamp = data_stamp(conn, self.config_path)
+                    state = self._build(conn)
+                finally:
+                    conn.close()
+                with self._lock:
+                    if self._stamp is not None and stamp[-1] == self._stamp[-1]:  # réglages changés entre-temps : déjà refait
+                        self._state, self._stamp = state, stamp
+            except Exception:  # noqa: BLE001 — la page suivante la refera elle-même
+                log.exception("Préparation des données en arrière-plan")
+            finally:
+                self._rebuilding = False
+
+        threading.Thread(target=work, daemon=True, name="préparation des données").start()
+
+    def _build(self, conn: sqlite3.Connection) -> dict:
+        """Tout ce que les pages partagent : prix, crafts, tendances, stock, icônes, noms…"""
+        cfg = config.load(self.config_path)
+        ws = data.build_workspace(conn, cfg, time.time())
+        trends, insufficient = data.trends_frame(conn, cfg, ws)
+        stock = Stock(conn)
+        crafts_from_stock = stock_crafts(conn, ws.calculator, stock)
+        return {
+            "stock": stock,
+            "stock_crafts": crafts_from_stock,
+            "craftable": {c.result.item.id: c.craftable for c in crafts_from_stock if c.craftable},
+            "cfg": cfg,
+            "ws": ws,
+            "crafts": data.crafts_frame(conn, ws),
+            "trends": trends,
+            "insufficient": insufficient,
+            "icons": dict(conn.execute("SELECT item_id, icon_id FROM item_icons")),
+            "meta": {
+                item_id: (type_name, CATEGORIES.get(category_id, "Autres"))
+                for item_id, type_name, category_id in conn.execute("SELECT id, type_name, category_id FROM items")
+            },
+            "effects": forge.effect_names(conn),
+            "assets": forge.effect_assets(conn),
+            "priorities": forge.effect_priorities(conn),
+            "recipe_uses": dict(conn.execute("SELECT item_id, COUNT(*) FROM recipe_ingredients GROUP BY item_id")),
+        }
 
     def _hidden(self, conn: sqlite3.Connection, state: dict):
         """Renvoie une fonction disant si un item est masqué : ignoré lui-même, ou par son type."""
