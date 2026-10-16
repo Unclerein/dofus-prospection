@@ -338,7 +338,7 @@ def test_pa_and_ra_runes_are_priced_by_fusion():
 
     # Passages déjà chiffrés au prix de l'HDV : rechiffrés une seule fois, par fusion.
     conn.executemany(
-        "INSERT INTO fm_passes VALUES (?, 0, 7, 500, ?, 1, 0, 0, 0, ?)", [(10, 2, 50_000.0), (11, 4, 2_000_000.0)]
+        "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, rune_price) VALUES (?, 0, 7, 500, ?, 1, 0, 0, 0, ?)", [(10, 2, 50_000.0), (11, 4, 2_000_000.0)]
     )
     fmjournal.reprice_fusions_once(conn, sources)
     fmjournal.freeze_prices(conn, lambda r: fmjournal.fusion_price(r, sources, hdv))
@@ -346,3 +346,59 @@ def test_pa_and_ra_runes_are_priced_by_fusion():
     conn.execute("UPDATE fm_passes SET rune_price = 4000 WHERE source_id = 10")  # le prix figé ne bouge plus ensuite
     fmjournal.reprice_fusions_once(conn, sources)
     assert conn.execute("SELECT rune_price FROM fm_passes WHERE source_id = 10").fetchone()[0] == 4_000
+
+
+ECLAT = 3960
+
+
+def test_parse_refusal():
+    assert fm.parse_refusal(b"", RESULT) == (fm.REFUSED_EMPTY, None)
+    f = RESULT.fields
+    assert fm.parse_refusal(vi(f["status"], 4) + vi(3, 23_693), RESULT) == (4, 23_693)
+    assert fm.parse_refusal(fm_result_body(f), RESULT) is None  # un vrai résultat n'est pas un refus
+    assert fm.parse_refusal(vi(f["status"], 2), RESULT) is None
+    assert fm.parse_refusal(ld(2, b"xx"), RESULT) is None
+
+
+def test_every_tool_is_recorded_with_its_kind_the_pool_before_and_refusals(monkeypatch):
+    market = db.connect(":memory:")
+    market.execute("INSERT INTO items VALUES (?, 'Geta', 1, 'Bottes', 1, 1, 0, 0)", (BOOTS,))
+    market.execute("INSERT INTO items VALUES (?, 'Rune Vi', 1, 'Rune de forgemagie', 1, 1, 0, 2)", (RUNE,))
+    market.execute("INSERT INTO items VALUES (?, 'Éclat d''Incendie', 20, 'Éclat de forgemagie', 1, 1, 0, 2)", (ECLAT,))
+    keymap = {"fm_object": PLACED, "fm_result": RESULT}
+    pipeline = Pipeline(Archive(":memory:"), market, dict(keymap))
+    paid_by_lines = ((125, 350), (119, 40), (112, 5))  # la vitalité a payé : neutre
+    stream = (
+        framed(any_frame("obj", fm_object_body(PLACED.fields, item=BOOTS, uid=UID, effects=START)))
+        + framed(any_frame("obj", fm_object_body(PLACED.fields)))
+        + framed(any_frame("res", fm_result_body(RESULT.fields, pool=3.0, change=POOL_UP, effects=paid_by_lines)))
+        # rune passée sans toucher aux lignes, mais le puits a baissé : un neutre payé par le puits
+        + framed(any_frame("obj", fm_object_body(PLACED.fields)))
+        + framed(any_frame("res", fm_result_body(RESULT.fields, pool=2.0, change=POOL_DOWN, effects=paid_by_lines)))
+        + framed(any_frame("obj", fm_object_body(PLACED.fields, item=ECLAT, effects=((700, 1),))))
+        + framed(any_frame("res", fm_result_body(RESULT.fields, pool=2.0, change=POOL_SAME, effects=paid_by_lines + ((700, 1),))))
+        + framed(any_frame("obj", fm_object_body(PLACED.fields)))
+        + framed(any_frame("res", b""))  # refusé : rien ne bouge
+    )
+    feed(pipeline, stream)
+    rows = market.execute("SELECT rune_id, kind, pool_before, pool, before IS NOT NULL, after IS NOT NULL FROM fm_passes ORDER BY source_id").fetchall()
+    assert rows == [(RUNE, "rune", None, 3.0, 1, 1), (RUNE, "rune", 3.0, 2.0, 1, 1), (ECLAT, "eclat", 2.0, 2.0, 1, 1)]
+    (refusal,) = market.execute("SELECT uid, item_id, rune_id, status, code, before IS NOT NULL FROM fm_refusals").fetchall()
+    assert refusal == (UID, BOOTS, RUNE, fm.REFUSED_EMPTY, None, 1)
+    (dossier,) = fmjournal.load(market)
+    assert (dossier.sc, dossier.sn, dossier.ec) == (1, 2, 0)  # l'éclat ne rate jamais : compté critique
+
+    # Rattrapage : une base où ces passages ont été enregistrés à l'ancienne (sans état ni puits d'avant) est complétée.
+    pipeline.archive.commit()
+    old = db.connect(":memory:")
+    for row in market.execute("SELECT * FROM items"):
+        old.execute(f"INSERT INTO items VALUES ({','.join('?' * len(row))})", row)
+    from dofustool.db.backfill import backfill_fm, fm_backfill_due
+
+    old.executemany("INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    market.execute("SELECT source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change FROM fm_passes WHERE kind = 'rune'").fetchall())  # fmt: skip
+    assert fm_backfill_due(old)
+    done = backfill_fm(pipeline.archive.db, old, keymap)
+    assert done == {"passages de rune ajoutés": 1, "fabrications ajoutées": 0, "passages refusés relevés": 1}  # l'éclat, et le refus
+    assert not fm_backfill_due(old)
+    assert old.execute("SELECT kind, pool_before FROM fm_passes ORDER BY source_id").fetchall() == [("rune", None), ("rune", 3.0), ("eclat", 2.0)]

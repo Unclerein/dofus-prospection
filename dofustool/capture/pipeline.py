@@ -50,8 +50,10 @@ class _ConnWatch:
     inventory: storage.Storage | None = None  # dernier inventaire de cette connexion
     character_id: int | None = None  # personnage choisi sur cette connexion
     scan: identify.Scan | None = None  # ce que la connexion a échangé, pour retrouver les messages
-    fm_rune: int | None = None  # rune posée sur l'atelier de forgemagie, en attente de son résultat
+    fm_rune: int | None = None  # rune (ou potion, orbe…) posée sur l'atelier de forgemagie, en attente de son résultat
     fm_objects: dict[int, tuple] = field(default_factory=dict)  # derniers effets connus des objets posés sur l'atelier
+    fm_pools: dict[int, float] = field(default_factory=dict)  # puits connu de chaque objet après son dernier passage
+    fm_item: tuple[int, int] | None = None  # (exemplaire, objet) posé en dernier sur l'atelier
 
 
 class Pipeline:
@@ -89,6 +91,7 @@ class Pipeline:
         self._next_identify = 0.0
         self._context: identify.Context | None = None
         self._runes: frozenset[int] | None = None
+        self._tools: dict[int, str] | None = None
         self._stock_moved: float | None = None  # dernier mouvement d'inventaire pas encore signalé à l'interface
         self.backup_dir = db.MARKET_PATH.parent / "keymap-backups"
 
@@ -198,16 +201,24 @@ class Pipeline:
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             placed = fm.parse_object(msg.body, mapping)
             if placed is not None:
-                if placed.item_id in self._rune_ids():
+                if placed.item_id in self._fm_tools():
                     watch.fm_rune = placed.item_id
                 else:
                     watch.fm_objects[placed.uid] = placed.effects
+                    watch.fm_item = (placed.uid, placed.item_id)
             return
 
         mapping = self.keymap.get("fm_result")
         if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
             result = fm.parse_result(msg.body, mapping)
             rune, watch.fm_rune = watch.fm_rune, None
+            if result is None:
+                refusal = fm.parse_refusal(msg.body, mapping)
+                if refusal is not None and source_id is not None:
+                    before = watch.fm_objects.get(watch.fm_item[0]) if watch.fm_item else None
+                    if db.save_fm_refusal(self.market, source_id, msg.ts, *refusal, watch.fm_item, rune, before):
+                        log.info("Forgemagie : passage refusé par le serveur (état %d).", refusal[0])
+                return
             if result is not None and not result.forged and result.passed and source_id is not None:
                 # Ni puits ni rune : une fabrication ordinaire, qui entre dans le journal des crafts.
                 if db.save_craft(self.market, source_id, msg.ts, result.object):
@@ -215,11 +226,13 @@ class Pipeline:
                     log.info("Fabrication : %s x%d.", row[0] if row else f"item {result.object.item_id}", result.object.quantity)
                 return
             # Sans rune posée, c'est le résultat d'une autre fabrication, pas un passage de rune.
-            if result is None or rune is None or not result.forged or result.object.item_id in self._rune_ids():
+            if rune is None or not result.forged or result.object.item_id in self._fm_tools():
                 return
             uid = result.object.uid
             known = self.market.execute("SELECT 1 FROM fm_items WHERE uid = ?", (uid,)).fetchone()
-            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid)):
+            kind, pool_before = self._fm_tools()[rune], watch.fm_pools.get(uid)
+            watch.fm_pools[uid] = result.pool
+            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid), kind, pool_before):
                 if known is None:
                     row = self.market.execute("SELECT name FROM items WHERE id = ?", (result.object.item_id,)).fetchone()
                     log.info("Forgemagie : premier passage de rune sur %s.", row[0] if row else f"item {result.object.item_id}")
@@ -401,6 +414,12 @@ class Pipeline:
                 self._stock_moved = msg.ts
             return True
         return False
+
+    def _fm_tools(self) -> dict[int, str]:
+        """Ce qui peut se poser sur l'atelier à côté de l'objet : {objet : type} (messages.fm.TOOL_TYPES)."""
+        if self._tools is None:
+            self._tools = {row[0]: fm.TOOL_TYPES[row[1]] for row in self.market.execute(fm.TOOLS_SQL)}
+        return self._tools
 
     def _rune_ids(self) -> frozenset[int]:
         if self._runes is None:

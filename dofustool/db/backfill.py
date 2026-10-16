@@ -15,8 +15,60 @@ from ..messages import exchange
 from ..messages import inventory as moves
 from ..messages import load_runtime_keymap as load_keymap
 
-RUNES_SQL = "SELECT id FROM items WHERE type_name LIKE 'Rune %'"
 OFFLINE_LOGIN_WINDOW_S = 120.0  # comme capture.pipeline : l'annonce des ventes hors ligne arrive au début de la connexion
+
+
+def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=None) -> dict[str, int]:
+    """Rejoue les passages de forgemagie de l'archive : ajoute ceux qui manquent, complète les autres
+    (état d'avant et d'après, puits d'avant, type de ce qui a été posé), et relève les refus."""
+    keymap = keymap or load_keymap()
+    placed, outcome = keymap.get("fm_object"), keymap.get("fm_result")
+    if placed is None or outcome is None:
+        return {}
+    counts = {"passages de rune ajoutés": 0, "fabrications ajoutées": 0, "passages refusés relevés": 0}
+    tools = {row[0]: fm.TOOL_TYPES[row[1]] for row in market.execute(fm.TOOLS_SQL)}
+    rune: dict[int, int] = {}  # rune (ou potion, orbe…) posée sur l'atelier, par connexion
+    item: dict[int, tuple[int, int]] = {}  # dernier objet posé, par connexion
+    objects: dict[tuple[int, int], tuple] = {}  # derniers effets connus d'un objet, par connexion
+    pools: dict[tuple[int, int], float] = {}  # puits d'un objet après son dernier passage, par connexion
+    rows = archive.execute(
+        "SELECT id, connection_id, ts, key, body FROM messages WHERE key IN (?, ?) AND direction = 's2c' ORDER BY connection_id, id",
+        (placed.key, outcome.key),
+    )
+    for source_id, connection_id, ts, key, body in rows:
+        if key == placed.key:
+            obj = fm.parse_object(body, placed)
+            if obj is not None and obj.item_id in tools:
+                rune[connection_id] = obj.item_id
+            elif obj is not None:
+                objects[(connection_id, obj.uid)] = obj.effects
+                item[connection_id] = (obj.uid, obj.item_id)
+            continue
+        result = fm.parse_result(body, outcome)
+        used = rune.pop(connection_id, None)
+        if result is None:
+            refusal = fm.parse_refusal(body, outcome)
+            if refusal is not None:
+                at = item.get(connection_id)
+                before = objects.get((connection_id, at[0])) if at else None
+                counts["passages refusés relevés"] += db.save_fm_refusal(market, source_id, ts, *refusal, at, used, before)
+            continue
+        if not result.forged and result.passed:
+            counts["fabrications ajoutées"] += db.save_craft(market, source_id, ts, result.object)
+            continue
+        if used is None or result.object.item_id in tools:
+            continue
+        slot = (connection_id, result.object.uid)
+        if db.save_fm_pass(market, source_id, ts, result, used, objects.get(slot), tools[used], pools.get(slot)):
+            counts["passages de rune ajoutés"] += 1
+        objects[slot] = result.object.effects
+        pools[slot] = result.pool
+    return counts
+
+
+def fm_backfill_due(market: sqlite3.Connection) -> bool:
+    """Des passages enregistrés avant que leur état d'avant et d'après ne soit gardé : le rattrapage est à faire."""
+    return market.execute("SELECT 1 FROM fm_passes WHERE after IS NULL LIMIT 1").fetchone() is not None
 
 
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
@@ -125,37 +177,7 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             trade = trades.parse_text(body, text)
             if trade is not None and db.save_trade(market, source_id, trade, ts):
                 counts["ventes et achats ajoutés"] += 1
-    placed, outcome = keymap.get("fm_object"), keymap.get("fm_result")
-    if placed is not None and outcome is not None:
-        counts["passages de rune ajoutés"] = 0
-        runes = {row[0] for row in market.execute(RUNES_SQL)}
-        rune: dict[int, int] = {}  # rune posée sur l'atelier, par connexion
-        objects: dict[tuple[int, int], tuple] = {}  # derniers effets connus d'un objet, par connexion
-        rows = archive.execute(
-            "SELECT id, connection_id, ts, key, body FROM messages WHERE key IN (?, ?) AND direction = 's2c' "
-            "ORDER BY connection_id, id",
-            (placed.key, outcome.key),
-        )
-        counts["fabrications ajoutées"] = 0
-        for source_id, connection_id, ts, key, body in rows:
-            if key == placed.key:
-                obj = fm.parse_object(body, placed)
-                if obj is not None and obj.item_id in runes:
-                    rune[connection_id] = obj.item_id
-                elif obj is not None:
-                    objects[(connection_id, obj.uid)] = obj.effects
-                continue
-            result = fm.parse_result(body, outcome)
-            used = rune.pop(connection_id, None)
-            if result is not None and not result.forged and result.passed:
-                counts["fabrications ajoutées"] += db.save_craft(market, source_id, ts, result.object)
-                continue
-            if result is None or used is None or result.object.item_id in runes:
-                continue
-            slot = (connection_id, result.object.uid)
-            if db.save_fm_pass(market, source_id, ts, result, used, objects.get(slot)):
-                counts["passages de rune ajoutés"] += 1
-            objects[slot] = result.object.effects
+    counts.update(backfill_fm(archive, market, keymap))
     names = ("exchange_started", "fm_object", "exchange_modified", "exchange_removed", "exchange_kamas", "exchange_closed")
     if all(name in keymap for name in names):
         counts["échanges ajoutés"] = 0

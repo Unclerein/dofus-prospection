@@ -296,9 +296,24 @@ CREATE TABLE IF NOT EXISTS fm_passes (
     lost        INTEGER,           -- 1 : d'autres lignes ont baissé ; NULL : état d'avant inconnu
     pool        REAL,              -- puits après le passage
     pool_change INTEGER NOT NULL,  -- 0 inchangé, 1 en hausse, 2 en baisse
-    rune_price  REAL               -- prix unitaire de la rune, figé à la première consultation du journal
+    rune_price  REAL,              -- prix unitaire de la rune, figé à la première consultation du journal
+    kind        TEXT NOT NULL DEFAULT 'rune',  -- ce qui a été posé : messages.fm.TOOL_TYPES
+    pool_before REAL,              -- puits avant le passage, s'il a été vu
+    before      TEXT,              -- effets de l'objet juste avant (JSON), s'ils ont été vus
+    after       TEXT               -- effets de l'objet juste après (JSON)
 );
 CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
+-- Passages refusés par le serveur (rune impossible sur cet objet) : rien n'a bougé.
+CREATE TABLE IF NOT EXISTS fm_refusals (
+    source_id INTEGER PRIMARY KEY,
+    ts        REAL NOT NULL,
+    uid       INTEGER,            -- exemplaire posé sur l'atelier, s'il est connu
+    item_id   INTEGER,
+    rune_id   INTEGER,            -- ce qui était posé à côté, s'il est connu
+    status    INTEGER NOT NULL,   -- 0 : refus sans contenu ; autre : état renvoyé par le serveur
+    code      INTEGER,            -- numéro renvoyé avec cet état
+    before    TEXT                -- effets de l'objet au moment du refus (JSON), s'ils sont connus
+);
 -- Un dossier par exemplaire forgemagé : ses jets avant et après, et ce qu'il est devenu.
 CREATE TABLE IF NOT EXISTS fm_items (
     uid          INTEGER PRIMARY KEY,
@@ -417,6 +432,11 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(fm_items)")}
     if columns and "lot_uid" not in columns:  # renseigné au prochain relevé de l'onglet Vendre
         conn.execute("ALTER TABLE fm_items ADD COLUMN lot_uid INTEGER")
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(fm_passes)")}
+    if columns and "kind" not in columns:  # renseignés depuis l'archive au prochain démarrage de la capture
+        conn.execute("ALTER TABLE fm_passes ADD COLUMN kind TEXT NOT NULL DEFAULT 'rune'")
+        for name, kind in (("pool_before", "REAL"), ("before", "TEXT"), ("after", "TEXT")):
+            conn.execute(f"ALTER TABLE fm_passes ADD COLUMN {name} {kind}")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -1075,22 +1095,34 @@ def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts:
     return delta if cur.rowcount else 0
 
 
-def save_fm_pass(conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before) -> bool:
-    """Enregistre un passage de rune (messages.fm.Result). before : effets de l'objet juste avant, s'ils sont connus.
+def save_fm_pass(
+    conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before, kind: str = "rune", pool_before: float | None = None
+) -> bool:  # fmt: skip
+    """Enregistre un passage (messages.fm.Result). before : effets de l'objet juste avant, s'ils sont connus ;
+    kind : ce qui a été posé (messages.fm.TOOL_TYPES) ; pool_before : puits juste avant, s'il est connu.
 
-    Renvoie False s'il était déjà connu.
+    Renvoie False s'il était déjà connu ; ce qui lui manquait (état d'avant, puits d'avant) est alors complété.
     """
     obj = result.object
     after = {effect_id: value for effect_id, value in obj.effects if value is not None}
     lost = None
     if before is not None:
         lost = int(any(value > after.get(effect_id, 0) for effect_id, value in before if value is not None and value > 0))
+    encoded_before = json.dumps([list(e) for e in before]) if before is not None else None
+    encoded_after = json.dumps([list(e) for e in obj.effects])
     with conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-            (source_id, ts, obj.uid, obj.item_id, rune_id, int(result.passed), lost, result.pool, result.pool_change),
-        )
+            "INSERT OR IGNORE INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source_id, ts, obj.uid, obj.item_id, rune_id, int(result.passed), lost, result.pool, result.pool_change,
+             kind, pool_before, encoded_before, encoded_after),
+        )  # fmt: skip
         if not cur.rowcount:
+            conn.execute(
+                "UPDATE fm_passes SET kind = ?, after = COALESCE(after, ?), before = COALESCE(before, ?), "
+                "pool_before = COALESCE(pool_before, ?), lost = COALESCE(lost, ?) WHERE source_id = ?",
+                (kind, encoded_after, encoded_before, pool_before, lost, source_id),
+            )
             return False
         conn.execute(
             "INSERT INTO fm_items (uid, item_id, first_ts, last_ts, before, after) VALUES (?, ?, ?, ?, ?, ?) "
@@ -1105,6 +1137,19 @@ def save_fm_pass(conn: sqlite3.Connection, source_id: int, ts: float, result, ru
             ),
         )  # fmt: skip
     return True
+
+
+def save_fm_refusal(
+    conn: sqlite3.Connection, source_id: int, ts: float, status: int, code: int | None, item: tuple[int, int] | None, rune_id: int | None, before
+) -> bool:  # fmt: skip
+    """Enregistre un passage refusé par le serveur. item : (exemplaire, objet) posé sur l'atelier, s'il est connu."""
+    uid, item_id = item if item is not None else (None, None)
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (source_id, ts, uid, item_id, rune_id, status, code, json.dumps([list(e) for e in before]) if before is not None else None),
+        )
+    return bool(cur.rowcount)
 
 
 def set_fm_base_cost(conn: sqlite3.Connection, uid: int, cost: int | None) -> None:

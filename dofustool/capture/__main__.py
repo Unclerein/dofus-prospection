@@ -7,11 +7,13 @@ Usage : python -m dofustool.capture [--iface NOM]
 """
 import argparse
 import logging
+import sqlite3
 import sys
 import time
 
 from .. import config, db
-from ..archive import Archive
+from ..archive import ARCHIVE_PATH, Archive
+from ..db.backfill import backfill_fm, fm_backfill_due
 from ..messages import load_keymap, runtime_keymap_path
 from . import GAME_PORT
 from .pipeline import Pipeline, log
@@ -53,6 +55,9 @@ def main() -> int:
         if removed:
             log.info("Archive allégée : %d anciens messages non décodés supprimés.", removed)
         thinned = db.thin_snapshots(market, time.time())
+        if fm_backfill_due(market):  # une fois, après la mise à jour qui garde l'état des objets à chaque passage
+            done = backfill_fm(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
+            log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
         if thinned:
             log.info("Anciens relevés de prix moyens : %d supprimés, un par jour est gardé.", thinned)
     except Exception as exc:  # le ménage ne doit jamais empêcher la capture

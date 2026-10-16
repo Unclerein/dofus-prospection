@@ -2,9 +2,13 @@
 
 Un passage se classe d'après ce que le jeu en dit :
 
-  - succès critique : la rune est passée et aucune autre ligne n'a baissé ;
-  - succès neutre   : la rune est passée, d'autres lignes ont baissé ;
+  - succès critique : la rune est passée sans rien coûter, ni lignes ni puits ;
+  - succès neutre   : la rune est passée et l'objet a payé son poids, avec des lignes ou avec son puits ;
   - échec           : la rune n'est pas passée.
+
+Un neutre payé par le puits ne touche aucune ligne : seul le puits qui baisse le distingue d'un critique.
+Les potions, éclats, gravures, gemmes, orbes et runes de transcendance ne ratent jamais : ils comptent
+comme des critiques.
 
 Quand l'état de l'objet avant le passage n'a pas été vu (premier passage d'une connexion), la
 perte se déduit du puits : un puits qui bouge trahit une ligne perdue ou payée.
@@ -21,12 +25,17 @@ GAP_S = 120.0
 MODEL_PURCHASE_MAX_AGE_S = 7 * 86400.0
 
 
-def outcome(passed: bool, lost: bool | None, pool_change: int) -> str:
+POOL_DOWN = 2  # messages.fm.POOL_DOWN
+
+
+def outcome(passed: bool, lost: bool | None, pool_change: int, kind: str = "rune") -> str:
+    if kind != "rune":
+        return SC if passed else EC
     if not passed:
         return EC
     if lost is None:
         return SN if pool_change else SC
-    return SN if lost else SC
+    return SN if lost or pool_change == POOL_DOWN else SC
 
 
 @dataclass(slots=True)
@@ -145,13 +154,13 @@ def load(conn: sqlite3.Connection) -> list[Dossier]:
         )
     }
     previous: dict[int, float] = {}
-    for uid, ts, rune_id, passed, lost, pool, pool_change, price in conn.execute(
-        "SELECT uid, ts, rune_id, passed, lost, pool, pool_change, rune_price FROM fm_passes ORDER BY ts, source_id"
+    for uid, ts, rune_id, passed, lost, pool, pool_change, price, used in conn.execute(
+        "SELECT uid, ts, rune_id, passed, lost, pool, pool_change, rune_price, kind FROM fm_passes ORDER BY ts, source_id"
     ):
         dossier = dossiers.get(uid)
         if dossier is None:
             continue
-        kind = outcome(bool(passed), None if lost is None else bool(lost), pool_change)
+        kind = outcome(bool(passed), None if lost is None else bool(lost), pool_change, used)
         line = dossier.runes.setdefault(rune_id, RuneLine(rune_id))
         line.count += 1
         setattr(line, kind, getattr(line, kind) + 1)

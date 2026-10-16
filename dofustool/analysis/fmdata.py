@@ -4,9 +4,12 @@ But : retrouver par la mesure comment le jeu tire le résultat d'un passage (suc
 échec) et ce qu'il retire, pour un simulateur calé sur de vrais passages. Ankama n'a jamais publié
 la formule ; le calcul se fait sur le serveur, la capture n'en voit que les résultats.
 
-Pour chaque passage du journal (table fm_passes), on relit dans l'archive l'objet après le passage et
-l'objet juste avant (passage précédent du même exemplaire dans la même connexion, ou objet posé sur
-l'atelier), puis on y joint la rune, la ligne visée, ses bornes de base et les poids.
+Chaque passage du journal (table fm_passes) garde l'objet juste avant et juste après, et le puits
+d'avant. On y joint la rune, la ligne visée, ses bornes de base et les poids. Seules les runes de
+forgemagie entrent : potions, éclats, orbes et transcendances ne ratent jamais.
+
+Un succès est neutre dès que l'objet a payé quelque chose, avec ses lignes ou avec son puits ;
+critique seulement s'il n'a rien payé.
 
 Le fichier écrit (data/fm_dataset.csv) reste sur ce PC : il décrit les objets du joueur.
 
@@ -22,12 +25,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .. import db
-from ..archive import ARCHIVE_PATH
-from ..messages import fm, load_keymap, runtime_keymap_path
 
 STATIC_PATH = db.MARKET_PATH.parent / "static" / "dofus.sqlite"
 OUT_PATH = db.MARKET_PATH.parent / "fm_dataset.csv"
 SC, SN, EC = "sc", "sn", "ec"
+POOL_DOWN = 2  # messages.fm.POOL_DOWN
 
 
 @dataclass
@@ -57,7 +59,7 @@ class Pass:
     outcome: str  # sc, sn, ec
     lost_weight: float  # poids retiré aux autres lignes
     lost_lines: str  # JSON {caractéristique: points retirés}
-    before_known: int  # l'état d'avant vient d'un message vu (1) ou manque (0)
+    before_known: int  # l'état d'avant a été vu (1) ou manque (0)
 
 
 def densities(path: Path = STATIC_PATH) -> dict[int, float]:
@@ -82,65 +84,39 @@ def weight_of(effects: dict[int, int], density: dict[int, float]) -> float:
     return sum(value * density.get(effect, 0.0) for effect, value in effects.items() if value > 0)
 
 
-def build(market: sqlite3.Connection, archive: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
-    keymap = load_keymap(runtime_keymap_path())
-    result_map, object_map = keymap["fm_result"], keymap["fm_object"]
+def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
     items = {row[0]: (row[1], row[2] or "") for row in market.execute("SELECT id, level, type_name FROM items")}
     templates: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
     for item_id, effect, low, high in market.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         templates[item_id][effect] = (low, high)
-    passes = market.execute("SELECT source_id, ts, uid, item_id, rune_id, pool_change FROM fm_passes ORDER BY ts, source_id").fetchall()
-
-    # Objets posés sur l'atelier, par connexion : l'état d'avant au premier passage d'une séance.
-    placed: dict[int, list[tuple[float, fm.Object]]] = defaultdict(list)
-    for connection, ts, body in archive.execute("SELECT connection_id, ts, body FROM messages WHERE key = ? AND direction = 's2c' ORDER BY id", (object_map.key,)):
-        obj = fm.parse_object(bytes(body), object_map)
-        if obj is not None and obj.effects:
-            placed[connection].append((ts, obj))
-
-    last_after: dict[tuple[int, int], tuple[dict[int, int], float]] = {}
+    rows = market.execute(
+        "SELECT p.ts, p.uid, p.item_id, p.rune_id, p.passed, p.pool, p.pool_change, p.pool_before, p.before, p.after "
+        "FROM fm_passes p WHERE p.kind = 'rune' AND p.before IS NOT NULL AND p.after IS NOT NULL ORDER BY p.ts, p.source_id"
+    )
     out: list[Pass] = []
-    for source_id, ts, uid, item_id, rune_id, pool_change in passes:
-        row = archive.execute("SELECT connection_id, body FROM messages WHERE id = ?", (source_id,)).fetchone()
-        if row is None:
-            continue
-        connection, body = row
-        result = fm.parse_result(bytes(body), result_map)
-        if result is None or result.object.uid != uid:
-            continue
-        after = {e: v for e, v in result.object.effects if v is not None}
-        previous = last_after.get((connection, uid))
-        pool_before = None
-        if previous is not None:
-            before, pool_before = previous
-            known = 1
-        else:
-            seen = [o for t, o in placed.get(connection, []) if t <= ts and o.uid == uid]
-            before = {e: v for e, v in seen[-1].effects if v is not None} if seen else None
-            known = int(before is not None)
-        last_after[(connection, uid)] = (after, result.pool)
-        if before is None:
-            continue
+    for ts, uid, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
+        before = {e: v for e, v in json.loads(raw_before) if v is not None}
+        after = {e: v for e, v in json.loads(raw_after) if v is not None}
         rune = templates.get(rune_id, {})
         rune_effect, (rune_value, _) = next(iter(rune.items())) if len(rune) == 1 else (None, (None, None))
         base = templates.get(item_id, {})
         low, high = base.get(rune_effect, (None, None)) if rune_effect is not None else (None, None)
         line_before, line_after = before.get(rune_effect, 0), after.get(rune_effect, 0)
         lost = {e: v - after.get(e, 0) for e, v in before.items() if e != rune_effect and v > 0 and after.get(e, 0) < v}
-        lost_weight = sum(points * density.get(e, 0.0) for e, points in lost.items())
-        passed = int(result.passed)
-        outcome = EC if not passed else (SN if lost or (known == 0 and pool_change) else SC)
+        paid = lost or pool_change == POOL_DOWN
+        outcome = EC if not passed else (SN if paid else SC)
         level, type_name = items.get(item_id, (None, ""))
         out.append(Pass(
-            ts=ts, connection=connection, uid=uid, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
+            ts=ts, connection=0, uid=uid, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
             rune_effect=rune_effect, rune_value=rune_value,
             rune_weight=round(rune_value * density.get(rune_effect, 0.0), 3) if rune_effect is not None and rune_value is not None else None,
             line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high),
             line_weight_before=round(line_before * density.get(rune_effect, 0.0), 3) if rune_effect is not None else 0.0,
             item_weight_before=round(weight_of(before, density), 3),
             item_weight_max=round(sum(h * density.get(e, 0.0) for e, (_, h) in base.items() if h > 0), 3),
-            pool_before=pool_before, pool_after=result.pool, pool_change=result.pool_change, passed=passed, outcome=outcome,
-            lost_weight=round(lost_weight, 3), lost_lines=json.dumps(lost, separators=(",", ":")), before_known=known,
+            pool_before=pool_before, pool_after=pool_after, pool_change=pool_change, passed=passed, outcome=outcome,
+            lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3),
+            lost_lines=json.dumps(lost, separators=(",", ":")), before_known=1,
         ))  # fmt: skip
     return out
 
@@ -158,8 +134,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=OUT_PATH)
     args = parser.parse_args()
     market = sqlite3.connect(f"file:{db.MARKET_PATH.as_posix()}?mode=ro", uri=True)
-    archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
-    rows = build(market, archive, densities())
+    rows = build(market, densities())
     write(rows, args.out)
     print(f"{len(rows)} passages écrits dans {args.out}.")
     return 0

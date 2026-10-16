@@ -21,6 +21,20 @@ from ..protocol.wire import I32, LEN, VARINT, WireError, iter_fields, to_signed
 from . import Mapping
 
 PASSED = 2  # état du résultat : la rune est passée (1 : elle a échoué)
+REFUSED_EMPTY = 0  # refus sans aucun contenu : par exemple un over sur une ligne qui pèse 100 ou plus à son max
+
+# Ce qui se pose sur l'atelier à côté de l'objet, par type d'objet du jeu. Seules les runes de forgemagie
+# peuvent rater : les autres passent toujours, et ne comptent pas dans la mesure des chances.
+TOOL_TYPES = {
+    "Rune de forgemagie": "rune",
+    "Rune de transcendance": "transcendance",
+    "Potion de forgemagie": "potion",  # élément de l'arme
+    "Éclat de forgemagie": "eclat",  # élément des soins
+    "Gravure de forgemagie": "gravure",  # élément du vol de vie
+    "Gemme de forgemagie": "gemme",  # annule potion, éclat et gravure
+    "Orbe de forgemagie": "orbe",  # retire tous les jets, comme à la fabrication
+}
+TOOLS_SQL = f"SELECT id, type_name FROM items WHERE type_name IN ({', '.join(repr(t) for t in TOOL_TYPES)})"
 POOL_SAME, POOL_UP, POOL_DOWN = 0, 1, 2
 MAX_POOL = 10_000.0
 
@@ -93,6 +107,28 @@ def parse_object(body: bytes, mapping: Mapping) -> Object | None:
     except WireError:
         return None
     return found
+
+
+def parse_refusal(body: bytes, mapping: Mapping) -> tuple[int, int | None] | None:
+    """(état, code) d'un résultat qui n'en est pas un : le serveur a refusé le passage. None sinon.
+
+    Deux formes vues : un message vide (REFUSED_EMPTY), et un état inconnu suivi d'un numéro."""
+    if not body:
+        return REFUSED_EMPTY, None
+    status = code = None
+    try:
+        for number, wire_type, value in iter_fields(body):
+            if wire_type != VARINT:
+                return None
+            if number == mapping.fields["status"]:
+                status = value
+            else:
+                code = value
+    except WireError:
+        return None
+    if status is None or status in (1, PASSED):
+        return None
+    return status, code
 
 
 def parse_result(body: bytes, mapping: Mapping) -> Result | None:
