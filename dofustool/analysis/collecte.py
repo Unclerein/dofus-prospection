@@ -410,10 +410,10 @@ def judge_beyond_25(ctx):
         return "verifier", text + " Il faut 300 tentatives à 30 ou plus, et 100 entre 25 et 29.", cases, min(1.0, above[1] / 300) * 0.5
     if middle[1] < 100:
         return "verifier", text + " Au-delà de 30, c'est bien autour de 1 % ; reste à savoir entre 25 et 29.", cases, 0.5
-    if wilson(*middle)[1] <= 0.03:
-        return "probable", text + " Le seuil est à 25 : entre 25 et 29, c'est déjà autour de 1 %.", cases, 0.8
     if gap(middle, above) >= 2:
         return "probable", text + " Le seuil est à 30 : entre 25 et 29, ça passe encore normalement.", cases, 0.8
+    if middle[0] / middle[1] <= 0.03:
+        return "probable", text + " Le seuil est à 25 : entre 25 et 29, c'est déjà autour de 1 %, comme au-delà de 30.", cases, 0.8
     return "verifier", text + " Entre 25 et 29, ni normal ni 1 % : à creuser.", cases, 0.4
 
 
