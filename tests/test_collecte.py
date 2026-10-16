@@ -103,3 +103,19 @@ def test_overs_are_ranked_on_their_line():
     assert [collecte.over_rank(r) for r in rows] == [None, 1, 2, 3]  # ligne max 50, rune +1
     assert "r|1" in collecte.cells_of(rows[1]) and "r|2" in collecte.cells_of(rows[2])
     assert collecte.other_extra(rows[2]) == 0  # le point déjà au-delà du max est sur la ligne visée
+
+
+def test_the_workshop_banner_picks_the_mission_that_suits_the_placed_item(tmp_path):
+    conn = forge([])  # la Geta : Force 30–50, Vitalité 100–200, poids max 90 : un objet léger
+    placed, focus = tmp_path / "forge.json", tmp_path / "collecte.json"
+    missions = [{"id": i, "title": i, "text": "", "worth": w, "bonus": 100, "count": 0, "target": 10}
+                for i, w in (("au-dela-25", 10.0), ("orbes", 9.9), ("poids-plume", 9.0), ("duel-crit", 8.0))]
+    focus.write_text(json.dumps({"mission": missions[0], "missions": missions}), encoding="utf-8")
+    board = Forge(conn, placed, focus, {}, 1000.0, DENSITY)
+    # Objet léger, sans over : « Au-delà de 25 » ne va pas avec lui, « Poids plume » si.
+    placed.write_text(json.dumps({"placed": 1001.0, "item_id": 10, "effects": [[118, 45], [125, 150]]}), encoding="utf-8")
+    assert board.mission(1002.0)["id"] == "poids-plume"
+    # Objet inconnu de la base : la plus rentable de celles qui ne dépendent pas de l'objet.
+    placed.write_text(json.dumps({"placed": 1200.0, "item_id": 99, "effects": []}), encoding="utf-8")
+    assert board.mission(1201.0)["id"] == "orbes"
+    assert collecte.pick(missions, {}) == missions[0]  # sans rien savoir de l'objet : la mission du moment

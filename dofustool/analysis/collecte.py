@@ -670,16 +670,57 @@ def compute(conn: sqlite3.Connection, density: dict[int, float] | None = None) -
 FOCUS_PATH = Path(__file__).resolve().parents[2] / "data" / "collecte.json"
 
 
+def open_missions(state: State) -> list[dict]:
+    """Les missions pas encore réussies, celles dont les passages rapportent le plus d'abord (puis le plus gros bonus)."""
+    out = []
+    for entry in sorted(state.missions, key=lambda e: (-e["worth"], -e["mission"].bonus)):
+        mission = entry["mission"]
+        if mission.id in state.done:
+            continue
+        count = min(min(part["count"] for part in entry["parts"]), mission.target)
+        out.append({"id": mission.id, "title": mission.title, "text": mission.text, "worth": entry["worth"], "bonus": mission.bonus,
+                    "count": count, "target": mission.target})  # fmt: skip
+    return out
+
+
 def focus(state: State) -> dict | None:
     """La mission du moment : pas encore réussie, celle dont les passages rapportent le plus."""
-    open_ = [entry for entry in state.missions if entry["mission"].id not in state.done]
-    if not open_:
-        return None
-    entry = max(open_, key=lambda e: (e["worth"], e["mission"].bonus))
-    mission = entry["mission"]
-    count = min(min(part["count"] for part in entry["parts"]), mission.target)
-    return {"id": mission.id, "title": mission.title, "text": mission.text, "worth": entry["worth"], "bonus": mission.bonus,
-            "count": count, "target": mission.target}  # fmt: skip
+    missions = open_missions(state)
+    return missions[0] if missions else None
+
+
+def fits(mission_id: str, effects: dict[int, int], base: dict[int, tuple[int, int]], density: dict[int, float], group: int) -> bool | None:
+    """La mission va-t-elle avec l'objet posé sur l'atelier ? None : elle ne dépend pas de l'objet (puits, orbes…).
+
+    effects : ses lignes actuelles ; base : ses bornes de base ; group : passages du groupe sur ce modèle."""
+    weight = sum(high * density.get(e, 0.0) for e, (_, high) in base.items() if high and high > 0)
+    extra = fmdata.extra_weight(effects, base, density)
+    at_max = any(high and high > 0 and effects.get(e, 0) >= high for e, (_, high) in base.items())
+    if mission_id == "poids-plume":
+        return 0 < weight < LIGHT
+    if mission_id == "juste-milieu":
+        return LIGHT <= weight < 400
+    if mission_id == "duel-crit":
+        return base.get(CRIT, (None, None))[1] in (4, 7)
+    if mission_id == "au-dela-25":
+        return extra >= 25
+    if mission_id == "over-charge":
+        return LOADED <= extra < 25 and at_max
+    if mission_id == "lignes-basses":
+        return any(high and high > 0 and 0 < effects.get(e, 0) < 0.4 * high for e, (_, high) in base.items())
+    if mission_id == "explorateur":
+        return group == 0
+    return None
+
+
+def pick(missions: list[dict], verdicts: dict[str, bool | None]) -> dict | None:
+    """La mission à proposer pour l'objet posé : la plus rentable de celles qui vont avec lui, sinon la plus
+    rentable de celles qui ne dépendent pas de l'objet, sinon la mission du moment."""
+    for wanted in (True, None):
+        found = next((m for m in missions if verdicts.get(m["id"]) is wanted), None)
+        if found is not None:
+            return found
+    return missions[0] if missions else None
 
 
 def remember(conn: sqlite3.Connection, state: State, now: float | None = None, focus_path: Path | None = None) -> list[str]:
@@ -694,7 +735,9 @@ def remember(conn: sqlite3.Connection, state: State, now: float | None = None, f
         try:
             focus_path.parent.mkdir(parents=True, exist_ok=True)
             partial = focus_path.with_suffix(".tmp")
-            partial.write_text(json.dumps({"mission": focus(state), "updated": now}, ensure_ascii=False), encoding="utf-8")
+            missions = open_missions(state)
+            payload = {"mission": missions[0] if missions else None, "missions": missions, "updated": now}
+            partial.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(partial, focus_path)
         except OSError:
             pass

@@ -71,7 +71,7 @@ class Pipeline:
         # fight_path : où écrire le combat en cours pour la fenêtre d'affichage. Sans lui, le combat n'est pas suivi.
         self._fight_path = fight_path
         self._forge_path = forge_path  # où signaler à la fenêtre d'affichage qu'un objet vient d'être posé sur l'atelier
-        self._forge_written = 0.0
+        self._forge_written = (0.0, 0)  # dernier signalement : (date, exemplaire)
         self.fight = live.Tracker() if fight_path else None
         if fight_path is not None:
             try:
@@ -209,10 +209,11 @@ class Pipeline:
                 else:
                     watch.fm_objects[placed.uid] = placed.effects
                     watch.fm_item = (placed.uid, placed.item_id)
-                    if self._forge_path is not None and msg.ts - self._forge_written > 30:
-                        self._forge_written = msg.ts
+                    if self._forge_path is not None and (msg.ts - self._forge_written[0] > 30 or placed.uid != self._forge_written[1]):
+                        self._forge_written = (msg.ts, placed.uid)
                         try:
-                            live.write(self._forge_path, {"placed": msg.ts, "item_id": placed.item_id})
+                            effects = [[effect, value] for effect, value in placed.effects if value is not None]
+                            live.write(self._forge_path, {"placed": msg.ts, "item_id": placed.item_id, "effects": effects})
                         except OSError:
                             pass
             return

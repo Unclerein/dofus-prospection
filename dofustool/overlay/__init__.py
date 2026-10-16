@@ -10,6 +10,8 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from ..analysis.collecte import fits, pick
+
 SHOWN_S = 3.0  # durée d'un bandeau après la dernière vente qui l'a touché
 MAX_BANNERS = 4
 FRESH_S = 60.0  # une vente plus vieille que ça vient d'un rattrapage de l'archive : on ne l'annonce pas
@@ -100,7 +102,8 @@ class Board:
             banner.born = now  # il apparaîtra au retour du jeu
 
 
-FORGE_GAP_S = 20 * 60.0  # la mission n'est rappelée qu'une fois par séance d'atelier
+FORGE_GAP_S = 20 * 60.0  # la mission n'est rappelée qu'une fois par séance d'atelier…
+OTHER_ITEM_GAP_S = 2 * 60.0  # … sauf pour un autre modèle d'objet, au plus toutes les deux minutes
 PLACED_FRESH_S = 60.0  # un objet posé il y a plus longtemps ne déclenche plus rien
 SUCCESS_FRESH_S = 30 * 60.0  # une mission réussie il y a plus longtemps n'est plus annoncée
 
@@ -112,9 +115,12 @@ class Forge:
     moment, écrite par l'interface ; les succès viennent de la base (les siens, et ceux reçus par le hub).
     Rien de ce qui précède le lancement n'est annoncé."""
 
-    def __init__(self, conn: sqlite3.Connection, forge_path, focus_path, titles: dict[str, tuple[str, int]], now: float) -> None:
+    def __init__(self, conn: sqlite3.Connection, forge_path, focus_path, titles: dict[str, tuple[str, int]], now: float,
+                 density: dict[int, float] | None = None) -> None:  # fmt: skip
         self.conn, self.forge_path, self.focus_path, self.titles = conn, forge_path, focus_path, titles
+        self.density = density or {}  # poids d'un point de chaque caractéristique, pour juger l'objet posé
         self.shown_at = float("-inf")  # aucun rappel encore
+        self.shown_item = 0
         self.placed = _read(forge_path).get("placed", 0.0)
         self.mine = {row[0] for row in conn.execute("SELECT mission_id FROM fm_missions_done")}
         self.theirs = set(self._others())
@@ -129,17 +135,35 @@ class Forge:
 
     def mission(self, now: float) -> dict | None:
         """La mission à rappeler, si un objet vient d'être posé sur l'atelier."""
-        placed = _read(self.forge_path).get("placed", 0.0)
+        data = _read(self.forge_path)
+        placed = data.get("placed", 0.0)
         if not isinstance(placed, (int, float)) or placed <= self.placed:
             return None
         self.placed = placed
-        if now - placed > PLACED_FRESH_S or now - self.shown_at < FORGE_GAP_S:
+        item_id = data.get("item_id") if isinstance(data.get("item_id"), int) else 0
+        gap = FORGE_GAP_S if item_id == self.shown_item else OTHER_ITEM_GAP_S
+        if now - placed > PLACED_FRESH_S or now - self.shown_at < gap:
             return None
-        focus = _read(self.focus_path).get("mission")
-        if not isinstance(focus, dict) or not focus.get("title"):
+        focus = _read(self.focus_path)
+        missions = [m for m in focus.get("missions") or [focus.get("mission")] if isinstance(m, dict) and m.get("title")]
+        if not missions:
             return None
-        self.shown_at = now
-        return focus
+        chosen = pick(missions, self._verdicts(missions, item_id, data.get("effects")))
+        self.shown_at, self.shown_item = now, item_id
+        return chosen
+
+    def _verdicts(self, missions: list[dict], item_id: int, raw) -> dict:
+        """Pour chaque mission : va-t-elle avec l'objet posé ? (rien si l'objet est inconnu)"""
+        if not item_id or not isinstance(raw, list):
+            return {}
+        try:
+            effects = {e: v for e, v in raw if isinstance(e, int) and isinstance(v, int)}
+            base = {e: (low, high) for e, low, high in self.conn.execute("SELECT effect_id, min_value, max_value FROM item_effects WHERE item_id = ?", (item_id,))}
+            group = self.conn.execute("SELECT (SELECT COUNT(*) FROM fm_passes WHERE item_id = ?) + (SELECT COUNT(*) FROM shared_fm_passes WHERE item_id = ?)",
+                                      (item_id, item_id)).fetchone()[0]  # fmt: skip
+        except (sqlite3.Error, ValueError, TypeError):
+            return {}
+        return {m["id"]: fits(m["id"], effects, base, self.density, group) for m in missions}
 
     def successes(self, now: float, me: str | None) -> list[tuple[str, str, int]]:
         """Missions réussies depuis le dernier passage : (qui, mission, bonus)."""

@@ -379,11 +379,16 @@ def main() -> int:
     forge = None
     if cfg.fm_banners:
         from ..analysis.collecte import FOCUS_PATH, MISSIONS
+        from ..analysis.fmdata import densities
         from ..fight.live import FIGHT_PATH
 
         titles = {m.id: (m.title, m.bonus) for m in MISSIONS}
         try:
-            forge = Forge(conn, FIGHT_PATH.with_name("forge.json"), FOCUS_PATH, titles, time.time())
+            try:
+                density = densities()
+            except (sqlite3.Error, OSError):
+                density = {}  # sans les données du jeu, les missions liées au poids de l'objet ne sont pas proposées
+            forge = Forge(conn, FIGHT_PATH.with_name("forge.json"), FOCUS_PATH, titles, time.time(), density)
         except sqlite3.Error:
             forge = None  # base d'avant la collecte : la capture la mettra à jour
     Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game,
