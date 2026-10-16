@@ -73,7 +73,7 @@ def test_rules_follow_the_evidence():
         [(100 + i, 2000.0 + i) for i in range(40)],
     )
     state = collecte.compute(conn, DENSITY)
-    assert state.blocks[4].id == "orbs" and state.blocks[4].counts["orbe"] == 40
+    assert next(b for b in state.blocks if b.id == "orbs").counts["orbe"] == 40
 
 
 def test_the_overlay_recalls_the_mission_once_per_workshop_and_announces_fresh_successes(tmp_path):
@@ -96,3 +96,10 @@ def test_the_overlay_recalls_the_mission_once_per_workshop_and_announces_fresh_s
     conn.commit()
     assert board.successes(1200.0, "Lou") == [("Forgeronne", "Le duel des critiques", 500), ("Hupper", "Le hasard des orbes", 200)]
     assert board.successes(1201.0, "Lou") == []
+
+
+def test_overs_are_ranked_on_their_line():
+    rows = collecte.compute(forge([(5.0, 49, 1), (5.0, 50, 1), (5.0, 51, 0), (5.0, 52, 1)]), DENSITY).rows
+    assert [collecte.over_rank(r) for r in rows] == [None, 1, 2, 3]  # ligne max 50, rune +1
+    assert "r|1" in collecte.cells_of(rows[1]) and "r|2" in collecte.cells_of(rows[2])
+    assert collecte.other_extra(rows[2]) == 0  # le point déjà au-delà du max est sur la ligne visée

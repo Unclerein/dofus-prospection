@@ -44,6 +44,8 @@ EXTRA_BINS = ((10, "0–10"), (25, "10–25"), (50, "25–50"), (math.inf, "50�
 POOL_LEVELS = ("sans puits", "petit puits", "gros puits")  # 0, moins de 20, 20 et plus
 
 NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET, ORB_TARGET = 600, 700, 2000, 8000, 1000
+RANK_TARGET, LOADED_TARGET = 600, 300
+LOADED = 8  # poids over/exo porté ailleurs sur l'objet à partir duquel un premier over compte comme « chargé »
 MODELS_TARGET, MODEL_PASSES = 50, 100  # 50 modèles d'objets avec au moins 100 passages chacun
 
 
@@ -73,7 +75,10 @@ def blocks() -> list[Block]:
     return [
         Block("normal", "Lignes normales", "Runes sous le max de la ligne : la courbe critique, neutre, échec selon le remplissage de la ligne et de l'objet, avec et sans puits.", normal),
         Block("extra", "Over et exo", "Tentatives au-delà du max ou hors des lignes de base, selon le poids over/exo déjà porté par l'objet et le puits.", extra),
-        Block("edges", "Seuils", "Autour de 25 de poids over/exo (la règle du 1 %) et du plafond de 101.", {"s|25": EDGE_TARGET, "s|101": EDGE_TARGET}),
+        Block("ranks", "Rang des overs", "Premier, deuxième, troisième point au-delà du max d'une même ligne, sur un objet sous 25 de poids over/exo ; "
+              "et des premiers overs sur un objet qui porte déjà un over ou un exo ailleurs, pour savoir si c'est le rang ou ce poids qui compte.",
+              {"r|1": RANK_TARGET, "r|2": RANK_TARGET, "r|3": RANK_TARGET, "r|1|chargé": LOADED_TARGET}),
+        Block("edges", "Seuil des 25", "Autour de 25 de poids over/exo : la règle du 1 % de critique.", {"s|25": EDGE_TARGET}),
         Block("light", "Objets légers", f"Objets de poids max inférieur à {LIGHT} : la formule tient-elle en bas de l'échelle ?", {"l": LIGHT_TARGET}),
         Block("orbs", "Orbes", "Comment le jeu tire les jets d'un objet, comme à sa fabrication.", {"orbe": ORB_TARGET}),
     ]  # fmt: skip
@@ -100,15 +105,33 @@ def cells_of(row) -> list[str]:
             out.append(f"o|{row.line_kind}|{band(row.extra_before, EXTRA_BINS)}|{level}")
         if 20 <= row.extra_before < 30:
             out.append("s|25")
-        if row.rune_weight is not None and 90 <= row.extra_before + row.rune_weight <= 115:
-            out.append("s|101")
     elif row.line_max and pool is not None and row.item_weight_max:
         line = band(row.line_before / row.line_max, LINE_BINS)
         item = band(row.item_weight_before / row.item_weight_max, ITEM_BINS)
         out.append(f"n|{line}|{item}|{'avec' if pool > 0 else 'sans'}")
+    rank = over_rank(row)
+    if rank is not None and rank <= 3:
+        out.append(f"r|{rank}")
+        if rank == 1 and LOADED <= other_extra(row) < 25:
+            out.append("r|1|chargé")
     if row.item_weight_max and row.item_weight_max < LIGHT:
         out.append("l")
     return out
+
+
+def over_rank(row) -> int | None:
+    """Rang de l'over tenté sur la ligne visée : 1 si elle est au max, 2 si elle le dépasse déjà d'une rune…
+    None si ce n'est pas un over, ou si l'objet porte déjà 25 de poids over/exo (là, c'est la règle du 1 %)."""
+    if row.line_max is None or row.line_before < row.line_max or not row.rune_value or row.extra_before >= 25:
+        return None
+    return (row.line_before - row.line_max) // row.rune_value + 1
+
+
+def other_extra(row) -> float:
+    """Poids over/exo que l'objet porte ailleurs que sur la ligne visée."""
+    if not row.line_max or not row.rune_value or row.rune_weight is None:
+        return row.extra_before
+    return row.extra_before - max(0, row.line_before - row.line_max) * row.rune_weight / row.rune_value
 
 
 def value(count: int, goal: int) -> float:
@@ -175,9 +198,9 @@ MISSIONS = [
     Mission("au-dela-25", "Au-delà de 25", "300 tentatives d'over ou d'exo sur un objet qui porte déjà 25 de poids over/exo ou plus.", 300, 500, "seuil-25",
             lambda r: "" if _extra(r) and r.extra_before >= 25 else None, lambda it: it.weight < LIGHT, lambda c: c == "s|25" or "|25–50|" in c or "|50–101|" in c,
             "Le moins cher : monter un over avec des runes de poids 1 (Fo, Cha) sur un objet léger, puis tenter au-delà de 25."),
-    Mission("plafond-101", "Contre le plafond", "50 tentatives qui feraient dépasser 101 de poids over/exo sur l'objet.", 50, 300, "plafond-101",
-            lambda r: "" if _extra(r) and r.rune_weight is not None and r.extra_before + r.rune_weight > 101 else None, lambda it: it.weight < LIGHT,
-            lambda c: c == "s|101", "Monter près de 101 avec des runes Ra (poids 10), puis tenter une rune qui ferait dépasser."),
+    Mission("over-charge", "Premier over, objet chargé", "50 premiers overs (ligne au max) sur un objet qui porte déjà entre 8 et 25 de poids over/exo ailleurs.",
+            50, 400, "rang-over", lambda r: "" if over_rank(r) == 1 and LOADED <= other_extra(r) < 25 else None, lambda it: it.weight < 400,
+            lambda c: c == "r|1|chargé", "Par exemple : un objet avec un exo ou un over déjà passé, et une autre ligne montée à son max ; on tente l'over sur celle-ci."),
     Mission("duel-crit", "Le duel des critiques", "50 tentatives d'over en % critique sur un objet à 4 % max, et 50 sur un objet à 7 % max.", 50, 500, "petit-max",
             lambda r: (f"{r.line_max} %" if r.rune_effect == CRIT and r.line_kind == "over" and r.line_max in (4, 7) else None),
             lambda it: it.crit in (4, 7), lambda c: c.startswith("o|over|"),
@@ -419,6 +442,26 @@ def judge_partial_pool(ctx):
     return "verifier", text + " Pas encore d'écart net.", a[1] + b[1], 0.3
 
 
+def judge_over_rank(ctx):
+    first = [r for r in ctx.rows if over_rank(r) == 1 and other_extra(r) < 5]
+    second = [r for r in ctx.rows if over_rank(r) == 2]
+    loaded = [r for r in ctx.rows if over_rank(r) == 1 and LOADED <= other_extra(r) < 25]
+    rate = lambda rows: (sum(r.line_after > r.line_before for r in rows), len(rows))  # noqa: E731
+    a, b, c = rate(first), rate(second), rate(loaded)
+    show = lambda x: f"{pct(x[0] / x[1])} ({x[1]})" if x[1] else "— (0)"  # noqa: E731
+    text = f"Passés : 1er over {show(a)}, 2e over {show(b)} ; 1er over sur un objet qui porte déjà un over ou un exo ailleurs : {show(c)}."
+    if min(a[1], b[1]) < 100:
+        return "verifier", text + " Il faut au moins 100 tentatives de 1er et de 2e over.", a[1] + b[1], 0.2
+    drop = gap(a, b)
+    if drop < 2:
+        return "refute", text + " Pas d'écart net entre le 1er et le 2e over.", a[1] + b[1], 0.5
+    if c[1] < 50:
+        return "verifier", text + " Le 2e over passe bien moins souvent ; reste à savoir si c'est le rang ou le poids déjà porté par l'objet : il faut 50 premiers overs sur un objet chargé.", a[1] + b[1] + c[1], 0.5
+    if gap(c, b) >= 2:
+        return "probable", text + " Un 1er over sur un objet chargé passe bien mieux qu'un 2e over : c'est le rang qui compte.", a[1] + b[1] + c[1], min(1.0, gap(c, b) / 4)
+    return "refute", text + " Un 1er over sur un objet chargé passe aussi mal qu'un 2e over : c'est le poids déjà porté qui compte, pas le rang.", a[1] + b[1] + c[1], 0.6
+
+
 def judge_item_weight(ctx):
     normal = [r for r in ctx.rows if not _extra(r) and r.item_weight_max]
     light = [r for r in normal if r.item_weight_before / r.item_weight_max < 0.6]
@@ -472,11 +515,13 @@ RULES = [
          "Un over est refusé s'il porterait la ligne au-delà de 101 de poids, en comptant les autres overs et exos de l'objet. "
          "Sur une ligne qui pèse 100 à son max, un over ne passe donc que d'un point de poids.",
          "Mesuré sur nos passages (remplace « pas d'over sur une ligne qui pèse 100 ou plus »)", judge_line_cap),
-    Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté, validé par le groupe", judge_cap, "plafond-101"),
+    Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté, validé par le groupe", judge_cap),
     Rule("seuil-25", "Au-delà de 25 de poids over/exo, 1 % de critique", "Quand l'objet porte déjà 25 de poids over/exo ou plus, une nouvelle tentative ne passe qu'en critique, environ une fois sur cent.",
          "Communauté", judge_beyond_25, "au-dela-25"),
     Rule("neutre-50", "La part de neutres ne dépend pas de la ligne", "Sur une ligne normale, la part des succès qui coûtent quelque chose (lignes ou puits) est la même, ligne basse ou presque au max.",
          "Mesuré sur nos passages", judge_neutral, "lignes-basses"),
+    Rule("rang-over", "Chaque over de plus sur la même ligne est plus dur", "Le 2e point au-delà du max d'une ligne passe bien moins souvent que le 1er, sur un objet sous 25 de poids over/exo.",
+         "Théorie à vérifier", judge_over_rank, "over-charge"),
     Rule("puits-aide", "Le puits aide over et exo", "Une tentative d'over ou d'exo passe plus souvent quand l'objet a assez de puits pour la payer.", "Théorie à vérifier", judge_pool_helps, "exo-sec"),
     Rule("puits-partiel", "Même un petit puits aide", "Un puits trop petit pour payer la rune aide quand même over et exo, comparé à pas de puits du tout.",
          "Théorie à vérifier", judge_partial_pool, "exo-sec"),
