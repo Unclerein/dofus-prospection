@@ -74,8 +74,9 @@ amis », avec ton pseudo. Laisser « Ce PC héberge le hub » décoché, puis **
 Dans la minute, l'onglet **État** affiche « Synchronisé à l'instant » et la liste des joueurs du
 groupe. À partir de là, les prix que chacun relève à l'HDV profitent à tous.
 
-Seuls les prix du marché circulent. Ton stock, tes ventes, tes personnages et le chat ne quittent
-jamais ton PC.
+Circulent les prix du marché et tes passages de forgemagie (l'objet avant et après, ce qui a été
+posé, le puits), qui servent à percer les chances du jeu. Ton stock, tes ventes, tes personnages, les
+prix que tu paies et le chat ne quittent jamais ton PC.
 
 ---
 
