@@ -255,6 +255,14 @@ def test_pipeline_records_passes_and_backfill_does_not_double_them(caplog, monke
     fresh = db.connect(":memory:")
     fresh.execute("INSERT INTO items VALUES (?, 'Rune Vi', 1, 'Rune de forgemagie', 1, 1, 0, 2)", (RUNE,))
     assert backfill(pipeline.archive.db, fresh)["passages de rune ajoutés"] == 2
+    # Fait une fois pour toutes : un passage que l'archive ne permet pas de compléter ne relance pas le
+    # rattrapage à chaque démarrage (il retardait l'écoute du jeu).
+    from dofustool.db.backfill import fm_backfill_due
+
+    fresh.execute("UPDATE fm_passes SET after = NULL")
+    assert not fm_backfill_due(fresh)
+    fresh.execute("DELETE FROM fm_backfill")
+    assert fm_backfill_due(fresh)
     market.close()
     fresh.close()
 

@@ -18,6 +18,9 @@ from ..messages import load_runtime_keymap as load_keymap
 OFFLINE_LOGIN_WINDOW_S = 120.0  # comme capture.pipeline : l'annonce des ventes hors ligne arrive au début de la connexion
 
 
+FM_BACKFILL_VERSION = 1
+
+
 def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=None) -> dict[str, int]:
     """Rejoue les passages de forgemagie de l'archive : ajoute ceux qui manquent, complète les autres
     (état d'avant et d'après, puits d'avant, type de ce qui a été posé), et relève les refus."""
@@ -63,11 +66,20 @@ def backfill_fm(archive: sqlite3.Connection, market: sqlite3.Connection, keymap=
             counts["passages de rune ajoutés"] += 1
         objects[slot] = result.object.effects
         pools[slot] = result.pool
+    with market:  # fait une fois pour toutes, même si des passages n'ont pas pu être complétés (archive allégée)
+        market.execute("DELETE FROM fm_backfill")
+        market.execute("INSERT INTO fm_backfill VALUES (?)", (FM_BACKFILL_VERSION,))
     return counts
 
 
 def fm_backfill_due(market: sqlite3.Connection) -> bool:
-    """Des passages enregistrés avant que leur état d'avant et d'après ne soit gardé : le rattrapage est à faire."""
+    """Des passages enregistrés avant que leur état d'avant et d'après ne soit gardé : le rattrapage est à faire.
+
+    Une seule fois : un passage dont les messages ne sont plus dans l'archive ne sera jamais complété, et le
+    rattrapage ne doit pas se relancer à chaque démarrage pour lui."""
+    done = market.execute("SELECT MAX(version) FROM fm_backfill").fetchone()[0] or 0
+    if done >= FM_BACKFILL_VERSION:
+        return False
     return market.execute("SELECT 1 FROM fm_passes WHERE after IS NULL LIMIT 1").fetchone() is not None
 
 

@@ -55,9 +55,6 @@ def main() -> int:
         if removed:
             log.info("Archive allégée : %d anciens messages non décodés supprimés.", removed)
         thinned = db.thin_snapshots(market, time.time())
-        if fm_backfill_due(market):  # une fois, après la mise à jour qui garde l'état des objets à chaque passage
-            done = backfill_fm(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
-            log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
         if thinned:
             log.info("Anciens relevés de prix moyens : %d supprimés, un par jour est gardé.", thinned)
     except Exception as exc:  # le ménage ne doit jamais empêcher la capture
@@ -72,6 +69,15 @@ def main() -> int:
     db.set_status(market, started_ts=time.time(), stopped_ts="", decode_alert="", awaiting_prices_since="", last_packet_ts="")
     READY_FILE.write_text(str(time.time()), encoding="utf-8")
     log.info("Capture démarrée (écoute passive, tcp port %d, interface « %s »).", GAME_PORT, source.iface)
+    # Rattrapage du journal de forgemagie, une fois après la mise à jour qui garde l'état des objets à chaque
+    # passage. Il peut durer : il se fait écoute déjà lancée, les paquets du jeu attendent leur tour.
+    try:
+        if fm_backfill_due(market):
+            log.info("Journal de forgemagie : rattrapage depuis l'archive, la capture écoute déjà…")
+            done = backfill_fm(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
+            log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
+    except Exception as exc:  # le rattrapage ne doit jamais empêcher la capture
+        log.warning("Rattrapage du journal de forgemagie non fait : %s", exc)
     noted = 0.0  # dernière fois que l'arrivée d'un paquet du jeu a été notée dans l'état
     try:
         while not STOP_FILE.exists():

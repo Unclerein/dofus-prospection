@@ -303,6 +303,8 @@ CREATE TABLE IF NOT EXISTS fm_passes (
     after       TEXT               -- effets de l'objet juste après (JSON)
 );
 CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
+-- Rattrapage des passages depuis l'archive : version du dernier fait (voir db.backfill.FM_BACKFILL_VERSION).
+CREATE TABLE IF NOT EXISTS fm_backfill (version INTEGER NOT NULL);
 -- Passages refusés par le serveur (rune impossible sur cet objet) : rien n'a bougé.
 CREATE TABLE IF NOT EXISTS fm_refusals (
     source_id INTEGER PRIMARY KEY,
