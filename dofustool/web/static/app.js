@@ -2763,6 +2763,14 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 19, date: '16 octobre 2026', title: 'Forgemagie : on rassemble les passages pour percer les chances', hash: '#/forge/journal', go: 'Voir mon journal', points: [
+    ['Objectif :', 'retrouver par la mesure comment le jeu tire le résultat d’un passage, pour un simulateur de forgemagie calé sur de vrais passages.'],
+    ['Partagé entre nous :', 'chaque passage (l’objet avant et après, ce qui a été posé, le puits) part au hub et rejoint ceux des autres. L’exemplaire n’y est qu’une empreinte, l’heure est arrondie à la minute ; ni personnage, ni prix payé. Ton historique part une fois, tout seul.'],
+    ['Tout est relevé :', 'runes, transcendances, potions, éclats, gravures, gemmes et orbes, ainsi que les passages refusés par le jeu.'],
+    ['Journal plus juste :', 'un succès payé par le puits compte maintenant comme neutre, plus comme critique : tu peux voir moins de critiques qu’avant sur tes anciens objets.'],
+    ['Onglet Combat retiré :', 'la page du Comte Harebourg revient plus tard, en aide par-dessus le jeu, une fois testée.'],
+    ['Onglets :', 'dans les tableaux, le nom de l’objet est un vrai lien, et Ctrl+clic dessus n’emmène plus la page courante.'],
+  ] },
   { id: 18, date: '15 octobre 2026', title: 'Ouvrir plusieurs objets en onglets', hash: '#/forge/ranking', go: 'Voir le classement', points: [
     ['Nouvel onglet :', 'dans tous les tableaux, un clic molette ou Ctrl+clic sur une ligne l’ouvre dans un nouvel onglet. Le clic normal ne change pas.'],
     ['Forgemagie :', 'depuis le classement, le critère cherché (exo, over) suit dans l’onglet ouvert, comme avec un clic normal.'],
