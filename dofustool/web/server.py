@@ -283,4 +283,17 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
 
 
 def serve(port: int = DEFAULT_PORT, db_path: Path | str = db.MARKET_PATH) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(Api(db_path)))
+    api = Api(db_path)
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api))
+    server.api = api  # pour la préparation en arrière-plan (warm)
+    return server
+
+
+def warm(api: Api) -> None:
+    """Prépare en arrière-plan ce que les pages mettent du temps à calculer la première fois : la page qu'on
+    ouvre ensuite n'attend plus (ou moins). Une erreur ici ne compte pas : la page la refera."""
+    for step in (api.status, api.forge_collecte, lambda: api.forge_ranking("saved", None, None, None, None, False, None), api.ganymede_guides):
+        try:
+            step()
+        except Exception as exc:  # noqa: BLE001
+            log.info("Préparation en arrière-plan interrompue : %s", exc)

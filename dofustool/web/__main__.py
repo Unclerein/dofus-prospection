@@ -12,7 +12,7 @@ from .. import config, db
 from ..messages import runtime_keymap_path
 from ..share import hub as share_hub
 from ..share.client import Syncer
-from .server import DEFAULT_PORT, serve
+from .server import DEFAULT_PORT, serve, warm
 
 
 def main() -> int:
@@ -48,6 +48,8 @@ def main() -> int:
             print(f"Hub de partage : port {cfg.share_port}")
         except OSError as exc:
             print(f"Hub de partage non démarré (port {cfg.share_port}) : {exc}")
+    # Les pages lentes à calculer la première fois sont préparées tout de suite, avant qu'on les ouvre.
+    threading.Thread(target=warm, args=(server.api,), daemon=True, name="préparation").start()
     Syncer(keymap_path=runtime_keymap_path()).start()
     url = f"http://localhost:{args.port}"
     log.info("Interface démarrée : %s", url)

@@ -36,7 +36,7 @@ SC, SN, EC = "sc", "sn", "ec"
 POOL_DOWN = 2  # messages.fm.POOL_DOWN
 
 
-@dataclass
+@dataclass(slots=True)
 class Pass:
     ts: float
     source: str  # « moi » : capté sur ce PC ; « partage » : reçu par le hub
@@ -62,7 +62,7 @@ class Pass:
     passed: int
     outcome: str  # sc, sn, ec
     lost_weight: float  # poids retiré aux autres lignes
-    lost_lines: str  # JSON {caractéristique: points retirés}
+    lost_lines: dict  # {caractéristique: points retirés} (en JSON dans le fichier écrit)
     before_known: int  # l'état d'avant a été vu (1) ou manque (0)
     extra_before: float = 0.0  # poids over et exo de tout l'objet avant le passage (au-delà des max, et lignes exo)
     extra_after: float = 0.0
@@ -126,33 +126,49 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
         if key not in mine:  # nos propres passages revenus par le hub (après un changement de jeton)
             rows.append((at, "partage", rest[0], None, *rest[1:]))
     rows.sort(key=lambda row: row[0])
+    # Ce qui ne dépend que de l'objet, de la rune ou du texte d'un état est calculé une fois : un même
+    # modèle revient des milliers de fois, et l'état d'après d'un passage est l'état d'avant du suivant.
+    parsed: dict[str, dict[int, int]] = {}
+    per_item: dict[int, tuple] = {}
+    per_rune: dict[int, tuple] = {}
+
+    def effects_of(raw: str) -> dict[int, int]:
+        found = parsed.get(raw)
+        if found is None:
+            found = parsed[raw] = {e: v for e, v in json.loads(raw) if v is not None}
+        return found
+
     out: list[Pass] = []
     for ts, source, obj, character, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
-        before = {e: v for e, v in json.loads(raw_before) if v is not None}
-        after = {e: v for e, v in json.loads(raw_after) if v is not None}
-        rune = templates.get(rune_id, {})
-        rune_effect, (rune_value, _) = next(iter(rune.items())) if len(rune) == 1 else (None, (None, None))
-        base = templates.get(item_id, {})
+        before, after = effects_of(raw_before), effects_of(raw_after)
+        if rune_id not in per_rune:
+            rune = templates.get(rune_id, {})
+            effect, (value, _) = next(iter(rune.items())) if len(rune) == 1 else (None, (None, None))
+            weight = round(value * density.get(effect, 0.0), 3) if effect is not None and value is not None else None
+            per_rune[rune_id] = (effect, value, weight, density.get(effect, 0.0) if effect is not None else 0.0)
+        rune_effect, rune_value, rune_weight, unit = per_rune[rune_id]
+        if item_id not in per_item:
+            base = templates.get(item_id, {})
+            level, type_name = items.get(item_id, (None, ""))
+            per_item[item_id] = (base, level, type_name, round(sum(h * density.get(e, 0.0) for e, (_, h) in base.items() if h > 0), 3))
+        base, level, type_name, weight_max = per_item[item_id]
         low, high = base.get(rune_effect, (None, None)) if rune_effect is not None else (None, None)
         line_before, line_after = before.get(rune_effect, 0), after.get(rune_effect, 0)
         lost = {e: v - after.get(e, 0) for e, v in before.items() if e != rune_effect and v > 0 and after.get(e, 0) < v}
         paid = lost or pool_change == POOL_DOWN
         outcome = EC if not passed else (SN if paid else SC)
-        level, type_name = items.get(item_id, (None, ""))
         out.append(Pass(
             ts=ts, source=source, object=obj, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
-            rune_effect=rune_effect, rune_value=rune_value,
-            rune_weight=round(rune_value * density.get(rune_effect, 0.0), 3) if rune_effect is not None and rune_value is not None else None,
+            rune_effect=rune_effect, rune_value=rune_value, rune_weight=rune_weight,
             line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high) if rune_effect is not None and base else "?",
-            line_weight_before=round(line_before * density.get(rune_effect, 0.0), 3) if rune_effect is not None else 0.0,
-            item_weight_before=round(weight_of(before, density), 3),
-            item_weight_max=round(sum(h * density.get(e, 0.0) for e, (_, h) in base.items() if h > 0), 3),
+            line_weight_before=round(line_before * unit, 3) if rune_effect is not None else 0.0,
+            item_weight_before=round(weight_of(before, density), 3), item_weight_max=weight_max,
             pool_before=pool_before, pool_after=pool_after, pool_change=pool_change, passed=passed, outcome=outcome,
-            lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3),
-            lost_lines=json.dumps(lost, separators=(",", ":")), before_known=1,
+            lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3) if lost else 0.0,
+            lost_lines=lost, before_known=1,
             extra_before=round(extra_weight(before, base, density), 3), extra_after=round(extra_weight(after, base, density), 3),
-            line_max_weight=round(high * density.get(rune_effect, 0.0), 3) if high else None,
-            exo_lost=int(any(e not in base for e in lost)), character_id=character,
+            line_max_weight=round(high * unit, 3) if high else None,
+            exo_lost=int(any(e not in base for e in lost)) if lost else 0, character_id=character,
             has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())),
         ))  # fmt: skip
     return out
@@ -163,7 +179,7 @@ def write(rows: list[Pass], path: Path) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(Pass.__dataclass_fields__))
         writer.writeheader()
-        writer.writerows(asdict(row) for row in rows)
+        writer.writerows({**asdict(row), "lost_lines": json.dumps(row.lost_lines, separators=(",", ":"))} for row in rows)
 
 
 def main() -> int:

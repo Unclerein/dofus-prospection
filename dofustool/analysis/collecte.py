@@ -15,6 +15,7 @@ import json
 import math
 import os
 import sqlite3
+import threading
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -723,6 +724,30 @@ def pick(missions: list[dict], verdicts: dict[str, bool | None]) -> dict | None:
         if found is not None:
             return found
     return missions[0] if missions else None
+
+
+def signature(conn: sqlite3.Connection) -> str:
+    """Change dès qu'un passage arrive (le sien ou celui d'un autre) ou qu'une fiche d'objet est lue : le calcul est alors à refaire."""
+    mine = conn.execute("SELECT COUNT(*), MAX(source_id), COUNT(character_id) FROM fm_passes").fetchone()
+    others = conn.execute("SELECT COUNT(*), (SELECT COUNT(*) FROM shared_fm_refusals) FROM shared_fm_passes").fetchone()
+    fetched = conn.execute("SELECT COUNT(*) FROM item_effects_fetched").fetchone()[0]
+    return f"{mine[0]}:{mine[1]}:{mine[2]}:{others[0]}:{others[1]}:{fetched}"
+
+
+_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def cached(conn: sqlite3.Connection, density: dict[int, float] | None = None) -> State:
+    """Le calcul de la collecte, refait seulement quand quelque chose a changé ; la page et la synchro le partagent."""
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not path:  # base en mémoire (tests) : rien à partager
+        return compute(conn, density)
+    key = path + "|" + signature(conn)
+    with _cache_lock:
+        if _cache.get("key") != key:
+            _cache.update(key=key, state=compute(conn, density))
+        return _cache["state"]
 
 
 def remember(conn: sqlite3.Connection, state: State, now: float | None = None, focus_path: Path | None = None) -> list[str]:

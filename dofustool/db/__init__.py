@@ -304,6 +304,13 @@ CREATE TABLE IF NOT EXISTS fm_passes (
     character_id INTEGER           -- personnage connecté pendant le passage, s'il est connu
 );
 CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
+-- Calculs longs qui ne dépendent que des relevés de prix : gardés d'un lancement à l'autre, refaits à
+-- l'arrivée d'un nouveau relevé (voir db.memo).
+CREATE TABLE IF NOT EXISTS computed (
+    name    TEXT PRIMARY KEY,
+    key     TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
 -- Rattrapage des passages depuis l'archive : version du dernier fait (voir db.backfill.FM_BACKFILL_VERSION).
 CREATE TABLE IF NOT EXISTS fm_backfill (version INTEGER NOT NULL);
 -- Collecte de forgemagie : missions réussies sur ce PC, et statut de chaque règle à son dernier calcul.
@@ -444,7 +451,15 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
     """Ouvre la base et crée les tables manquantes."""
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=15.0)
+    if path != ":memory:":
+        # Capture, interface, synchro et affichage lisent et écrivent en même temps : en WAL, une lecture
+        # n'attend plus une écriture (ni l'inverse), et chaque écriture coûte moins cher.
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.OperationalError:
+            pass  # base occupée au moment de basculer : ce sera fait à la prochaine ouverture
     # Avant la phase 2b, last_sales n'avait pas la date de vente ; la table était encore vide.
     columns = {row[1] for row in conn.execute("PRAGMA table_info(last_sales)")}
     if columns and "sold_at" not in columns:
@@ -491,6 +506,25 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
         conn.execute("ALTER TABLE fm_passes ADD COLUMN character_id INTEGER")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
+
+
+def memo(conn: sqlite3.Connection, name: str, key: str, compute):
+    """Le résultat d'un calcul long (JSON), refait seulement quand sa clé change ; gardé en base d'un lancement à l'autre.
+
+    Base en lecture seule ou occupée : le calcul est fait sans être gardé."""
+    try:
+        row = conn.execute("SELECT payload FROM computed WHERE name = ? AND key = ?", (name, key)).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row is not None:
+        return json.loads(row[0])
+    value = compute()
+    try:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO computed VALUES (?, ?, ?)", (name, key, json.dumps(value, separators=(",", ":"))))
+    except sqlite3.Error:
+        pass
+    return value
 
 
 def content_hash(prices: dict[int, int]) -> str:

@@ -1797,11 +1797,10 @@ class Api:
         """Le calcul de la collecte, refait seulement quand un passage arrive (le sien ou celui d'un autre) ou une fiche d'objet."""
         if base_effects.forged_items(conn):
             self.fetch_missing_templates()  # en arrière-plan : les passages sans fiche restent de côté en attendant
-        fetched = conn.execute("SELECT COUNT(*) FROM item_effects_fetched").fetchone()[0]
-        signature = share_client.score_signature(conn) + f":{fetched}:" + str(int(time.time() // 3600))
+        state = collecte.cached(conn, self.densities())
+        signature = collecte.signature(conn) + ":" + str(int(time.time() // 3600))  # les prix des objets bougent dans l'heure
         with self._lock:
             if self._collecte is None or self._collecte[0] != signature:
-                state = collecte.compute(conn, self.densities())
                 collecte.remember(conn, state, focus_path=collecte.FOCUS_PATH)
                 self._collecte = (signature, state, collecte.catalogue(conn, state.density, state.models, time.time()))
             return self._collecte[1], self._collecte[2]

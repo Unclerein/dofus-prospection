@@ -515,7 +515,13 @@ async function workshopAct(payload) {
 }
 
 async function pageWorkshop(r) {
-  const [data, catalogue, ganymede] = await Promise.all([cached('workshop', '/api/workshop'), cached('items', '/api/items'), cached('ganymede', '/api/ganymede').catch(() => ({ guides: [] }))]);
+  // Les guides Ganymède viennent d'un site extérieur : la page n'attend pas, ils apparaissent quand ils arrivent.
+  if (!S.ganymede && !S.ganymedeAsked) {
+    S.ganymedeAsked = true;
+    cached('ganymede', '/api/ganymede').then((d) => { S.ganymede = d; if (route().page === 'workshop') refresh(); }).catch(() => { S.ganymedeAsked = false; });
+  }
+  const [data, catalogue] = await Promise.all([cached('workshop', '/api/workshop'), cached('items', '/api/items')]);
+  const ganymede = S.ganymede || { guides: [] };
   const ui = S.ui.workshop || (S.ui.workshop = { name: '', confirm: null });
   const current = data.lists.find((l) => l.id === r.id) || data.lists[0] || null;
   const run = async (payload, then) => { const done = await workshopAct(payload); if (done) { if (then) then(done); refresh(); } };

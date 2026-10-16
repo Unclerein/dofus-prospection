@@ -291,30 +291,28 @@ def apply(conn: sqlite3.Connection, record: dict, keymap_path: Path | None = Non
     if not validate(record):
         return False
     kind, at, data = record["kind"], record["at"], record["data"]
+    # Passages et scores : pas d'écriture disque à chaque fois, la synchro valide tout un paquet d'un coup.
     if kind == "fm_score":
-        with conn:
-            conn.execute(
-                "INSERT INTO shared_fm_scores VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (pseudo) DO UPDATE SET at = excluded.at, "
-                "character = excluded.character, points = excluded.points, passes = excluded.passes, kamas = excluded.kamas, "
-                "missions = excluded.missions WHERE excluded.at >= shared_fm_scores.at",
-                (record["key"], at, data["character"], data["points"], data["passes"], data["kamas"], json.dumps(data["missions"])),
-            )
+        conn.execute(
+            "INSERT INTO shared_fm_scores VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (pseudo) DO UPDATE SET at = excluded.at, "
+            "character = excluded.character, points = excluded.points, passes = excluded.passes, kamas = excluded.kamas, "
+            "missions = excluded.missions WHERE excluded.at >= shared_fm_scores.at",
+            (record["key"], at, data["character"], data["points"], data["passes"], data["kamas"], json.dumps(data["missions"])),
+        )
         return True
     if kind == "fm":
-        with conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO shared_fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["tool"], data["passed"],
-                 data["pool_before"], data["pool_after"], data["pool_change"],
-                 json.dumps(data["before"], separators=(",", ":")), json.dumps(data["after"], separators=(",", ":"))),
-            )  # fmt: skip
+        conn.execute(
+            "INSERT OR IGNORE INTO shared_fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["tool"], data["passed"],
+             data["pool_before"], data["pool_after"], data["pool_change"],
+             json.dumps(data["before"], separators=(",", ":")), json.dumps(data["after"], separators=(",", ":"))),
+        )  # fmt: skip
     elif kind == "fm_refusal":
         before = None if data["before"] is None else json.dumps(data["before"], separators=(",", ":"))
-        with conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO shared_fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["status"], data["code"], before),
-            )
+        conn.execute(
+            "INSERT OR IGNORE INTO shared_fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["status"], data["code"], before),
+        )
     elif kind == "hdv":
         listings = tuple(
             Listing(uid, (p1, p10, p100, p1000), tuple((e, v) for e, v in effects))

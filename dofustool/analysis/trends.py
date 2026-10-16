@@ -2,6 +2,7 @@
 import sqlite3
 from dataclasses import dataclass
 
+from .. import db
 from . import DAY, GRAIN_DAY
 
 MARKET_HISTORY = "cours du marché"
@@ -96,14 +97,17 @@ def compute_trends(
         return trends
     latest_id, latest_ts = latest
     current = dict(conn.execute("SELECT item_id, price FROM avg_prices WHERE snapshot_id = ?", (latest_id,)))
+    # Un mois de relevés (des millions de prix) : calculé une fois par nouveau relevé, et gardé.
+    query = lambda: [list(row) for row in conn.execute(  # noqa: E731
+        "SELECT p.item_id, AVG(CASE WHEN s.ts >= :week THEN p.price END), AVG(p.price), COUNT(*) "
+        "FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
+        "WHERE s.id != :latest AND s.ts >= :month GROUP BY p.item_id",
+        {"latest": latest_id, "week": latest_ts - 7 * DAY, "month": latest_ts - 30 * DAY},
+    )]  # fmt: skip
+    count_key = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
     past: dict[int, tuple[float | None, float | None, int]] = {
         item_id: (mean_7d, mean_30d, count)
-        for item_id, mean_7d, mean_30d, count in conn.execute(
-            "SELECT p.item_id, AVG(CASE WHEN s.ts >= :week THEN p.price END), AVG(p.price), COUNT(*) "
-            "FROM avg_prices p JOIN snapshots s ON s.id = p.snapshot_id "
-            "WHERE s.id != :latest AND s.ts >= :month GROUP BY p.item_id",
-            {"latest": latest_id, "week": latest_ts - 7 * DAY, "month": latest_ts - 30 * DAY},
-        )
+        for item_id, mean_7d, mean_30d, count in db.memo(conn, "trends_past", f"{latest_id}:{latest_ts}:{count_key}", query)
     }
     for item_id, price in current.items():
         if item_id in trends:

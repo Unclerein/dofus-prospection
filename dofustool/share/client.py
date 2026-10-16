@@ -112,6 +112,7 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
                 chunks = [(c, m) for c, m in chunks if not m]
         for record in reply.get("records", []):
             received += bool(apply(conn, record, keymap_path))
+        conn.commit()
         cursor = int(reply.get("cursor", cursor))
         members = reply.get("members", members)
         more = bool(reply.get("more"))
@@ -128,22 +129,15 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     return {"sent": sent, "received": received}
 
 
-def score_signature(conn: sqlite3.Connection) -> str:
-    """Change dès qu'un passage arrive (le sien ou celui d'un autre) : le score est alors à recalculer."""
-    mine = conn.execute("SELECT COUNT(*), MAX(source_id), COUNT(character_id) FROM fm_passes").fetchone()
-    others = conn.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()
-    return f"{mine[0]}:{mine[1]}:{mine[2]}:{others[0]}"
-
-
 def score_record(conn: sqlite3.Connection, state: dict, cfg: config.Config) -> tuple[dict, str] | None:
     """Le score de collecte de ce PC, à envoyer s'il a changé ; les missions réussies sont inscrites au passage."""
-    signature = score_signature(conn)
+    from ..analysis import collecte
+
+    signature = collecte.signature(conn)
     if state.get("fm_score_sig") == signature or conn.execute("SELECT 1 FROM fm_passes LIMIT 1").fetchone() is None:
         return None
     try:
-        from ..analysis import collecte
-
-        result = collecte.compute(conn)
+        result = collecte.cached(conn)
         collecte.remember(conn, result, focus_path=collecte.FOCUS_PATH)
         data = collecte.score(conn, result)
     except (sqlite3.Error, OSError, ValueError) as error:

@@ -14,7 +14,7 @@ l'estimation aux annonces HDV relevées : c'est elle qui dit ce que vaut la mét
 """
 import sqlite3
 import statistics
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 
 from . import DAY
 
@@ -51,7 +51,17 @@ def _confidence(price: float, hours: float, moved: int, same_sign: int, clamped:
 
 
 def estimate_prices(conn: sqlite3.Connection, lookback_hours: float = LOOKBACK_HOURS) -> dict[int, Estimate]:
-    """Estimation de chaque objet dont le prix moyen a bougé dans les relevés récents."""
+    """Estimation de chaque objet dont le prix moyen a bougé dans les relevés récents (gardée jusqu'au prochain relevé)."""
+    from .. import db
+
+    latest, count = conn.execute("SELECT MAX(ts), COUNT(*) FROM snapshots").fetchone()
+    if latest is None:
+        return {}
+    compute = lambda: [[item_id, *astuple(e)] for item_id, e in _estimate_prices(conn, lookback_hours).items()]  # noqa: E731
+    return {row[0]: Estimate(*row[1:]) for row in db.memo(conn, "estimates", f"{latest}:{count}:{lookback_hours}", compute)}
+
+
+def _estimate_prices(conn: sqlite3.Connection, lookback_hours: float) -> dict[int, Estimate]:
     latest = conn.execute("SELECT MAX(ts) FROM snapshots").fetchone()[0]
     if latest is None:
         return {}
