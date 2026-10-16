@@ -1430,6 +1430,11 @@ function collecteItems(items, mission) {
       h('td', { class: 'l soft' }, it.rune ? [h('div', {}, it.rune.name), h('div', { class: 'source' }, `${fmt(it.rune.price)} k`)] : '—'))))));
 }
 
+function collapseMission(id, ui) {
+  ui.open.delete(id);
+  refresh().then(() => document.getElementById(`mission-${id}`)?.scrollIntoView({ block: 'start' }));
+}
+
 async function collecteMissionList(mission, ui) {
   const data = await cached(`collecte-${mission.id}`, `/api/forge/collecte/${mission.id}`);
   const f = ui.filters[mission.id] || (ui.filters[mission.id] = { q: '', type: '', max: '' });
@@ -1442,7 +1447,8 @@ async function collecteMissionList(mission, ui) {
     h('select', { 'aria-label': 'Type d’objet', onchange: (e) => { f.type = e.target.value; refresh(); } },
       h('option', { value: '' }, 'Tous les types'), types.map((t) => h('option', { value: t, selected: t === f.type }, t))),
     h('input', { id: `cm-${mission.id}`, type: 'number', min: '0', step: '1000', placeholder: 'Prix max', value: f.max, oninput: (e) => { f.max = e.target.value; refresh(); } }),
-    h('span', { class: 'muted small' }, `${fmt(shown.length)} objet${shown.length > 1 ? 's' : ''}`));
+    h('span', { class: 'muted small' }, `${fmt(shown.length)} objet${shown.length > 1 ? 's' : ''}`),
+    h('button', { class: 'btn quiet', style: 'margin-left: auto', onclick: () => collapseMission(mission.id, ui) }, 'Réduire la liste'));
   return [controls, collecteItems(shown.slice(0, 300), mission), shown.length > 300 && h('p', { class: 'muted small' }, 'Les 300 premiers sont affichés : affine la recherche pour voir les autres.')];
 }
 
@@ -1453,7 +1459,7 @@ async function missionCard(m, ui) {
     p.label && h('span', { class: 'muted small part-label' }, p.label),
     meter(p.count / m.target),
     h('span', { class: 'small fw' }, `${fmt(Math.min(p.count, m.target))} / ${fmt(m.target)}`)));
-  const toggle = h('button', { class: 'btn', onclick: () => { if (open) ui.open.delete(m.id); else ui.open.add(m.id); refresh(); } },
+  const toggle = h('button', { class: 'btn', onclick: () => { if (open) collapseMission(m.id, ui); else { ui.open.add(m.id); refresh(); } } },
     open ? 'Ne garder que les 5 premiers' : `Voir les ${fmt(m.total)} objets`);
   return h('article', { class: 'panel mission' + (done ? ' done' : ''), id: `mission-${m.id}` },
     h('div', { class: 'mission-head' },
