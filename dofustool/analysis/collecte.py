@@ -318,19 +318,41 @@ def judge_pool_accounting(ctx):
 
 def judge_tools(ctx):
     n = len([t for t in ctx.tools if t.kind != "gemme"])
-    return _no_counterexample(n, 0, 30, "passages d'outils (transcendance, orbe, potion, éclat, gravure)")
+    status, text, cases, confidence = _no_counterexample(n, 0, 0, "passages d'outils (transcendance, orbe, potion, éclat, gravure)")
+    return status, "Validé par le groupe. " + text, cases, 1.0 if status == "certain" else confidence
 
 
-def judge_heavy_line(ctx):
-    against = sum(1 for r in ctx.rows if r.line_max_weight and r.line_max_weight >= 100 and r.line_max is not None and r.line_after > r.line_max)
-    support = ctx.heavy_refusals
-    return _no_counterexample(support, against, 10, "refus du jeu sur une ligne qui pèse 100 ou plus")
+LINE_CAP = 101.0
+
+
+def judge_line_cap(ctx):
+    """Over passés et refusés : le poids de la ligne visée après la rune, plus les autres overs et exos de l'objet."""
+    passed = []
+    for r in ctx.rows:
+        if r.line_max and r.line_after > r.line_max and r.rune_weight and r.rune_value:
+            density = r.rune_weight / r.rune_value
+            other = r.extra_before - max(0, r.line_before - r.line_max) * density
+            passed.append(r.line_after * density + other)
+    refused = ctx.over_refusals
+    near = [w for w in passed if w >= 90]  # seuls les overs proches de la limite disent quelque chose
+    against = sum(1 for w in passed if w > LINE_CAP + 0.5) + sum(1 for w in refused if w <= LINE_CAP)
+    support = sum(1 for w in near if w <= LINE_CAP + 0.5) + sum(1 for w in refused if w > LINE_CAP)
+    text = (f"{len(near)} overs passés près de la limite (ligne à 90 de poids ou plus), dont {sum(1 for w in near if w <= LINE_CAP + 0.5)} à 101 ou moins ; "
+            f"{len(refused)} refus du jeu, dont {sum(1 for w in refused if w > LINE_CAP)} au-delà de 101.")
+    if against:
+        return "refute", text, support + against, 0.0
+    if support >= 50:
+        return "certain", text, support, 1 - 0.99**support
+    if support >= 20:
+        return "probable", text, support, 1 - 0.99**support
+    return "verifier", text + " Il en faut au moins 20.", support, 1 - 0.99**support
 
 
 def judge_cap(ctx):
     against = sum(1 for r in ctx.rows if r.extra_after > 101.5)
     support = sum(1 for r in ctx.rows if _extra(r) and r.rune_weight is not None and r.extra_before + r.rune_weight > 101 and r.extra_after <= 101.5)
-    return _no_counterexample(support, against, 30, "tentatives qui auraient dépassé 101")
+    status, text, cases, confidence = _no_counterexample(support, against, 0, "tentatives qui auraient dépassé 101 sur nos passages")
+    return status, "Validé par le groupe. " + text, cases, 1.0 if status == "certain" else confidence
 
 
 def judge_beyond_25(ctx):
@@ -338,7 +360,7 @@ def judge_beyond_25(ctx):
     hits = sum(r.outcome == "sc" for r in tries)
     low, high = wilson(hits, len(tries))
     if not tries:
-        return "incertain", "Aucune tentative au-delà de 25 de poids over/exo pour l'instant.", 0, 0.0
+        return "verifier", "Aucune tentative au-delà de 25 de poids over/exo pour l'instant.", 0, 0.0
     text = f"{hits} critique{'s' if hits > 1 else ''} sur {len(tries)} tentatives ({pct(hits / len(tries))}, entre {pct(low)} et {pct(high)})."
     if len(tries) >= 100 and low > 0.05:
         return "refute", text, len(tries), 1 - high
@@ -346,7 +368,7 @@ def judge_beyond_25(ctx):
         return "certain", text, len(tries), 1 - high
     if len(tries) >= 300 and high <= 0.03:
         return "probable", text, len(tries), 1 - high
-    return "incertain", text + " Il en faut au moins 300.", len(tries), min(1.0, len(tries) / 300) * 0.5
+    return "verifier", text + " Il en faut au moins 300.", len(tries), min(1.0, len(tries) / 300) * 0.5
 
 
 def judge_neutral(ctx):
@@ -370,6 +392,23 @@ def judge_pool_helps(ctx):
     dry = [r for r in tries if pool_of(r) <= 0]
     a, b = (sum(r.passed for r in rich), len(rich)), (sum(r.passed for r in dry), len(dry))
     text = (f"Avec assez de puits : {a[0]} réussites sur {a[1]} ; sans puits : {b[0]} sur {b[1]}.")
+    if min(a[1], b[1]) < 100:
+        return "verifier", text + " Il faut au moins 100 tentatives de chaque côté.", a[1] + b[1], 0.2
+    z = gap(a, b)
+    if z >= 2:
+        return "probable", text, a[1] + b[1], min(1.0, z / 4)
+    if z <= -2:
+        return "refute", text, a[1] + b[1], min(1.0, -z / 4)
+    return "verifier", text + " Pas encore d'écart net.", a[1] + b[1], 0.3
+
+
+def judge_partial_pool(ctx):
+    tries = [r for r in ctx.rows if _extra(r) and pool_of(r) is not None and r.rune_weight is not None]
+    partial = [r for r in tries if 0 < pool_of(r) < r.rune_weight]
+    dry = [r for r in tries if pool_of(r) <= 0]
+    a, b = (sum(r.passed for r in partial), len(partial)), (sum(r.passed for r in dry), len(dry))
+    share = lambda x: f" ({pct(x[0] / x[1])})" if x[1] else ""  # noqa: E731
+    text = f"Avec un puits plus petit que la rune : {a[0]} réussites sur {a[1]}{share(a)} ; sans puits : {b[0]} sur {b[1]}{share(b)}."
     if min(a[1], b[1]) < 100:
         return "verifier", text + " Il faut au moins 100 tentatives de chaque côté.", a[1] + b[1], 0.2
     z = gap(a, b)
@@ -422,25 +461,29 @@ def judge_small_max(ctx):
 
 
 def judge_job_level(ctx):
-    return "incertain", "Nos passages ne disent pas le niveau du métier : règle reprise de la communauté.", 0, 0.0
+    return "certain", "Validé par le groupe. Nos passages ne disent pas le niveau du métier : on ne peut pas le mesurer nous-mêmes.", 0, 1.0
 
 
 RULES = [
     Rule("puits-compte", "Le puits se compte au poids près", "Quand une rune passe en payant, le puits varie du poids perdu par les autres lignes, moins le poids de la rune.",
          "Mesuré sur nos passages", judge_pool_accounting),
-    Rule("outils-surs", "Les outils ne ratent jamais", "Transcendances, orbes, potions, éclats et gravures passent à tous les coups.", "Communauté", judge_tools, "orbes"),
-    Rule("ligne-100", "Pas d'over sur une ligne qui pèse 100 ou plus", "Si la ligne pèse 100 ou plus à son max, le jeu refuse toute rune qui la ferait dépasser ce max.",
-         "Communauté", judge_heavy_line),
-    Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté", judge_cap, "plafond-101"),
+    Rule("outils-surs", "Les outils ne ratent jamais", "Transcendances, orbes, potions, éclats et gravures passent à tous les coups.", "Communauté, validé par le groupe", judge_tools, "orbes"),
+    Rule("ligne-101", "Une ligne ne dépasse pas 101 de poids par l'over",
+         "Un over est refusé s'il porterait la ligne au-delà de 101 de poids, en comptant les autres overs et exos de l'objet. "
+         "Sur une ligne qui pèse 100 à son max, un over ne passe donc que d'un point de poids.",
+         "Mesuré sur nos passages (remplace « pas d'over sur une ligne qui pèse 100 ou plus »)", judge_line_cap),
+    Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté, validé par le groupe", judge_cap, "plafond-101"),
     Rule("seuil-25", "Au-delà de 25 de poids over/exo, 1 % de critique", "Quand l'objet porte déjà 25 de poids over/exo ou plus, une nouvelle tentative ne passe qu'en critique, environ une fois sur cent.",
          "Communauté", judge_beyond_25, "au-dela-25"),
     Rule("neutre-50", "La part de neutres ne dépend pas de la ligne", "Sur une ligne normale, la part des succès qui coûtent quelque chose (lignes ou puits) est la même, ligne basse ou presque au max.",
          "Mesuré sur nos passages", judge_neutral, "lignes-basses"),
     Rule("puits-aide", "Le puits aide over et exo", "Une tentative d'over ou d'exo passe plus souvent quand l'objet a assez de puits pour la payer.", "Théorie à vérifier", judge_pool_helps, "exo-sec"),
+    Rule("puits-partiel", "Même un petit puits aide", "Un puits trop petit pour payer la rune aide quand même over et exo, comparé à pas de puits du tout.",
+         "Théorie à vérifier", judge_partial_pool, "exo-sec"),
     Rule("poids-objet", "Plus l'objet est chargé, plus il échoue", "Le remplissage de l'objet (son poids actuel face à son poids max) fait monter les échecs.", "Théorie à vérifier", judge_item_weight, "poids-plume"),
     Rule("exo-avant-puits", "L'exo saute avant le puits", "Sur un succès neutre, un exo est retiré avant que le puits ne paie, même quand le puits suffirait.", "Théorie à vérifier", judge_exo_first),
     Rule("petit-max", "Over plus facile sur une ligne à petit max", "Un over passe plus facilement sur un objet à 4 % de critique max que sur un objet à 7 %.", "Théorie à vérifier", judge_small_max, "duel-crit"),
-    Rule("niveau-metier", "Le niveau du métier ne joue plus", "Depuis la refonte, le niveau du forgemage ne change pas les chances.", "Communauté", judge_job_level),
+    Rule("niveau-metier", "Le niveau du métier ne joue plus", "Depuis la refonte, le niveau du forgemage ne change pas les chances.", "Communauté, validé par le groupe", judge_job_level),
 ]  # fmt: skip
 
 
@@ -448,27 +491,32 @@ RULES = [
 class Context:
     rows: list
     tools: list
-    heavy_refusals: int
+    over_refusals: list[float]
 
 
-def heavy_refusals(conn: sqlite3.Connection, density: dict[int, float]) -> int:
-    """Refus du jeu sur une rune qui aurait fait dépasser le max d'une ligne pesant 100 ou plus à son max."""
+def over_refusals(conn: sqlite3.Connection, density: dict[int, float]) -> list[float]:
+    """Refus du jeu sur une rune qui aurait mis une ligne au-delà de son max : le poids qu'aurait eu la ligne,
+    plus les autres overs et exos de l'objet."""
     effects: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
     for item, effect, low, high in conn.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         effects[item][effect] = (low, high)
     rows = list(conn.execute("SELECT item_id, rune_id, before FROM fm_refusals WHERE before IS NOT NULL AND rune_id IS NOT NULL"))
     rows += list(conn.execute("SELECT item_id, rune_id, before FROM shared_fm_refusals WHERE before IS NOT NULL AND rune_id IS NOT NULL"))
-    count = 0
+    out = []
     for item_id, rune_id, raw in rows:
         rune = effects.get(rune_id, {})
         if len(rune) != 1:
             continue
         effect, (bonus, _) = next(iter(rune.items()))
-        high = effects.get(item_id, {}).get(effect, (None, None))[1]
-        value = {e: v for e, v in json.loads(raw) if v is not None}.get(effect, 0)
-        if high and high * density.get(effect, 0.0) >= 100 and value + bonus > high:
-            count += 1
-    return count
+        base = effects.get(item_id, {})
+        high = base.get(effect, (None, None))[1]
+        before = {e: v for e, v in json.loads(raw) if v is not None}
+        value = before.get(effect, 0)
+        if not high or value + bonus <= high:
+            continue
+        other = fmdata.extra_weight(before, base, density) - max(0, value - high) * density.get(effect, 0.0)
+        out.append((value + bonus) * density.get(effect, 0.0) + other)
+    return out
 
 
 # --- le calcul d'ensemble ------------------------------------------------------------
@@ -610,7 +658,7 @@ def remember(conn: sqlite3.Connection, state: State, now: float | None = None, f
 
 def rules(conn: sqlite3.Connection, state: State, now: float | None = None) -> list[dict]:
     now = time.time() if now is None else now
-    ctx = Context(state.rows, state.tools, heavy_refusals(conn, state.density))
+    ctx = Context(state.rows, state.tools, over_refusals(conn, state.density))
     previous = {row[0]: row[1:] for row in conn.execute("SELECT rule_id, status, changed_at, was FROM fm_rule_status")}
     out, changes = [], []
     for rule in RULES:

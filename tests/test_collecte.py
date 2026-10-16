@@ -54,17 +54,25 @@ def test_rules_follow_the_evidence():
     conn = forge([(0.0, 40, 1)] * 5)
     state = collecte.compute(conn, DENSITY)
     rules = {r["id"]: r for r in collecte.rules(conn, state, now=100.0)}
-    assert rules["outils-surs"]["status"] == "incertain" and rules["plafond-101"]["status"] == "incertain"
-    assert rules["outils-surs"]["was"] is None  # premier calcul : pas une nouveauté
-    # 40 orbes passés sans un échec : la règle des outils devient certaine, et c'est annoncé comme nouveau.
+    # Validées par le groupe : certaines tant qu'aucun passage ne les contredit.
+    assert {rules[k]["status"] for k in ("outils-surs", "plafond-101", "niveau-metier")} == {"certain"}
+    assert rules["seuil-25"]["status"] == "verifier" and rules["ligne-101"]["status"] == "verifier"
+    assert rules["ligne-101"]["was"] is None  # premier calcul : pas une nouveauté
+    # 20 refus du jeu sur un over qui aurait mis la ligne au-delà de 101 de poids : la règle devient très probable.
+    conn.executemany("INSERT INTO fm_refusals VALUES (?, ?, 7, 10, 20, 0, NULL, '[[118, 101]]')", [(500 + i, 3000.0 + i) for i in range(20)])
+    rules = {r["id"]: r for r in collecte.rules(conn, collecte.compute(conn, DENSITY), now=200.0)}
+    assert rules["ligne-101"]["status"] == "probable" and rules["ligne-101"]["was"] == "À vérifier"
+    # Un refus alors que la ligne serait restée sous 101 la contredirait.
+    conn.execute("INSERT INTO fm_refusals VALUES (900, 4000.0, 7, 10, 20, 0, NULL, '[[118, 50]]')")
+    rules = {r["id"]: r for r in collecte.rules(conn, collecte.compute(conn, DENSITY), now=300.0)}
+    assert rules["ligne-101"]["status"] == "refute"
+    # Les orbes comptent dans leur case.
     conn.executemany(
         "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, before, after) "
         "VALUES (?, ?, 7, 10, 20, 1, 0, 0, 0, 'orbe', '[]', '[]')",
         [(100 + i, 2000.0 + i) for i in range(40)],
     )
     state = collecte.compute(conn, DENSITY)
-    rules = {r["id"]: r for r in collecte.rules(conn, state, now=200.0)}
-    assert rules["outils-surs"]["status"] == "certain" and rules["outils-surs"]["was"] == "Incertain, à trancher"
     assert state.blocks[4].id == "orbs" and state.blocks[4].counts["orbe"] == 40
 
 
