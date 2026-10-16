@@ -140,3 +140,17 @@ def test_rune_size_is_read_from_its_name():
 
     assert [fmdata.rune_tier(n) for n in ("Rune Fo", "Rune Pa Fo", "Rune Ra Fo", "Rune Pa Ré Pme", "Rune Ré Per Air", "Rune Pa")] == [
         "simple", "Pa", "Ra", "Pa", "simple", "simple"]
+
+
+def test_the_one_percent_threshold_is_settled_between_25_and_30():
+    from types import SimpleNamespace
+
+    def tries(extra, n, passed):
+        return [SimpleNamespace(line_kind="over", extra_before=extra, line_before=10, line_after=11 if i < passed else 10) for i in range(n)]
+
+    above = tries(32, 400, 3)  # 30 et plus : environ 1 %
+    at_30 = collecte.judge_beyond_25(collecte.Context(above + tries(27, 150, 50), [], []))
+    assert at_30[0] == "probable" and "seuil est à 30" in at_30[1]
+    at_25 = collecte.judge_beyond_25(collecte.Context(above + tries(27, 150, 1), [], []))
+    assert at_25[0] == "probable" and "seuil est à 25" in at_25[1]
+    assert collecte.judge_beyond_25(collecte.Context(tries(32, 50, 1), [], []))[0] == "verifier"

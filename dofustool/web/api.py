@@ -67,6 +67,14 @@ STOCK_POSITION = 6
 LIGHT_POSITIONS = frozenset({STOCK_POSITION, 9, 10, 11, 12})
 
 
+# Noms d'usage en jeu, pour retrouver une caractéristique dans les listes d'exos.
+EXO_ALIASES = {"Portée": "Portée (PO)", "Invocation": "Invocation (invo)"}
+
+
+def exo_label(name: str) -> str:
+    return EXO_ALIASES.get(name, name)
+
+
 def core_stamp(stamp: list) -> tuple:
     """L'empreinte réduite à ce dont dépendent les prix, les crafts et les tendances."""
     return tuple(value for position, value in enumerate(stamp) if position not in LIGHT_POSITIONS)
@@ -1813,7 +1821,7 @@ class Api:
                     "assets": {i: state["assets"][i] for i in used if i in state["assets"]},
                     "order": sorted(used, key=lambda i: (state["priorities"].get(i, 1_000_000), i)),
                     "exos": [
-                        {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
+                        {"id": effect_id, "name": exo_label(names.get(effect_id, f"effet {effect_id}")), "count": count}
                         for effect_id, count in forge.exo_counts(current).items()
                     ],
                     "names": {i: names.get(i, f"effet {i}") for i in used},
@@ -2137,7 +2145,7 @@ class Api:
                 # Mes niveaux dans les métiers de forgemagie (absent : métier non renseigné).
                 "mages": {name: mine.get(name) for name in sorted(job_names[j] for j in MAGE_OF.values() if j in job_names)},
                 "exos": [
-                    {"id": effect_id, "name": names.get(effect_id, f"effet {effect_id}"), "count": count}
+                    {"id": effect_id, "name": exo_label(names.get(effect_id, f"effet {effect_id}")), "count": count}
                     for effect_id, count in forge.all_exo_counts(conn, loaded).items()
                 ],
                 "lines": [

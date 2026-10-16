@@ -79,7 +79,8 @@ def blocks() -> list[Block]:
         Block("ranks", "Rang des overs", "Premier, deuxième, troisième point au-delà du max d'une même ligne, sur un objet sous 25 de poids over/exo ; "
               "et des premiers overs sur un objet qui porte déjà un over ou un exo ailleurs, pour savoir si c'est le rang ou ce poids qui compte.",
               {"r|1": RANK_TARGET, "r|2": RANK_TARGET, "r|3": RANK_TARGET, "r|1|chargé": LOADED_TARGET}),
-        Block("edges", "Seuil des 25", "Autour de 25 de poids over/exo : la règle du 1 % de critique.", {"s|25": EDGE_TARGET}),
+        Block("edges", "Seuil du 1 %", "Tentatives sur un objet qui porte déjà 25 à 29, puis 30 ou plus, de poids over/exo : "
+              "le seuil où il ne reste qu'environ 1 % de critique est-il à 25 ou à 30 ?", {"s|25": EDGE_TARGET, "s|30": EDGE_TARGET}),
         Block("light", "Objets légers", f"Objets de poids max inférieur à {LIGHT} : la formule tient-elle en bas de l'échelle ?", {"l": LIGHT_TARGET}),
         Block("orbs", "Orbes", "Comment le jeu tire les jets d'un objet, comme à sa fabrication.", {"orbe": ORB_TARGET}),
     ]  # fmt: skip
@@ -106,8 +107,10 @@ def cells_of(row) -> list[str]:
         if pool is not None:
             level = POOL_LEVELS[0 if pool <= 0 else 1 if pool < 20 else 2]
             out.append(f"o|{row.line_kind}|{band(row.extra_before, EXTRA_BINS)}|{level}")
-        if 20 <= row.extra_before < 30:
+        if 25 <= row.extra_before < 30:
             out.append("s|25")
+        elif 30 <= row.extra_before < 40:
+            out.append("s|30")
     elif row.line_max and pool is not None and row.item_weight_max:
         line = band(row.line_before / row.line_max, LINE_BINS)
         item = band(row.item_weight_before / row.item_weight_max, ITEM_BINS)
@@ -198,9 +201,11 @@ MISSIONS = [
             lambda c: c.startswith("n|0–20") or c.startswith("n|20–40")),
     Mission("premiers-overs", "Premiers overs", "100 tentatives d'over ou d'exo sur un objet qui porte moins de 25 de poids over/exo.", 100, 300, "puits-aide",
             lambda r: "" if _extra(r) and r.extra_before < 25 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|") and ("|0–10|" in c or "|10–25|" in c)),
-    Mission("au-dela-25", "Au-delà de 25", "300 tentatives d'over ou d'exo sur un objet qui porte déjà 25 de poids over/exo ou plus.", 300, 500, "seuil-25",
-            lambda r: "" if _extra(r) and r.extra_before >= 25 else None, lambda it: it.weight < LIGHT, lambda c: c == "s|25" or "|25–50|" in c or "|50–101|" in c,
-            "Le moins cher : monter un over avec des runes de poids 1 (Fo, Cha) sur un objet léger, puis tenter au-delà de 25."),
+    Mission("au-dela-25", "Au-delà de 25", "150 tentatives d'over ou d'exo sur un objet qui porte déjà 25 à 29 de poids over/exo, et 150 à 30 ou plus.", 150, 500, "seuil-25",
+            lambda r: ("25 à 29" if 25 <= r.extra_before < 30 else "30 et plus" if r.extra_before >= 30 else None) if _extra(r) else None,
+            lambda it: it.weight < LIGHT, lambda c: c in ("s|25", "s|30") or "|25–50|" in c or "|50–101|" in c,
+            "Le moins cher : monter un over avec des runes de poids 1 (Fo, Cha) sur un objet léger, puis tenter entre 25 et 29, puis au-delà de 30.",
+            ("25 à 29", "30 et plus")),
     Mission("over-charge", "Premier over, objet chargé", "50 premiers overs (ligne au max) sur un objet qui porte déjà entre 8 et 25 de poids over/exo ailleurs.",
             50, 400, "rang-over", lambda r: "" if over_rank(r) == 1 and LOADED <= other_extra(r) < 25 else None, lambda it: it.weight < 400,
             lambda c: c == "r|1|chargé", "Par exemple : un objet avec un exo ou un over déjà passé, et une autre ligne montée à son max ; on tente l'over sur celle-ci."),
@@ -387,19 +392,29 @@ def judge_cap(ctx):
 
 
 def judge_beyond_25(ctx):
-    tries = [r for r in ctx.rows if _extra(r) and r.extra_before >= 25]
-    hits = sum(r.outcome == "sc" for r in tries)
-    low, high = wilson(hits, len(tries))
-    if not tries:
+    """Réussite des tentatives over/exo selon le poids over/exo déjà porté : 20 à 24, 25 à 29, 30 et plus."""
+    bands = {"20 à 24": (20, 25), "25 à 29": (25, 30), "30 et plus": (30, 1000)}
+    rates = {}
+    for label, (low, high) in bands.items():
+        tries = [r for r in ctx.rows if _extra(r) and low <= r.extra_before < high]
+        rates[label] = (sum(r.line_after > r.line_before for r in tries), len(tries))
+    show = lambda x: f"{pct(x[0] / x[1])} ({x[1]})" if x[1] else "— (0)"  # noqa: E731
+    text = "Tentatives passées selon le poids over/exo déjà porté : " + ", ".join(f"{label} : {show(rate)}" for label, rate in rates.items()) + "."
+    middle, above = rates["25 à 29"], rates["30 et plus"]
+    cases = middle[1] + above[1]
+    if not cases:
         return "verifier", "Aucune tentative au-delà de 25 de poids over/exo pour l'instant.", 0, 0.0
-    text = f"{hits} critique{'s' if hits > 1 else ''} sur {len(tries)} tentatives ({pct(hits / len(tries))}, entre {pct(low)} et {pct(high)})."
-    if len(tries) >= 100 and low > 0.05:
-        return "refute", text, len(tries), 1 - high
-    if len(tries) >= 1500 and high <= 0.02:
-        return "certain", text, len(tries), 1 - high
-    if len(tries) >= 300 and high <= 0.03:
-        return "probable", text, len(tries), 1 - high
-    return "verifier", text + " Il en faut au moins 300.", len(tries), min(1.0, len(tries) / 300) * 0.5
+    if above[1] >= 100 and wilson(*above)[0] > 0.05:
+        return "refute", text + " Au-delà de 30, ça passe bien plus d'une fois sur cent.", cases, 0.7
+    if above[1] < 300 or wilson(*above)[1] > 0.03:
+        return "verifier", text + " Il faut 300 tentatives à 30 ou plus, et 100 entre 25 et 29.", cases, min(1.0, above[1] / 300) * 0.5
+    if middle[1] < 100:
+        return "verifier", text + " Au-delà de 30, c'est bien autour de 1 % ; reste à savoir entre 25 et 29.", cases, 0.5
+    if wilson(*middle)[1] <= 0.03:
+        return "probable", text + " Le seuil est à 25 : entre 25 et 29, c'est déjà autour de 1 %.", cases, 0.8
+    if gap(middle, above) >= 2:
+        return "probable", text + " Le seuil est à 30 : entre 25 et 29, ça passe encore normalement.", cases, 0.8
+    return "verifier", text + " Entre 25 et 29, ni normal ni 1 % : à creuser.", cases, 0.4
 
 
 def judge_neutral(ctx):
@@ -554,8 +569,9 @@ RULES = [
          "Sur une ligne qui pèse 100 à son max, un over ne passe donc que d'un point de poids.",
          "Mesuré sur nos passages (remplace « pas d'over sur une ligne qui pèse 100 ou plus »)", judge_line_cap),
     Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté, validé par le groupe", judge_cap),
-    Rule("seuil-25", "Au-delà de 25 de poids over/exo, 1 % de critique", "Quand l'objet porte déjà 25 de poids over/exo ou plus, une nouvelle tentative ne passe qu'en critique, environ une fois sur cent.",
-         "Communauté", judge_beyond_25, "au-dela-25"),
+    Rule("seuil-25", "1 % de critique au-delà de 25… ou de 30 ?", "Quand l'objet porte déjà assez de poids over/exo, une nouvelle tentative ne passe qu'en critique, "
+         "environ une fois sur cent. La communauté place le seuil à 25 ; Xilef le place à 30 (jusqu'à 29, les chances restent normales).",
+         "Communauté et Xilef, à départager", judge_beyond_25, "au-dela-25"),
     Rule("neutre-50", "La part de neutres ne dépend pas de la ligne", "Sur une ligne normale, la part des succès qui coûtent quelque chose (lignes ou puits) est la même, ligne basse ou presque au max.",
          "Mesuré sur nos passages", judge_neutral, "lignes-basses"),
     Rule("taille-rune", "Les grosses runes passent moins bien", "À hauteur égale de la ligne après la rune, une Pa ou une Ra passe moins souvent qu'une rune simple. "
