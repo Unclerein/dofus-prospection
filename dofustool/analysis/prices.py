@@ -221,6 +221,11 @@ class PriceBook:
             return PriceRef(avg, AVG_PRICE, self.snapshot_ts)
         return None
 
+    def average(self, item_id: int) -> PriceRef | None:
+        """Prix moyen du dernier relevé, quel que soit le réglage des équipements."""
+        avg = self._avg.get(item_id)
+        return PriceRef(avg, AVG_PRICE, self.snapshot_ts) if avg is not None and self.snapshot_ts is not None else None
+
     def estimate(self, item_id: int) -> estimation.Estimate | None:
         """Prix du moment estimé d'une ressource ou d'un consommable, quel que soit son niveau de confiance."""
         return None if item_id in self._equipment else self.estimates.get(item_id)

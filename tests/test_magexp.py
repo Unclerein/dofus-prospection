@@ -113,6 +113,24 @@ def test_mage_plan_is_served(app_db, tmp_path):  # noqa: F811
     assert api.job_plan(63, 0, 10)["blocked_at"] == 1  # aucun objet de niveau 1 à 10 : le plan le dit
     assert api.job_plan(63, jobxp.level_to_xp(60), 62, exclude=frozenset({500}))["blocked_at"] == 60
 
+    # Réglé sur « annonce seulement » et sans annonce de l'anneau : le prix moyen sert d'objet support,
+    # au lieu de bloquer la montée dès le départ.
+    import dataclasses
+
+    from dofustool import config
+
+    conn = db.connect(app_db)
+    conn.execute("DELETE FROM hdv_listings WHERE item_id = 500")
+    conn.execute("INSERT OR REPLACE INTO avg_prices VALUES ((SELECT id FROM snapshots ORDER BY ts DESC LIMIT 1), 500, 5000)")
+    conn.commit()
+    conn.close()
+    for mode in ("any", "base"):
+        path = tmp_path / f"{mode}.toml"
+        config.save(dataclasses.replace(config.Config(), equipment_price=mode), path)
+        strict = Api(app_db, path)
+        strict.static_path = static
+        assert strict.job_plan(63, jobxp.level_to_xp(60), 62, pass_rate=0.5)["blocked_at"] is None
+
 
 def test_single_line_support_is_a_last_resort():
     """Un objet à une seule ligne sert faute de mieux : un quart de runes en moins y passent."""

@@ -885,6 +885,11 @@ class Api:
                 cheapest = ws.prices.hdv_any(item_id)
                 price = cheapest[0] if cheapest is not None else market(item_id)
                 if price is None:
+                    # Réglé sur « annonce seulement », un équipement sans annonce relevée n'a pas de prix : pour un
+                    # objet qu'on va forgemager, le prix moyen suffit (sinon la montée bloquait dès le niveau 1).
+                    average = ws.prices.average(item_id)
+                    price = average.price if average is not None else None
+                if price is None:
                     unpriced += 1
                     continue
                 supports.append(magexp.Support(item_id, item.level, found, price))
