@@ -6,9 +6,13 @@
   - qualité        : où se situent les jets entre le minimum et le maximum de base.
 
 Les caractéristiques de base viennent de la table item_effects : {id d'effet: (min, max)}.
-Un malus de base a des bornes négatives : il n'est ni filtrable, ni « over », ni « manquant ».
+Un malus de base (« -7 à -5 % critique ») a des bornes négatives. Le jeu en envoie la valeur sans signe sur
+l'effet malus ; la lecture la remet avec son signe (-6), et y ajoute la caractéristique positive si une rune
+l'a fait passer au-delà de 0. Un malus réduit au-delà de son meilleur jet (-1, ou 0 s'il a disparu) est un over ;
+il n'est jamais « manquant ».
 """
 from dataclasses import dataclass
+from functools import cache
 
 # Effets qui ne sont pas des caractéristiques : signatures et verrous posés sur l'objet.
 MODIFIED_BY = 985
@@ -68,19 +72,43 @@ class Classification:
 
 
 def base_lines(template: Template) -> dict[int, tuple[int, int]]:
-    """Caractéristiques de base positives, celles qu'on peut vouloir filtrer ou améliorer."""
-    return {effect_id: (low, high) for effect_id, (low, high) in template.items() if high > 0 and effect_id != HUNTING}
+    """Caractéristiques de base, celles qu'on peut vouloir filtrer ou améliorer, malus compris."""
+    return {effect_id: (low, high) for effect_id, (low, high) in template.items() if (high > 0 or low < 0) and effect_id != HUNTING}
 
 
-def classify(effects: list[tuple[int, int | None]], template: Template) -> Classification:
-    """effects : (id, valeur) de l'exemplaire ; template : caractéristiques de l'item de base."""
-    values = {
-        effect_id: value for effect_id, value in effects if effect_id not in MARKERS and effect_id != HUNTING and value is not None
-    }
+@cache
+def _positive_of() -> dict[int, int]:
+    """Caractéristique positive de chaque effet malus (« -Force » → « Force »), d'après les données du jeu."""
+    from .fmdata import malus_of  # import tardif : fmdata dépend de la base
+
+    return {negative: positive for positive, negative in malus_of().items()}
+
+
+def signed_values(values: dict[int, int], template: Template, positive_of: dict[int, int] | None = None) -> dict[int, int]:
+    """Valeurs de l'exemplaire, chaque malus de base lu avec son signe sur son effet malus (0 s'il a disparu)."""
+    positive_of = _positive_of() if positive_of is None else positive_of
+    out = dict(values)
+    for effect_id, (_, high) in template.items():
+        if high >= 0:
+            continue
+        positive = positive_of.get(effect_id)
+        gained = out.pop(positive, 0) if positive is not None and positive not in template else 0
+        out[effect_id] = gained - out.get(effect_id, 0)
+    return out
+
+
+def classify(effects: list[tuple[int, int | None]], template: Template, positive_of: dict[int, int] | None = None) -> Classification:
+    """effects : (id, valeur) de l'exemplaire ; template : caractéristiques de l'item de base ;
+    positive_of : caractéristique positive de chaque effet malus (par défaut, lue dans les données du jeu)."""
+    values = signed_values(
+        {effect_id: value for effect_id, value in effects if effect_id not in MARKERS and effect_id != HUNTING and value is not None},
+        template,
+        positive_of,
+    )
     lines = base_lines(template)
     exo = tuple(effect_id for effect_id in values if effect_id not in template)
     over = tuple(effect_id for effect_id, (_, high) in lines.items() if values.get(effect_id, 0) > high)
-    missing = tuple(effect_id for effect_id in lines if values.get(effect_id, 0) <= 0)
+    missing = tuple(effect_id for effect_id, (_, high) in lines.items() if high > 0 and values.get(effect_id, 0) <= 0)
     # Seules les lignes à jet variable comptent : une ligne fixe (1 PA) n'a pas de « bon » jet.
     rolls = [
         min(1.0, max(0.0, (values.get(effect_id, 0) - low) / (high - low)))

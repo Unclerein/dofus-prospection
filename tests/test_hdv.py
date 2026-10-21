@@ -91,20 +91,21 @@ def test_classify_exo_over_plain():
     template = {PA: (1, 1), VITA: (201, 250), 116: (-1, -1)}
     base = classify([(PA, 1), (VITA, 230), (116, 1)], template)
     assert base.label == "de base" and base.plain and base.quality == pytest.approx(29 / 49)
-    assert classify([(PA, 1), (VITA, 230), (MODIFIED, None)], template).label == "forgemagé"
-    perfect = classify([(PA, 1), (VITA, 250)], template)
+    assert classify([(PA, 1), (VITA, 230), (116, 1), (MODIFIED, None)], template).label == "forgemagé"
+    assert classify([(PA, 1), (VITA, 230)], template).over == (116,)  # le malus de base a disparu : over
+    perfect = classify([(PA, 1), (VITA, 250), (116, 1)], template)
     assert perfect.perfect and perfect.plain and perfect.label == "jets parfaits"
-    exo = classify([(PA, 1), (VITA, 230), (CHANCE, 10)], template)
+    exo = classify([(PA, 1), (VITA, 230), (116, 1), (CHANCE, 10)], template)
     assert exo.exo == (CHANCE,) and exo.label == "exo" and not exo.plain
-    over = classify([(PA, 1), (VITA, 265)], template)
+    over = classify([(PA, 1), (VITA, 265), (116, 1)], template)
     assert over.over == (VITA,) and over.label == "over" and over.quality == 1
     both = classify([(PA, 2), (VITA, 210), (CHANCE, 5)], template)
     assert both.label == "exo + over"
     # Ligne de base absente ou à 0 : l'exemplaire est abîmé, pas comparable à un craft.
-    broken = classify([(PA, 1)], template)
+    broken = classify([(PA, 1), (116, 1)], template)
     assert broken.missing == (VITA,) and broken.label == "ligne manquante" and not broken.plain
     assert classify([(PA, 1), (VITA, 0)], template).missing == (VITA,)
-    # Un malus de base n'est ni un over ni une ligne manquante ; une ligne fixe n'a pas de « jet ».
+    # Un malus de base plus fort que son jet reste « de base » ; une ligne fixe n'a pas de « jet ».
     assert classify([(PA, 1), (VITA, 201), (116, 5)], template).plain
     fixed = classify([(PA, 1)], {PA: (1, 1)})
     assert fixed.quality is None and fixed.label == "de base" and not fixed.perfect

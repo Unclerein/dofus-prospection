@@ -1805,8 +1805,9 @@ async function forgeItem(id, options) {
     return h('div', { class: 'line-row' },
       h('label', { for: `line-${line.id}`, class: 'with-ico' }, statIcon(d.assets[line.id]), line.name),
       h('span', { class: 'range' }, line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`),
-      h('input', { id: `line-${line.id}`, type: 'number', min: 0, value: value || '', placeholder: '—', class: value ? 'set' : '',
-        onchange: (e) => change((x) => { const n = Number(e.target.value); if (n > 0) x.minimums[line.id] = n; else delete x.minimums[line.id]; }) }));
+      // Un malus (« -7 à -5 ») se filtre avec son signe : -3 demande un malus réduit à -3 ou mieux, 0 qu'il ait disparu.
+      h('input', { id: `line-${line.id}`, type: 'number', min: line.max < 0 ? line.min : 0, value: value === undefined ? '' : value, placeholder: '—', class: value !== undefined ? 'set' : '',
+        onchange: (e) => change((x) => { const n = Number(e.target.value); if (e.target.value !== '' && (n > 0 || line.max < 0)) x.minimums[line.id] = n; else delete x.minimums[line.id]; }) }));
   });
   const criteria = h('section', { class: 'panel pad criteria', 'aria-label': 'Critères' },
     h('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 12px' }, h('h2', {}, 'Critères'),
@@ -1882,15 +1883,10 @@ function itemTooltip(l, d) {
   for (const line of d.lines) {
     const v = l.values[line.id] || 0;
     const range = line.min === line.max ? `${line.min}` : `${line.min} à ${line.max}`;
-    const state = v <= 0 ? ['low', 'perdue'] : v > line.max ? ['over', `+${v - line.max}`] : v >= line.max && line.max > line.min ? ['max', 'max'] : v < line.min ? ['low', 'bas'] : ['', ''];
+    const state = v <= 0 && line.max > 0 ? ['low', 'perdue'] : v > line.max ? ['over', `+${v - line.max}`] : v >= line.max && line.max > line.min ? ['max', 'max'] : v < line.min ? ['low', 'bas'] : ['', ''];
     lines.push([line.id, h('div', { class: 'tip-line ' + state[0] }, h('span', { class: 'v' }, v), h('span', { class: 'n with-ico' }, statIcon(d.assets[line.id]), line.name), h('span', { class: 'r' }, `${range}${state[1] ? ' · ' + state[1] : ''}`))]);
   }
   const exos = l.exo.map((effect) => [effect, h('div', { class: 'tip-line exo' }, h('span', { class: 'v' }, l.values[effect]), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'exo'))]);
-  for (const [effect, bounds] of Object.entries(d.template || {})) {
-    if (bounds[1] > 0) continue; // malus de base
-    const v = l.values[effect];
-    if (v !== undefined) lines.push([Number(effect), h('div', { class: 'tip-line malus' }, h('span', { class: 'v' }, `−${Math.abs(v)}`), h('span', { class: 'n with-ico' }, statIcon(d.assets[effect]), d.names[effect]), h('span', { class: 'r' }, 'malus'))]);
-  }
   // Même ordre que l'infobulle du jeu : chaque ligne à sa place, exos compris.
   const rank = new Map((d.order || []).map((effect, index) => [Number(effect), index]));
   const byRank = (a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9);

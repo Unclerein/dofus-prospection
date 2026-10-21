@@ -230,3 +230,21 @@ def test_filter_exact():
     assert Filter({}, exo=CHANCE, exo_min=1).matches(two)
     assert Filter({VITA: 250}, exact=True).matches(one) and not Filter({VITA: 240}, exact=True).matches(one)
     assert "exact" not in Filter({VITA: 250}, exact=True).to_config()  # jamais enregistré dans les critères par objet
+
+
+def test_negative_base_line_reads_signed():
+    from dofustool.analysis.forgemagie import base_lines, classify
+
+    CRIT, MINUS_CRIT = 115, 171
+    template = {VITA: (201, 250), MINUS_CRIT: (-7, -5)}
+    opposite = {MINUS_CRIT: CRIT}
+    assert MINUS_CRIT in base_lines(template)  # la ligne négative s'affiche et se filtre
+    base = classify([(VITA, 250), (MINUS_CRIT, 6)], template, opposite)
+    assert base.values[MINUS_CRIT] == -6 and base.plain and not base.missing
+    reduced = classify([(VITA, 250), (MINUS_CRIT, 1)], template, opposite)  # -1 : mieux que le meilleur jet (-5)
+    assert reduced.values[MINUS_CRIT] == -1 and reduced.over == (MINUS_CRIT,) and reduced.label == "over"
+    gone = classify([(VITA, 250)], template, opposite)  # malus effacé : 0, pas une ligne manquante
+    assert gone.values[MINUS_CRIT] == 0 and gone.over == (MINUS_CRIT,) and not gone.missing
+    crossed = classify([(VITA, 250), (CRIT, 2)], template, opposite)  # passé au-delà de 0 : over, pas un exo
+    assert crossed.values[MINUS_CRIT] == 2 and not crossed.exo and crossed.over == (MINUS_CRIT,)
+    assert Filter({MINUS_CRIT: -3}).matches(reduced) and not Filter({MINUS_CRIT: -3}).matches(base)
