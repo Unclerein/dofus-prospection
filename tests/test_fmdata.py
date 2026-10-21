@@ -43,3 +43,30 @@ def test_dataset_reads_the_journal_and_tells_a_pool_paid_neutral_from_a_critical
     rows = fmdata.build(conn, {118: 1.0, 125: 0.2})
     assert [r.outcome for r in rows] == ["sc", "sn", "sn", "ec"]
     assert rows[2].lost_weight == 2.0 and rows[0].line_kind == "haut" and rows[0].rune_weight == 1.0
+
+
+def test_a_rune_on_a_negative_line_lowers_the_malus_and_is_not_an_exo():
+    import json
+
+    from dofustool import db
+
+    conn = db.connect(":memory:")
+    conn.execute("INSERT INTO items VALUES (10, 'Geta', 200, 'Bottes', 1, 1, 0, 0)")
+    conn.execute("INSERT INTO items VALUES (20, 'Rune Fo', 1, 'Rune de forgemagie', 1, 1, 0, 2)")
+    # La Geta : Force de -20 à -1 (malus 157, bornes négatives comme chez DofusDB), Vitalité 100 à 200.
+    conn.executemany("INSERT INTO item_effects VALUES (?, ?, ?, ?)", [(10, 157, -20, -1), (10, 125, 100, 200), (20, 118, 1, 1)])
+    passes = [  # (passé, avant, après)
+        (1, [[157, 10], [125, 150]], [[157, 9], [125, 150]]),  # le malus baisse, rien d'autre : critique
+        (1, [[157, 9], [125, 150]], [[157, 8], [125, 140]]),  # le malus baisse, la vitalité paie : neutre
+        (0, [[157, 8], [125, 140]], [[157, 8], [125, 135]]),  # échec
+    ]
+    for i, (ok, before, after) in enumerate(passes):
+        conn.execute(
+            "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after) "
+            "VALUES (?, ?, 1, 10, 20, ?, NULL, 0, 0, 'rune', 0, ?, ?)",
+            (i, float(i), ok, json.dumps(before), json.dumps(after)),
+        )
+    rows = fmdata.build(conn, {118: 1.0, 157: -0.5, 125: 0.2}, malus={118: 157})
+    assert [(r.line_kind, r.line_before, r.line_after, r.outcome) for r in rows] == [
+        ("malus", -10, -9, "sc"), ("malus", -9, -8, "sn"), ("malus", -8, -8, "ec")]
+    assert (rows[0].line_min, rows[0].line_max) == (-20, -1) and json.dumps(rows[1].lost_lines) == '{"125": 10}'

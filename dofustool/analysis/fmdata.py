@@ -11,6 +11,10 @@ forgemagie entrent : potions, éclats, orbes et transcendances ne ratent jamais.
 Un succès est neutre dès que l'objet a payé quelque chose, avec ses lignes ou avec son puits ;
 critique seulement s'il n'a rien payé.
 
+Une ligne négative (« -7 % critique ») est un effet à part, le malus, que le jeu fait baisser quand on
+passe la rune de la caractéristique. Ces passages sont classés « malus », la ligne lue avec son signe
+(-7 → -6) ; la baisse du malus n'est pas une perte.
+
 Les passages des autres joueurs, reçus par le hub (table shared_fm_passes), entrent aussi : la colonne
 source dit d'où vient chaque ligne, et l'exemplaire n'y est qu'une empreinte.
 
@@ -52,7 +56,7 @@ class Pass:
     line_after: int
     line_min: int | None  # bornes de base de la ligne ; None : la ligne n'existe pas de base (exo)
     line_max: int | None
-    line_kind: str  # « exo », « over » (au-delà du max), « max », « haut » (80 à 100 % du max), « bas » ; « ? » sans fiche
+    line_kind: str  # « exo », « over » (au-delà du max), « max », « haut » (80 à 100 % du max), « bas », « malus » ; « ? » sans fiche
     line_weight_before: float  # poids de la ligne visée avant le passage
     item_weight_before: float  # poids de toutes les lignes positives avant le passage
     item_weight_max: float  # poids des lignes de base à leur jet max
@@ -78,6 +82,22 @@ def densities(path: Path = STATIC_PATH) -> dict[int, float]:
     source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
         return {row[0]: float(row[1]) for row in source.execute("SELECT id, effectPowerRate FROM EffectData") if row[1]}
+    finally:
+        source.close()
+
+
+def malus_of(path: Path = STATIC_PATH) -> dict[int, int]:
+    """Effet malus de chaque caractéristique (« Force » → « -Force »), d'après les données du jeu."""
+    try:
+        source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        bonus_type = {row[0]: row[1] for row in source.execute("SELECT id, bonusType FROM EffectData")}
+        return {effect: opposite for effect, opposite in source.execute("SELECT id, oppositeId FROM EffectData WHERE oppositeId")
+                if bonus_type.get(effect) == 1 and bonus_type.get(opposite) == -1}  # fmt: skip
+    except sqlite3.Error:
+        return {}
     finally:
         source.close()
 
@@ -115,7 +135,8 @@ def extra_weight(effects: dict[int, int], base: dict[int, tuple[int, int]], dens
     return total
 
 
-def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
+def build(market: sqlite3.Connection, density: dict[int, float], malus: dict[int, int] | None = None) -> list[Pass]:
+    malus = malus_of() if malus is None else malus
     items = {row[0]: (row[1], row[2] or "") for row in market.execute("SELECT id, level, type_name FROM items")}
     tiers = {row[0]: rune_tier(row[1]) for row in market.execute("SELECT id, name FROM items WHERE type_name = 'Rune de forgemagie'")}
     templates: dict[int, dict[int, tuple[int, int]]] = defaultdict(dict)
@@ -165,20 +186,28 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
         base, level, type_name, weight_max = per_item[item_id]
         low, high = base.get(rune_effect, (None, None)) if rune_effect is not None else (None, None)
         line_before, line_after = before.get(rune_effect, 0), after.get(rune_effect, 0)
-        lost = {e: v - after.get(e, 0) for e, v in before.items() if e != rune_effect and v > 0 and after.get(e, 0) < v}
+        negative = malus.get(rune_effect)
+        on_malus = negative is not None and (before.get(negative, 0) > 0 or (rune_effect not in base and negative in base))
+        if on_malus:
+            # La ligne visée est le malus : lue avec son signe, bornes de la fiche (déjà négatives chez DofusDB).
+            low, high = base.get(negative, (None, None))
+            line_before = before.get(rune_effect, 0) - before.get(negative, 0)
+            line_after = after.get(rune_effect, 0) - after.get(negative, 0)
+        target = {rune_effect, negative} if on_malus else {rune_effect}
+        lost = {e: v - after.get(e, 0) for e, v in before.items() if e not in target and v > 0 and after.get(e, 0) < v}
         paid = lost or pool_change == POOL_DOWN
         outcome = EC if not passed else (SN if paid else SC)
         out.append(Pass(
             ts=ts, source=source, object=obj, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
             rune_effect=rune_effect, rune_value=rune_value, rune_weight=rune_weight,
-            line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind=line_kind(line_before, low, high) if rune_effect is not None and base else "?",
+            line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind="malus" if on_malus else line_kind(line_before, low, high) if rune_effect is not None and base else "?",
             line_weight_before=round(line_before * unit, 3) if rune_effect is not None else 0.0,
             item_weight_before=round(weight_of(before, density), 3), item_weight_max=weight_max,
             pool_before=pool_before, pool_after=pool_after, pool_change=pool_change, passed=passed, outcome=outcome,
             lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3) if lost else 0.0,
             lost_lines=lost, before_known=1,
             extra_before=round(extra_weight(before, base, density), 3), extra_after=round(extra_weight(after, base, density), 3),
-            line_max_weight=round(high * unit, 3) if high else None,
+            line_max_weight=round(high * unit, 3) if high and not on_malus else None,
             exo_lost=int(any(e not in base for e in lost)) if lost else 0, character_id=character,
             has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())), rune_tier=tier, game_version=version,
         ))  # fmt: skip

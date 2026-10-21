@@ -103,8 +103,9 @@ def pool_of(row) -> float | None:
 
 
 def cells_of(row) -> list[str]:
-    """Les cases où compte un passage de rune. Aucune tant que la fiche de l'objet ou de la rune manque."""
-    if row.line_kind == "?":
+    """Les cases où compte un passage de rune. Aucune tant que la fiche de l'objet ou de la rune manque,
+    ni pour une ligne négative (malus), étudiée à part."""
+    if row.line_kind in ("?", "malus"):
         return []
     out = []
     pool = pool_of(row)
