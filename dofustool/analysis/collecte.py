@@ -213,11 +213,11 @@ def _extra(row) -> bool:
 
 # Dans l'ordre de priorité : les premières sont celles qui manquent le plus pour finir la formule.
 MISSIONS = [
-    Mission("portee", "Au bout de la portée", "300 passages sur une ligne qui vaut déjà 15 à 30 fois le bonus de la rune, sans dépasser 95 % de son max.",
-            300, 600, "taille-rune", lambda r: "" if in_reach_zone(r) else None, lambda it: it.weight < 400, lambda c: c == "z|portée",
+    Mission("portee", "Au bout de la portée", "2 000 passages sur une ligne qui vaut déjà 15 à 30 fois le bonus de la rune, sans dépasser 95 % de son max.",
+            2000, 800, "taille-rune", lambda r: "" if in_reach_zone(r) else None, lambda it: it.weight < 400, lambda c: c == "z|portée",
             "Le moins cher : une petite rune (+1) sur une ligne déjà haute mais loin de son max, par exemple 20 en Force sur un objet à 40 de max."),
-    Mission("mal-roule", "Objet mal roulé", "300 passages sur un objet de niveau 150 ou plus rempli à moins de 60 % de son poids max.",
-            300, 600, "poids-objet", lambda r: "" if low_fill(r) else None, lambda it: it.level >= HIGH_LEVEL, lambda c: c == "z|peu rempli",
+    Mission("mal-roule", "Objet mal roulé", "1 000 passages sur un objet de niveau 150 ou plus rempli à moins de 60 % de son poids max.",
+            1000, 800, "poids-objet", lambda r: "" if low_fill(r) else None, lambda it: it.level >= HIGH_LEVEL, lambda c: c == "z|peu rempli",
             "Un objet tout juste fabriqué avec de mauvais jets fait l'affaire : forger ses lignes basses avant de le remplir."),
     Mission("premiers-overs", "Premiers overs", "100 tentatives d'over ou d'exo sur un objet qui porte moins de 25 de poids over/exo.", 100, 300, "puits-aide",
             lambda r: "" if _extra(r) and r.extra_before < 25 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|") and ("|0–10|" in c or "|10–25|" in c)),
@@ -845,6 +845,8 @@ def remember(conn: sqlite3.Connection, state: State, now: float | None = None, f
     fresh = [m for m in state.done if m not in known]
     with conn:
         conn.executemany("INSERT OR IGNORE INTO fm_missions_done VALUES (?, ?, ?)", [(m, *state.done[m]) for m in fresh])
+        # Objectif relevé depuis : la mission n'est plus réussie.
+        conn.executemany("DELETE FROM fm_missions_done WHERE mission_id = ?", [(m,) for m in known if m not in state.done])
     if focus_path is not None:
         try:
             focus_path.parent.mkdir(parents=True, exist_ok=True)
