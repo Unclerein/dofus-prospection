@@ -387,22 +387,29 @@ def judge_pool_accounting(ctx):
 
 
 def judge_malus_half(ctx):
-    """Puits des passages sur une ligne négative : avec le poids du malus (la moitié) ou le poids entier de la rune ?"""
-    half = whole = checked = 0
+    """Puits des passages payés sur une ligne négative, selon trois hypothèses sur le poids de la rune :
+    la règle (moitié tant que la ligne reste négative, poids normal pour l'amener à 0), toujours la moitié,
+    toujours le poids normal."""
+    rule = half = normal = checked = to_zero = to_zero_ok = 0
     for r in ctx.rows:
-        if r.line_kind != "malus" or r.outcome == "sc" or r.pool_before is None or not r.rune_weight:
+        if r.line_kind != "malus" or r.outcome == "sc" or r.pool_before is None or not r.rune_weight_normal or r.rune_weight_malus is None:
             continue
-        lost = r.lost_weight
+        fits = lambda w: abs(r.pool_after - max(0.0, r.pool_before + r.lost_weight - w)) <= 0.05  # noqa: E731
         checked += 1
-        half += abs(r.pool_after - max(0.0, r.pool_before + lost - r.rune_weight)) <= 0.05
-        whole += abs(r.pool_after - max(0.0, r.pool_before + lost - 2 * r.rune_weight)) <= 0.05
-    text = f"Puits juste avec la moitié du poids : {half} cas sur {checked} ; avec le poids entier : {whole}."
+        rule += fits(r.rune_weight)
+        half += fits(r.rune_weight_malus)
+        normal += fits(r.rune_weight_normal)
+        if r.line_before + (r.rune_value or 0) >= 0:
+            to_zero += 1
+            to_zero_ok += fits(r.rune_weight)
     if not checked:
         return "verifier", "Aucun passage payé sur une ligne négative pour l'instant.", 0, 0.0
-    if half == checked and whole < checked:
-        status = "certain" if checked >= 30 else "probable" if checked >= 5 else "verifier"
-        return status, text, checked, 1 - 0.5**checked
-    if whole > half:
+    text = (f"Puits juste avec la règle : {rule} cas sur {checked} (dont {to_zero_ok} sur {to_zero} pour amener la ligne à 0) ; "
+            f"toujours la moitié : {half} ; toujours le poids normal : {normal}.")
+    if rule == checked:
+        status = "certain" if checked >= 30 and to_zero >= 5 else "probable" if checked >= 5 else "verifier"
+        return status, text + ("" if to_zero >= 5 else " Il faut au moins 5 passages qui amènent la ligne à 0."), checked, 1 - 0.5**checked
+    if max(half, normal) > rule:
         return "refute", text, checked, 0.8
     return "verifier", text, checked, 0.3
 
@@ -619,7 +626,8 @@ RULES = [
     Rule("puits-compte", "Le puits se compte au poids près", "Quand une rune passe en payant, le puits varie du poids perdu par les autres lignes, moins le poids de la rune.",
          "Mesuré sur nos passages", judge_pool_accounting),
     Rule("malus-moitie", "Sur une ligne négative, la rune ne pèse que la moitié", "Une rune passée sur un malus (« -7 % critique ») ne compte que pour le poids "
-         "d'un point de malus, la moitié de son poids habituel : c'est ce poids que le puits paie ou gagne.", "Communauté, vérifié sur le puits", judge_malus_half),
+         "d'un point de malus, la moitié de son poids habituel, tant que la ligne reste négative ; pour l'amener à 0 (de -1 à 0), elle pèse son poids normal. "
+         "C'est ce poids que le puits paie ou gagne.", "Communauté, vérifié sur le puits", judge_malus_half),
     Rule("outils-surs", "Les outils ne ratent jamais", "Transcendances, orbes, potions, éclats et gravures passent à tous les coups.", "Communauté, validé par le groupe", judge_tools),
     Rule("ligne-101", "Une ligne ne dépasse pas 101 de poids par l'over",
          "Un over est refusé s'il porterait la ligne au-delà de 101 de poids, en comptant les autres overs et exos de l'objet. "

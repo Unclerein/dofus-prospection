@@ -14,7 +14,8 @@ critique seulement s'il n'a rien payé.
 Une ligne négative (« -7 % critique ») est un effet à part, le malus, que le jeu fait baisser quand on
 passe la rune de la caractéristique. Ces passages sont classés « malus », la ligne lue avec son signe
 (-7 → -6) ; la baisse du malus n'est pas une perte. La rune n'y pèse que le poids du malus, la moitié
-de son poids habituel (vérifié sur le puits).
+de son poids habituel, tant que la ligne reste négative ; pour l'amener à 0 (de -1 à 0), son poids
+normal (vu sur le puits).
 
 Les passages des autres joueurs, reçus par le hub (table shared_fm_passes), entrent aussi : la colonne
 source dit d'où vient chaque ligne, et l'exemplaire n'y est qu'une empreinte.
@@ -76,6 +77,8 @@ class Pass:
     has_exo: int = 0  # l'objet portait un exo (autre que la ligne visée) avant le passage
     rune_tier: str = ""  # taille de la rune : « simple », « Pa » ou « Ra »
     game_version: str | None = None  # version du jeu au moment du passage, si elle est connue
+    rune_weight_normal: float | None = None  # poids habituel de la rune (sur un malus, rune_weight peut en être la moitié)
+    rune_weight_malus: float | None = None  # sur un malus : poids d'autant de points de malus que la rune en retire
     character_id: int | None = None  # personnage, pour les passages captés sur ce PC
 
 
@@ -195,8 +198,10 @@ def build(market: sqlite3.Connection, density: dict[int, float], malus: dict[int
             line_before = before.get(rune_effect, 0) - before.get(negative, 0)
             line_after = after.get(rune_effect, 0) - after.get(negative, 0)
         target = {rune_effect, negative} if on_malus else {rune_effect}
-        # Sur un malus, la rune ne pèse que le poids d'un point de malus : la moitié de son poids habituel.
-        weight = round(rune_value * abs(density.get(negative, 0.0)), 3) if on_malus and rune_value is not None else rune_weight
+        # Sur un malus, la rune ne pèse que le poids d'un point de malus (la moitié de son poids habituel) tant que
+        # la ligne reste négative ; pour l'amener à 0 ou au-delà, son poids normal.
+        malus_weight = round(rune_value * abs(density.get(negative, 0.0)), 3) if on_malus and rune_value is not None else None
+        weight = malus_weight if malus_weight is not None and line_before + rune_value < 0 else rune_weight
         line_unit = abs(density.get(negative, 0.0)) if on_malus else unit
         lost = {e: v - after.get(e, 0) for e, v in before.items() if e not in target and v > 0 and after.get(e, 0) < v}
         paid = lost or pool_change == POOL_DOWN
@@ -214,6 +219,7 @@ def build(market: sqlite3.Connection, density: dict[int, float], malus: dict[int
             line_max_weight=round(high * unit, 3) if high and not on_malus else None,
             exo_lost=int(any(e not in base for e in lost)) if lost else 0, character_id=character,
             has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())), rune_tier=tier, game_version=version,
+            rune_weight_normal=rune_weight, rune_weight_malus=malus_weight,
         ))  # fmt: skip
     return out
 

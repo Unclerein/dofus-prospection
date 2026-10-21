@@ -66,8 +66,13 @@ def test_a_rune_on_a_negative_line_lowers_the_malus_and_is_not_an_exo():
             "VALUES (?, ?, 1, 10, 20, ?, NULL, 0, 0, 'rune', 0, ?, ?)",
             (i, float(i), ok, json.dumps(before), json.dumps(after)),
         )
+    conn.execute(
+        "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after) "
+        "VALUES (3, 3.0, 1, 10, 20, 1, NULL, 0, 0, 'rune', 0, ?, ?)", (json.dumps([[157, 1], [125, 135]]), json.dumps([[125, 135]])),
+    )  # de -1 à 0 : le malus disparaît
     rows = fmdata.build(conn, {118: 1.0, 157: -0.5, 125: 0.2}, malus={118: 157})
     assert [(r.line_kind, r.line_before, r.line_after, r.outcome) for r in rows] == [
-        ("malus", -10, -9, "sc"), ("malus", -9, -8, "sn"), ("malus", -8, -8, "ec")]
+        ("malus", -10, -9, "sc"), ("malus", -9, -8, "sn"), ("malus", -8, -8, "ec"), ("malus", -1, 0, "sc")]
+    assert rows[3].rune_weight == 1.0  # pour amener la ligne à 0, la rune pèse son poids normal
     assert (rows[0].line_min, rows[0].line_max) == (-20, -1) and json.dumps(rows[1].lost_lines) == '{"125": 10}'
     assert rows[0].rune_weight == 0.5  # sur un malus, la rune ne pèse que la moitié (poids d'un point de malus)
