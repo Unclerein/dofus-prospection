@@ -70,3 +70,4 @@ def test_a_rune_on_a_negative_line_lowers_the_malus_and_is_not_an_exo():
     assert [(r.line_kind, r.line_before, r.line_after, r.outcome) for r in rows] == [
         ("malus", -10, -9, "sc"), ("malus", -9, -8, "sn"), ("malus", -8, -8, "ec")]
     assert (rows[0].line_min, rows[0].line_max) == (-20, -1) and json.dumps(rows[1].lost_lines) == '{"125": 10}'
+    assert rows[0].rune_weight == 0.5  # sur un malus, la rune ne pèse que la moitié (poids d'un point de malus)

@@ -13,7 +13,8 @@ critique seulement s'il n'a rien payé.
 
 Une ligne négative (« -7 % critique ») est un effet à part, le malus, que le jeu fait baisser quand on
 passe la rune de la caractéristique. Ces passages sont classés « malus », la ligne lue avec son signe
-(-7 → -6) ; la baisse du malus n'est pas une perte.
+(-7 → -6) ; la baisse du malus n'est pas une perte. La rune n'y pèse que le poids du malus, la moitié
+de son poids habituel (vérifié sur le puits).
 
 Les passages des autres joueurs, reçus par le hub (table shared_fm_passes), entrent aussi : la colonne
 source dit d'où vient chaque ligne, et l'exemplaire n'y est qu'une empreinte.
@@ -194,14 +195,17 @@ def build(market: sqlite3.Connection, density: dict[int, float], malus: dict[int
             line_before = before.get(rune_effect, 0) - before.get(negative, 0)
             line_after = after.get(rune_effect, 0) - after.get(negative, 0)
         target = {rune_effect, negative} if on_malus else {rune_effect}
+        # Sur un malus, la rune ne pèse que le poids d'un point de malus : la moitié de son poids habituel.
+        weight = round(rune_value * abs(density.get(negative, 0.0)), 3) if on_malus and rune_value is not None else rune_weight
+        line_unit = abs(density.get(negative, 0.0)) if on_malus else unit
         lost = {e: v - after.get(e, 0) for e, v in before.items() if e not in target and v > 0 and after.get(e, 0) < v}
         paid = lost or pool_change == POOL_DOWN
         outcome = EC if not passed else (SN if paid else SC)
         out.append(Pass(
             ts=ts, source=source, object=obj, item_id=item_id, item_level=level, item_type=type_name, rune_id=rune_id,
-            rune_effect=rune_effect, rune_value=rune_value, rune_weight=rune_weight,
+            rune_effect=rune_effect, rune_value=rune_value, rune_weight=weight,
             line_before=line_before, line_after=line_after, line_min=low, line_max=high, line_kind="malus" if on_malus else line_kind(line_before, low, high) if rune_effect is not None and base else "?",
-            line_weight_before=round(line_before * unit, 3) if rune_effect is not None else 0.0,
+            line_weight_before=round(line_before * line_unit, 3) if rune_effect is not None else 0.0,
             item_weight_before=round(weight_of(before, density), 3), item_weight_max=weight_max,
             pool_before=pool_before, pool_after=pool_after, pool_change=pool_change, passed=passed, outcome=outcome,
             lost_weight=round(sum(points * density.get(e, 0.0) for e, points in lost.items()), 3) if lost else 0.0,
