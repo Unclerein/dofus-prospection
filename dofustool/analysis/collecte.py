@@ -44,7 +44,11 @@ ITEM_BINS = ((0.6, "moins de 60 %"), (0.8, "60–80 %"), (0.95, "80–95 %"), (m
 EXTRA_BINS = ((10, "0–10"), (25, "10–25"), (50, "25–50"), (math.inf, "50–101"))
 POOL_LEVELS = ("sans puits", "petit puits", "gros puits")  # 0, moins de 20, 20 et plus
 
-NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET, ORB_TARGET = 600, 700, 2000, 8000, 1000
+NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET = 600, 700, 2000, 8000
+GAP_TARGET = 1000  # zones où la formule reste floue
+REACH_LOW, REACH_HIGH = 15, 30  # ligne entre 15 et 30 fois le bonus de la rune : la portée de la rune
+LOW_FILL = 0.6  # objet rempli à moins de 60 % de son poids max
+HIGH_LEVEL, LOW_LEVEL = 150, 100
 RANK_TARGET, LOADED_TARGET = 600, 300
 LOADED = 8  # poids over/exo porté ailleurs sur l'objet à partir duquel un premier over compte comme « chargé »
 MODELS_TARGET, MODEL_PASSES = 50, 100  # 50 modèles d'objets avec au moins 100 passages chacun
@@ -82,7 +86,8 @@ def blocks() -> list[Block]:
         Block("edges", "Seuil du 1 %", "Tentatives sur un objet qui porte déjà 25 à 29, puis 30 ou plus, de poids over/exo : "
               "le seuil où il ne reste qu'environ 1 % de critique est-il à 25 ou à 30 ?", {"s|25": EDGE_TARGET, "s|30": EDGE_TARGET}),
         Block("light", "Objets légers", f"Objets de poids max inférieur à {LIGHT} : la formule tient-elle en bas de l'échelle ?", {"l": LIGHT_TARGET}),
-        Block("orbs", "Orbes", "Comment le jeu tire les jets d'un objet, comme à sa fabrication.", {"orbe": ORB_TARGET}),
+        Block("gaps", "Zones floues de la formule", "Ce qui manque pour finir la formule : lignes entre 15 et 30 fois le bonus de la rune, "
+              "objets haut niveau peu remplis, objets de niveau 100 ou moins.", {"z|portée": GAP_TARGET, "z|peu rempli": GAP_TARGET, "z|bas niveau": GAP_TARGET}),
     ]  # fmt: skip
 
 
@@ -122,7 +127,25 @@ def cells_of(row) -> list[str]:
             out.append("r|1|chargé")
     if row.item_weight_max and row.item_weight_max < LIGHT:
         out.append("l")
+    if in_reach_zone(row):
+        out.append("z|portée")
+    if low_fill(row):
+        out.append("z|peu rempli")
+    if row.item_level is not None and row.item_level <= LOW_LEVEL and not _extra(row):
+        out.append("z|bas niveau")
     return out
+
+
+def in_reach_zone(row) -> bool:
+    """Ligne normale qui vaut déjà 15 à 30 fois le bonus de la rune, et qui reste à 95 % de son max ou moins."""
+    return (not _extra(row) and bool(row.line_max) and bool(row.rune_value)
+            and REACH_LOW <= row.line_before / row.rune_value < REACH_HIGH and row.line_before + row.rune_value <= 0.95 * row.line_max)
+
+
+def low_fill(row) -> bool:
+    """Objet de niveau 150 ou plus, rempli à moins de 60 % de son poids max (objet neuf ou mal roulé)."""
+    return (not _extra(row) and (row.item_level or 0) >= HIGH_LEVEL and bool(row.item_weight_max)
+            and row.item_weight_before / row.item_weight_max < LOW_FILL)
 
 
 def over_rank(row) -> int | None:
@@ -150,7 +173,7 @@ def value(count: int, goal: int) -> float:
 
 @dataclass
 class Tool:
-    """Un passage qui n'est pas une rune de forgemagie (orbe, potion…), pour les points et les orbes."""
+    """Un passage qui n'est pas une rune de forgemagie (orbe, potion…), pour les points."""
 
     ts: float
     source: str
@@ -188,19 +211,18 @@ def _extra(row) -> bool:
     return row.line_kind in ("over", "exo")
 
 
+# Dans l'ordre de priorité : les premières sont celles qui manquent le plus pour finir la formule.
 MISSIONS = [
-    Mission("sans-puits", "Sans filet", "300 passages de rune sur un objet sans puits.", 300, 300, "puits-aide",
-            lambda r: "" if pool_of(r) == 0 else None, lambda it: it.weight < 400, lambda c: c.endswith("|sans") or c.endswith("|sans puits"),
-            "Le plus simple : forger un objet neuf, avant qu'il n'ait généré du puits."),
-    Mission("poids-plume", "Poids plume", f"300 passages sur un objet de poids max inférieur à {LIGHT}.", 300, 300, "poids-objet",
-            lambda r: "" if r.item_weight_max < LIGHT else None, lambda it: it.weight < LIGHT, lambda c: c == "l"),
-    Mission("juste-milieu", "Juste milieu", "300 passages sur un objet de poids max entre 150 et 400.", 300, 300, "poids-objet",
-            lambda r: "" if LIGHT <= r.item_weight_max < 400 else None, lambda it: LIGHT <= it.weight < 400, lambda c: c.startswith("n|")),
-    Mission("lignes-basses", "Repartir d'en bas", "300 passages sur une ligne sous 40 % de son max.", 300, 200, "neutre-50",
-            lambda r: "" if not _extra(r) and r.line_max and r.line_before < 0.4 * r.line_max else None, lambda it: it.weight < 400,
-            lambda c: c.startswith("n|0–20") or c.startswith("n|20–40")),
+    Mission("portee", "Au bout de la portée", "300 passages sur une ligne qui vaut déjà 15 à 30 fois le bonus de la rune, sans dépasser 95 % de son max.",
+            300, 600, "taille-rune", lambda r: "" if in_reach_zone(r) else None, lambda it: it.weight < 400, lambda c: c == "z|portée",
+            "Le moins cher : une petite rune (+1) sur une ligne déjà haute mais loin de son max, par exemple 20 en Force sur un objet à 40 de max."),
+    Mission("mal-roule", "Objet mal roulé", "300 passages sur un objet de niveau 150 ou plus rempli à moins de 60 % de son poids max.",
+            300, 600, "poids-objet", lambda r: "" if low_fill(r) else None, lambda it: it.level >= HIGH_LEVEL, lambda c: c == "z|peu rempli",
+            "Un objet tout juste fabriqué avec de mauvais jets fait l'affaire : forger ses lignes basses avant de le remplir."),
     Mission("premiers-overs", "Premiers overs", "100 tentatives d'over ou d'exo sur un objet qui porte moins de 25 de poids over/exo.", 100, 300, "puits-aide",
             lambda r: "" if _extra(r) and r.extra_before < 25 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|") and ("|0–10|" in c or "|10–25|" in c)),
+    Mission("exo-sec", "Exo à sec", "100 tentatives d'exo sans puits.", 100, 400, "puits-aide",
+            lambda r: "" if r.line_kind == "exo" and pool_of(r) == 0 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|exo|") and c.endswith("sans puits")),
     Mission("au-dela-25", "Au-delà de 25", "150 tentatives d'over ou d'exo sur un objet qui porte déjà 25 à 29 de poids over/exo, et 150 à 30 ou plus.", 150, 500, "seuil-25",
             lambda r: ("25 à 29" if 25 <= r.extra_before < 30 else "30 et plus" if r.extra_before >= 30 else None) if _extra(r) else None,
             lambda it: it.weight < LIGHT, lambda c: c in ("s|25", "s|30") or "|25–50|" in c or "|50–101|" in c,
@@ -209,23 +231,34 @@ MISSIONS = [
     Mission("over-charge", "Premier over, objet chargé", "50 premiers overs (ligne au max) sur un objet qui porte déjà entre 8 et 25 de poids over/exo ailleurs.",
             50, 400, "rang-over", lambda r: "" if over_rank(r) == 1 and LOADED <= other_extra(r) < 25 else None, lambda it: it.weight < 400,
             lambda c: c == "r|1|chargé", "Par exemple : un objet avec un exo ou un over déjà passé, et une autre ligne montée à son max ; on tente l'over sur celle-ci."),
+    Mission("bas-niveau", "Petits objets", "300 passages de rune sur des objets de niveau 100 ou moins.", 300, 400, "poids-objet",
+            lambda r: "" if r.item_level is not None and r.item_level <= LOW_LEVEL and not _extra(r) else None,
+            lambda it: it.level <= LOW_LEVEL, lambda c: c == "z|bas niveau",
+            "Ils échouent bien plus souvent que les objets haut niveau : il faut savoir pourquoi."),
+    Mission("duel-crit", "Le duel des critiques", "50 tentatives d'over en % critique sur un objet à 4 % max, et 50 sur un objet à 7 % max.", 50, 500, "petit-max",
+            lambda r: (f"{r.line_max} %" if r.rune_effect == CRIT and r.line_kind == "over" and r.line_max in (4, 7) else None),
+            lambda it: it.crit in (4, 7), lambda c: c.startswith("o|over|"),
+            "Paire idéale, presque le même poids total : Amulette de Kubitus (4 % max) et Cape du Boostache (7 % max).", ("4 %", "7 %")),
+    Mission("sans-puits", "Sans filet", "300 passages de rune sur un objet sans puits.", 300, 300, "puits-aide",
+            lambda r: "" if pool_of(r) == 0 else None, lambda it: it.weight < 400, lambda c: c.endswith("|sans") or c.endswith("|sans puits"),
+            "Le plus simple : forger un objet neuf, avant qu'il n'ait généré du puits."),
     Mission("petite-grosse", "Petite contre grosse", "300 runes simples et 300 runes Ra sur des lignes déjà à 80 % de leur max ou plus.",
             300, 400, "taille-rune",
             lambda r: (r.rune_tier if r.rune_tier in ("simple", "Ra") and not _extra(r) and r.line_max and r.line_before >= 0.8 * r.line_max else None),
             lambda it: it.weight < 400, lambda c: c.startswith("n|80–100 %"),
             "Le plus parlant : sur le même objet et la même ligne, alterner une rune simple et sa Ra (Fo et Ra Fo, Ine et Ra Ine…).", ("simple", "Ra")),
-    Mission("duel-crit", "Le duel des critiques", "50 tentatives d'over en % critique sur un objet à 4 % max, et 50 sur un objet à 7 % max.", 50, 500, "petit-max",
-            lambda r: (f"{r.line_max} %" if r.rune_effect == CRIT and r.line_kind == "over" and r.line_max in (4, 7) else None),
-            lambda it: it.crit in (4, 7), lambda c: c.startswith("o|over|"),
-            "Paire idéale, presque le même poids total : Amulette de Kubitus (4 % max) et Cape du Boostache (7 % max).", ("4 %", "7 %")),
-    Mission("exo-sec", "Exo à sec", "100 tentatives d'exo sans puits.", 100, 400, "puits-aide",
-            lambda r: "" if r.line_kind == "exo" and pool_of(r) == 0 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|exo|") and c.endswith("sans puits")),
+    Mission("lignes-basses", "Repartir d'en bas", "300 passages sur une ligne sous 40 % de son max.", 300, 200, "neutre-50",
+            lambda r: "" if not _extra(r) and r.line_max and r.line_before < 0.4 * r.line_max else None, lambda it: it.weight < 400,
+            lambda c: c.startswith("n|0–20") or c.startswith("n|20–40")),
+    Mission("poids-plume", "Poids plume", f"300 passages sur un objet de poids max inférieur à {LIGHT}.", 300, 300, "poids-objet",
+            lambda r: "" if r.item_weight_max < LIGHT else None, lambda it: it.weight < LIGHT, lambda c: c == "l"),
+    Mission("juste-milieu", "Juste milieu", "300 passages sur un objet de poids max entre 150 et 400.", 300, 300, "poids-objet",
+            lambda r: "" if LIGHT <= r.item_weight_max < 400 else None, lambda it: LIGHT <= it.weight < 400, lambda c: c.startswith("n|")),
     Mission("explorateur", "Explorateur", "5 modèles d'objets que personne du groupe n'avait forgés, 50 passages sur chacun.", 5, 500, "poids-objet",
             lambda r: None, lambda it: it.group == 0 and it.weight < 400, lambda c: False),
-    Mission("orbes", "Le hasard des orbes", "30 orbes de forgemagie passés.", 30, 200, None,
-            lambda r: None, lambda it: it.weight < 400, lambda c: c == "orbe", "Un orbe retire tous les jets de l'objet comme à sa fabrication."),
 ]  # fmt: skip
 EXPLORER_PASSES = 50
+PRIORITY = 6  # les 6 premières missions sont marquées prioritaires
 
 
 # --- les objets proposés -----------------------------------------------------------
@@ -563,7 +596,7 @@ def judge_job_level(ctx):
 RULES = [
     Rule("puits-compte", "Le puits se compte au poids près", "Quand une rune passe en payant, le puits varie du poids perdu par les autres lignes, moins le poids de la rune.",
          "Mesuré sur nos passages", judge_pool_accounting),
-    Rule("outils-surs", "Les outils ne ratent jamais", "Transcendances, orbes, potions, éclats et gravures passent à tous les coups.", "Communauté, validé par le groupe", judge_tools, "orbes"),
+    Rule("outils-surs", "Les outils ne ratent jamais", "Transcendances, orbes, potions, éclats et gravures passent à tous les coups.", "Communauté, validé par le groupe", judge_tools),
     Rule("ligne-101", "Une ligne ne dépasse pas 101 de poids par l'over",
          "Un over est refusé s'il porterait la ligne au-delà de 101 de poids, en comptant les autres overs et exos de l'objet. "
          "Sur une ligne qui pèse 100 à son max, un over ne passe donc que d'un point de poids.",
@@ -677,7 +710,7 @@ def compute(conn: sqlite3.Connection, density: dict[int, float] | None = None) -
     done: dict[str, tuple[float, int | None]] = {}
     for ts, _, event in events:
         if isinstance(event, Tool):
-            cells = ["orbe"] if event.kind == "orbe" else []
+            cells = []
         else:
             cells = cells_of(event)
         worth = max((value(owner[c].counts[c], goal[c]) for c in cells), default=1.0)
@@ -693,9 +726,7 @@ def compute(conn: sqlite3.Connection, density: dict[int, float] | None = None) -
         for mission in MISSIONS:
             if mission.id in done:
                 continue
-            if mission.id == "orbes":
-                key = "" if isinstance(event, Tool) and event.kind == "orbe" else None
-            elif mission.id == "explorateur":
+            if mission.id == "explorateur":
                 key = None
                 if first[item_id] == "moi":
                     progress["explorateur"][item_id] += 1
@@ -729,7 +760,8 @@ FOCUS_PATH = Path(__file__).resolve().parents[2] / "data" / "collecte.json"
 def open_missions(state: State) -> list[dict]:
     """Les missions pas encore réussies, celles dont les passages rapportent le plus d'abord (puis le plus gros bonus)."""
     out = []
-    for entry in sorted(state.missions, key=lambda e: (-e["worth"], -e["mission"].bonus)):
+    rank = {m.id: i for i, m in enumerate(MISSIONS)}
+    for entry in sorted(state.missions, key=lambda e: (rank[e["mission"].id] >= PRIORITY, -e["worth"], -e["mission"].bonus)):
         mission = entry["mission"]
         if mission.id in state.done:
             continue
@@ -766,6 +798,8 @@ def fits(mission_id: str, effects: dict[int, int], base: dict[int, tuple[int, in
         return any(high and high > 0 and 0 < effects.get(e, 0) < 0.4 * high for e, (_, high) in base.items())
     if mission_id == "explorateur":
         return group == 0
+    if mission_id == "mal-roule":
+        return 0 < weight and sum(v * density.get(e, 0.0) for e, v in effects.items() if v > 0) / weight < LOW_FILL
     return None
 
 

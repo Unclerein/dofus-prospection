@@ -1888,6 +1888,7 @@ class Api:
                     "parts": entry["parts"], "worth": entry["worth"], "hint": mission.hint, "rule": mission.rule,
                     "done_at": done[0] if done else None, "items": [self._collecte_item(it, icons, mission.id) for it in fitting[:5]], "total": len(fitting),
                     "winners": sorted(winners.get(mission.id, []), key=lambda w: w["at"]),
+                    "priority": collecte.MISSIONS.index(mission) < collecte.PRIORITY,
                 })  # fmt: skip
             me = {
                 "pseudo": cfg.share_pseudo or "moi", "character": collecte.main_character(conn), "points": state.points,

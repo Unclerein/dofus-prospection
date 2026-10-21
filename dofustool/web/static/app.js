@@ -1469,7 +1469,7 @@ async function missionCard(m, ui) {
     open ? 'Ne garder que les 5 premiers' : `Voir les ${fmt(m.total)} objets`);
   return h('article', { class: 'panel mission' + (done ? ' done' : ''), id: `mission-${m.id}` },
     h('div', { class: 'mission-head' },
-      h('div', {}, h('h3', {}, m.title), h('p', { class: 'soft' }, m.text)),
+      h('div', {}, h('h3', {}, [m.title, m.priority && h('span', { class: 'tag exo', style: 'margin-left: 8px', title: 'Parmi les missions qui manquent le plus pour finir la formule de la forgemagie' }, 'Prioritaire')]), h('p', { class: 'soft' }, m.text)),
       h('div', { class: 'mission-reward' }, done ? h('span', { class: 'tag good' }, `Réussie le ${when(m.done_at, false)}`) : h('span', { class: 'tag mine' }, `+${fmt(m.bonus)} pts`),
         h('div', { class: 'muted small', title: 'Points que rapporte en ce moment un passage qui fait avancer cette mission : plus les cases visées sont vides, plus c’est haut.' }, `≈ ${String(m.worth).replace('.', ',')} pts par passage`))),
     h('div', { class: 'mission-parts' }, parts),
@@ -1527,7 +1527,7 @@ async function forgeCollecte() {
       h('div', { class: 'heat-blocks' }, data.blocks.filter((b) => b.id === 'normal' || b.id === 'extra').map(collecteHeat))));
 
   const missions = h('section', { class: 'collect-missions', 'aria-label': 'Missions' },
-    h('div', { class: 'section-head' }, h('h2', {}, 'Missions'), h('p', { class: 'muted small' }, 'Personnelles. Chacune pousse vers ce qui manque et rapporte un bonus ; quand quelqu’un en réussit une, tout le groupe le voit passer par-dessus le jeu. Les objets sont triés par intérêt : les moins de 10 000 kamas d’abord, et un modèle que personne n’a forgé compte double.')),
+    h('div', { class: 'section-head' }, h('h2', {}, 'Missions'), h('p', { class: 'muted small' }, 'Personnelles, les plus utiles pour finir la formule en premier. Chacune pousse vers ce qui manque et rapporte un bonus ; quand quelqu’un en réussit une, tout le groupe le voit passer par-dessus le jeu. Les objets sont triés par intérêt : les moins de 10 000 kamas d’abord, et un modèle que personne n’a forgé compte double.')),
     h('div', { class: 'mission-grid' }, await Promise.all(data.missions.map((m) => missionCard(m, ui)))));
 
   const rules = h('section', { class: 'panel' },

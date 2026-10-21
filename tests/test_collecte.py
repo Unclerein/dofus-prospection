@@ -66,14 +66,6 @@ def test_rules_follow_the_evidence():
     conn.execute("INSERT INTO fm_refusals VALUES (900, 4000.0, 7, 10, 20, 0, NULL, '[[118, 50]]')")
     rules = {r["id"]: r for r in collecte.rules(conn, collecte.compute(conn, DENSITY), now=300.0)}
     assert rules["ligne-101"]["status"] == "refute"
-    # Les orbes comptent dans leur case.
-    conn.executemany(
-        "INSERT INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, before, after) "
-        "VALUES (?, ?, 7, 10, 20, 1, 0, 0, 0, 'orbe', '[]', '[]')",
-        [(100 + i, 2000.0 + i) for i in range(40)],
-    )
-    state = collecte.compute(conn, DENSITY)
-    assert next(b for b in state.blocks if b.id == "orbs").counts["orbe"] == 40
 
 
 def test_the_overlay_recalls_the_mission_once_per_workshop_and_announces_fresh_successes(tmp_path):
@@ -154,3 +146,11 @@ def test_the_one_percent_threshold_is_settled_between_25_and_30():
     at_25 = collecte.judge_beyond_25(collecte.Context(above + tries(27, 150, 1), [], []))
     assert at_25[0] == "probable" and "seuil est à 25" in at_25[1]
     assert collecte.judge_beyond_25(collecte.Context(tries(32, 50, 1), [], []))[0] == "verifier"
+
+
+def test_missions_put_the_formula_gaps_first():
+    ids = [m.id for m in collecte.MISSIONS]
+    assert ids[:2] == ["portee", "mal-roule"] and "orbes" not in ids
+    state = collecte.compute(forge([(0.0, 40, 1)]), DENSITY)
+    assert collecte.focus(state)["id"] in ids[:collecte.PRIORITY]
+    assert {b.id for b in state.blocks} >= {"gaps"} and "orbs" not in {b.id for b in state.blocks}
