@@ -79,6 +79,19 @@ def main() -> int:
             log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
     except Exception as exc:  # le rattrapage ne doit jamais empêcher la capture
         log.warning("Rattrapage du journal de forgemagie non fait : %s", exc)
+    # Version du jeu des passages récents, poids des caractéristiques et fiches des objets de cette version :
+    # de quoi relire un passage avec les règles de son époque après une mise à jour du jeu.
+    try:
+        from ..analysis.fmdata import densities
+        from ..staticdata import effects as base_effects
+
+        tagged = db.tag_game_version(market)
+        if tagged:
+            log.info("Version du jeu notée sur %d passages de forgemagie.", tagged)
+        db.record_densities(market, densities())
+        db.snapshot_templates(market, base_effects.known_version(market), time.time())
+    except Exception as exc:  # noqa: BLE001 — jamais au prix de la capture
+        log.warning("Version du jeu des passages non notée : %s", exc)
     noted = 0.0  # dernière fois que l'arrivée d'un paquet du jeu a été notée dans l'état
     try:
         while not STOP_FILE.exists():

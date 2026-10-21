@@ -59,11 +59,11 @@ def test_rules_follow_the_evidence():
     assert rules["seuil-25"]["status"] == "verifier" and rules["ligne-101"]["status"] == "verifier"
     assert rules["ligne-101"]["was"] is None  # premier calcul : pas une nouveauté
     # 20 refus du jeu sur un over qui aurait mis la ligne au-delà de 101 de poids : la règle devient très probable.
-    conn.executemany("INSERT INTO fm_refusals VALUES (?, ?, 7, 10, 20, 0, NULL, '[[118, 101]]')", [(500 + i, 3000.0 + i) for i in range(20)])
+    conn.executemany("INSERT INTO fm_refusals (source_id, ts, uid, item_id, rune_id, status, code, before) VALUES (?, ?, 7, 10, 20, 0, NULL, '[[118, 101]]')", [(500 + i, 3000.0 + i) for i in range(20)])
     rules = {r["id"]: r for r in collecte.rules(conn, collecte.compute(conn, DENSITY), now=200.0)}
     assert rules["ligne-101"]["status"] == "probable" and rules["ligne-101"]["was"] == "À vérifier"
     # Un refus alors que la ligne serait restée sous 101 la contredirait.
-    conn.execute("INSERT INTO fm_refusals VALUES (900, 4000.0, 7, 10, 20, 0, NULL, '[[118, 50]]')")
+    conn.execute("INSERT INTO fm_refusals (source_id, ts, uid, item_id, rune_id, status, code, before) VALUES (900, 4000.0, 7, 10, 20, 0, NULL, '[[118, 50]]')")
     rules = {r["id"]: r for r in collecte.rules(conn, collecte.compute(conn, DENSITY), now=300.0)}
     assert rules["ligne-101"]["status"] == "refute"
 
@@ -154,3 +154,23 @@ def test_missions_put_the_formula_gaps_first():
     state = collecte.compute(forge([(0.0, 40, 1)]), DENSITY)
     assert collecte.focus(state)["id"] in ids[:collecte.PRIORITY]
     assert {b.id for b in state.blocks} >= {"gaps"} and "orbs" not in {b.id for b in state.blocks}
+
+
+def test_passes_keep_the_game_version_and_the_rules_of_their_time():
+    conn = forge([(0.0, 40, 1)] * 2)
+    assert db.tag_game_version(conn) == 0  # version du jeu inconnue : rien n'est deviné
+    conn.executemany("INSERT INTO static_meta VALUES (?, ?)", [("version", "v6.0_3.7.11.11"), ("imported_at", "1000.5")])
+    conn.commit()
+    assert db.game_version(conn) == "3.7.11.11"
+    assert db.tag_game_version(conn) == 1  # le passage d'avant l'import des données reste sans version
+    assert conn.execute("SELECT ts, game_version FROM fm_passes ORDER BY ts").fetchall() == [(1000.0, None), (1001.0, "3.7.11.11")]
+    assert db.record_densities(conn, {118: 1.0}) and not db.record_densities(conn, {118: 2.0})
+    # La fiche d'un objet qui change garde l'ancienne dans l'historique.
+    from dofustool.staticdata import effects as base_effects
+
+    assert db.snapshot_templates(conn, "3.7.4.4", 5.0) == 2
+    base_effects.store(conn, 10, [(118, 30, 55), (125, 100, 200)])
+    history = conn.execute("SELECT version, effects FROM item_effects_history WHERE item_id = 10 ORDER BY seen_at").fetchall()
+    assert [json.loads(e) for _, e in history] == [[[118, 30, 50], [125, 100, 200]], [[118, 30, 55], [125, 100, 200]]]
+    base_effects.store(conn, 10, [(118, 30, 55), (125, 100, 200)])
+    assert conn.execute("SELECT COUNT(*) FROM item_effects_history WHERE item_id = 10").fetchone()[0] == 2  # inchangée : rien de plus

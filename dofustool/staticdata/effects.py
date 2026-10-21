@@ -52,6 +52,7 @@ def fetch(item_id: int) -> list[tuple[int, int, int]]:
 
 
 def store(conn: sqlite3.Connection, item_id: int, effects: list[tuple[int, int, int]]) -> None:
+    db.record_template(conn, item_id, effects, known_version(conn), time.time())  # l'ancienne fiche reste dans l'historique
     with conn:
         conn.execute("DELETE FROM item_effects WHERE item_id = ?", (item_id,))
         conn.executemany("INSERT INTO item_effects VALUES (?, ?, ?, ?)", [(item_id, *e) for e in effects])

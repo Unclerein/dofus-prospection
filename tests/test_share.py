@@ -284,7 +284,7 @@ def forge_db(passes=3):
             "VALUES (?, ?, 77, 10, 20, 1, 0, 2.0, 0, 'rune', 2.0, ?, ?)",
             (100 + i, NOW - 600 + i, json.dumps(before), json.dumps(after)),
         )
-    conn.execute("INSERT INTO fm_refusals VALUES (900, ?, 77, 10, 21, 0, NULL, ?)", (NOW - 30, json.dumps([[118, 43]])))
+    conn.execute("INSERT INTO fm_refusals (source_id, ts, uid, item_id, rune_id, status, code, before) VALUES (900, ?, 77, 10, 21, 0, NULL, ?)", (NOW - 30, json.dumps([[118, 43]])))
     conn.commit()
     return conn
 
@@ -369,3 +369,47 @@ def test_a_client_that_learns_new_records_reads_the_hub_again_from_the_start(hub
     client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))
     assert bob.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
     assert client.get_state(bob)["pull_version"] == str(client.PULL_VERSION)
+
+
+def test_forge_passes_carry_their_rank_on_the_item_and_the_game_version():
+    conn = forge_db()
+    conn.execute("UPDATE fm_passes SET game_version = '3.7.11.11' WHERE source_id >= 101")
+    out = {(kind, source): record for record, kind, source in share.collect_fm(conn)}
+    # Trois passages puis un refus sur le même exemplaire : rangs 1 à 4, dans l'ordre de capture.
+    assert [out[("fm", s)]["data"]["seq"] for s in (100, 101, 102)] == [1, 2, 3] and out[("fm_refusal", 900)]["data"]["seq"] == 4
+    assert "v" not in out[("fm", 100)]["data"] and out[("fm", 101)]["data"]["v"] == "3.7.11.11"
+    record = out[("fm", 101)]
+    assert share.validate(record)
+    old = {**record, "data": {k: v for k, v in record["data"].items() if k not in ("v", "seq")}}
+    assert share.validate(old)  # un passage partagé avant reste valable
+    for change in ({"v": "<b>"}, {"v": "x" * 50}, {"seq": 0}, {"seq": True}):
+        assert not share.validate({**record, "data": {**record["data"], **change}})
+
+
+def test_a_pass_sent_again_with_more_details_replaces_the_old_one_everywhere():
+    hub = Hub(":memory:")
+    record = share.collect_fm(forge_db())[0][0]
+    old = {**record, "data": {k: v for k, v in record["data"].items() if k not in ("v", "seq")}}
+    assert hub.sync("alice", 0, [old], NOW)["accepted"] == 1
+    assert hub.sync("alice", 0, [old], NOW)["accepted"] == 0  # même passage : rien de neuf
+    assert hub.sync("alice", 0, [record], NOW)["accepted"] == 1  # avec son rang : il remplace l'ancien
+    received = hub.sync("bob", 0, [], NOW)["records"]
+    assert len(received) == 1 and received[0]["data"]["seq"] == 1
+    bob = db.connect(":memory:")
+    assert share.apply(bob, old) and share.apply(bob, received[0])
+    assert bob.execute("SELECT COUNT(*), MAX(seq) FROM shared_fm_passes").fetchone() == (1, 1)
+
+
+def test_the_forge_history_is_sent_again_once_with_its_new_details():
+    conn, sent = forge_db(), []
+
+    def hub(url, token, payload):
+        sent.append(sum(r["kind"] in ("fm", "fm_refusal") for r in payload["records"]))
+        return {"cursor": 0, "records": [], "accepted": len(payload["records"]), "rejected": 0}
+
+    cfg = member("http://hub", "jeton-alice-0123456789")
+    client.sync_once(conn, cfg, post=hub)
+    client.set_state(conn, fm_share_version=1)  # comme une version d'avant le rang
+    client.sync_once(conn, cfg, post=hub)
+    client.sync_once(conn, cfg, post=hub)
+    assert sum(sent[:1]) == 4 and sum(sent) == 8  # tout repart une fois, pas deux

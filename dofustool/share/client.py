@@ -12,14 +12,15 @@ import urllib.request
 from pathlib import Path
 
 from .. import config, db
-from . import apply, collect, collect_fm, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
+from . import FM_SHARE_VERSION, apply, collect, collect_fm, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
 
 log = logging.getLogger("dofustool.share")
 
 SYNC_EVERY_S = 60.0
 CHUNK = 300
-# Monte quand le client apprend à lire un nouveau type d'enregistrement (2 : passages et scores de forgemagie).
-PULL_VERSION = 2
+# Monte quand le client apprend à lire de nouveaux enregistrements (2 : passages et scores de forgemagie ;
+# 3 : passages avec version du jeu et rang, qu'une version d'avant refusait).
+PULL_VERSION = 3
 TIMEOUT_S = 30
 
 
@@ -79,6 +80,11 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         # (et donc ignorés) sont toujours sur le hub ; on relit tout depuis le début, une fois.
         state["cursor"] = "0"
         set_state(conn, cursor=0, pull_version=PULL_VERSION)
+    if state.get("fm_share_version") != str(FM_SHARE_VERSION):
+        # Les passages déjà partagés repartent une fois, avec ce qu'ils n'avaient pas (version, rang) ;
+        # le hub remplace l'ancien exemplaire de chacun au lieu de le doubler.
+        forget_fm_sent(conn)
+        set_state(conn, fm_share_version=FM_SHARE_VERSION)
     cursor = int(state.get("cursor", 0))
     started = time.time()
     records = collect(conn, float(state.get("push_mark", 0)), keymap_path)

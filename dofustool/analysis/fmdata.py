@@ -70,6 +70,7 @@ class Pass:
     exo_lost: int = 0  # une ligne exo (autre que la visée) a perdu des points
     has_exo: int = 0  # l'objet portait un exo (autre que la ligne visée) avant le passage
     rune_tier: str = ""  # taille de la rune : « simple », « Pa » ou « Ra »
+    game_version: str | None = None  # version du jeu au moment du passage, si elle est connue
     character_id: int | None = None  # personnage, pour les passages captés sur ce PC
 
 
@@ -121,18 +122,19 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
     for item_id, effect, low, high in market.execute("SELECT item_id, effect_id, min_value, max_value FROM item_effects"):
         templates[item_id][effect] = (low, high)
     rows, mine = [], set()
-    for ts, uid, character, *rest in market.execute(
-        "SELECT ts, uid, character_id, item_id, rune_id, passed, pool, pool_change, pool_before, before, after FROM fm_passes "
-        "WHERE kind = 'rune' AND before IS NOT NULL AND after IS NOT NULL ORDER BY ts, source_id"
+    for source_id, ts, uid, character, version, *rest in market.execute(
+        "SELECT source_id, ts, uid, character_id, game_version, item_id, rune_id, passed, pool, pool_change, pool_before, before, after "
+        "FROM fm_passes WHERE kind = 'rune' AND before IS NOT NULL AND after IS NOT NULL ORDER BY ts, source_id"
     ):
         mine.add(fm_key("fm", uid, ts, rest[1]))
-        rows.append((ts, "moi", object_token(uid), character, *rest))
-    for key, at, *rest in market.execute(
-        "SELECT key, at, object, item_id, rune_id, passed, pool, pool_change, pool_before, before, after "
+        rows.append(((ts, 0, source_id), "moi", object_token(uid), character, version, *rest))
+    for key, at, seq, version, *rest in market.execute(
+        "SELECT key, at, seq, game_version, object, item_id, rune_id, passed, pool, pool_change, pool_before, before, after "
         "FROM shared_fm_passes WHERE kind = 'rune' ORDER BY at, key"
     ):
         if key not in mine:  # nos propres passages revenus par le hub (après un changement de jeton)
-            rows.append((at, "partage", rest[0], None, *rest[1:]))
+            # À la minute près, l'ordre d'un même exemplaire se retrouve par son rang quand il est connu.
+            rows.append(((at, 1, seq or 0), "partage", rest[0], None, version, *rest[1:]))
     rows.sort(key=lambda row: row[0])
     # Ce qui ne dépend que de l'objet, de la rune ou du texte d'un état est calculé une fois : un même
     # modèle revient des milliers de fois, et l'état d'après d'un passage est l'état d'avant du suivant.
@@ -147,7 +149,8 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
         return found
 
     out: list[Pass] = []
-    for ts, source, obj, character, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
+    for order, source, obj, character, version, item_id, rune_id, passed, pool_after, pool_change, pool_before, raw_before, raw_after in rows:
+        ts = order[0]
         before, after = effects_of(raw_before), effects_of(raw_after)
         if rune_id not in per_rune:
             rune = templates.get(rune_id, {})
@@ -177,7 +180,7 @@ def build(market: sqlite3.Connection, density: dict[int, float]) -> list[Pass]:
             extra_before=round(extra_weight(before, base, density), 3), extra_after=round(extra_weight(after, base, density), 3),
             line_max_weight=round(high * unit, 3) if high else None,
             exo_lost=int(any(e not in base for e in lost)) if lost else 0, character_id=character,
-            has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())), rune_tier=tier,
+            has_exo=int(any(e not in base and e != rune_effect and v > 0 for e, v in before.items())), rune_tier=tier, game_version=version,
         ))  # fmt: skip
     return out
 

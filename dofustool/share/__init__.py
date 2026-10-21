@@ -10,13 +10,15 @@ Un « enregistrement » est un dictionnaire JSON {kind, key, at, data} :
   - market  : le cours du marché d'un objet relevé à `at` ;
   - prices  : un relevé de prix moyens (clé = empreinte de son contenu) ;
   - keymap  : la table des clés d'un build (clé = signature du message des prix moyens) ;
-  - fm      : un passage de forgemagie (objet avant et après, ce qui a été posé, puits avant et après) ;
+  - fm      : un passage de forgemagie (objet avant et après, ce qui a été posé, puits avant et après,
+    version du jeu, rang du passage sur l'exemplaire) ;
   - fm_refusal : un passage refusé par le serveur ;
   - fm_score : le score de collecte d'un joueur (points, passages, kamas investis, missions réussies)
     et le nom de son personnage, pour le classement ; le hub le range sous le pseudo de son auteur.
 Les passages de forgemagie servent à retrouver les chances du jeu : le hub les garde tous, chacun range
 ceux des autres à part de son propre journal (tables shared_fm_*). L'exemplaire n'y figure que par une
-empreinte, et la date est arrondie à la minute.
+empreinte, et la date est arrondie à la minute ; le rang (1er, 2e… passage sur cet exemplaire) garde
+l'ordre exact sans rien dire de plus sur l'heure.
 Tout enregistrement reçu est validé (types, bornes) avant d'être appliqué, avec les mêmes règles de
 fusion que la capture : le relevé le plus récent gagne.
 """
@@ -39,6 +41,9 @@ MISSION = re.compile(r"^[a-z0-9-]{1,40}$")
 FM_TOOLS = ("rune", "transcendance", "potion", "eclat", "gravure", "gemme", "orbe")  # messages.fm.TOOL_TYPES
 FM_FIELDS = {"object", "item_id", "rune_id", "tool", "passed", "pool_before", "pool_after", "pool_change", "before", "after"}
 REFUSAL_FIELDS = {"object", "item_id", "rune_id", "status", "code", "before"}
+FM_OPTIONAL = {"v", "seq"}  # version du jeu, rang sur l'exemplaire : absents des passages partagés avant eux
+VERSION = re.compile(r"^[0-9A-Za-z._-]{1,40}$")
+FM_SHARE_VERSION = 2  # 2 : version du jeu et rang ; l'historique déjà partagé repart une fois avec eux
 MAX_POOL = 10_000.0
 MAX_PRICE = 10**12
 MAX_ITEM_ID = 10**7
@@ -77,6 +82,11 @@ def _is_object(value) -> bool:
     return isinstance(value, str) and len(value) == 16 and all(c in "0123456789abcdef" for c in value)
 
 
+def _optional_ok(data: dict) -> bool:
+    version, seq = data.get("v"), data.get("seq")
+    return (version is None or (isinstance(version, str) and bool(VERSION.match(version)))) and (seq is None or _is_int(seq, 1, 10**7))
+
+
 def _is_flag(value, allowed: tuple) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value in allowed
 
@@ -92,9 +102,11 @@ def validate(record, now: float | None = None) -> bool:
     if not isinstance(key, str) or not 0 < len(key) <= 200 or not _is_time(at, now, max_age) or not isinstance(data, dict):
         return False
     try:
+        if kind in ("fm", "fm_refusal") and not _optional_ok(data):
+            return False
         if kind == "fm":
             return (
-                set(data) == FM_FIELDS and _is_object(data["object"])
+                FM_FIELDS <= set(data) <= FM_FIELDS | FM_OPTIONAL and _is_object(data["object"])
                 and _is_int(data["item_id"], 1, MAX_ITEM_ID) and _is_int(data["rune_id"], 1, MAX_ITEM_ID)
                 and data["tool"] in FM_TOOLS and _is_flag(data["passed"], (0, 1))
                 and (data["pool_before"] is None or _is_pool(data["pool_before"]))
@@ -113,7 +125,7 @@ def validate(record, now: float | None = None) -> bool:
             )  # fmt: skip
         if kind == "fm_refusal":
             return (
-                set(data) == REFUSAL_FIELDS and (data["object"] is None or _is_object(data["object"]))
+                REFUSAL_FIELDS <= set(data) <= REFUSAL_FIELDS | FM_OPTIONAL and (data["object"] is None or _is_object(data["object"]))
                 and (data["item_id"] is None or _is_int(data["item_id"], 1, MAX_ITEM_ID))
                 and (data["rune_id"] is None or _is_int(data["rune_id"], 1, MAX_ITEM_ID))
                 and _is_int(data["status"], 0, 10**6) and (data["code"] is None or _is_int(data["code"], 0, 10**9))
@@ -243,9 +255,10 @@ def collect_fm(conn: sqlite3.Connection, limit: int = 100_000) -> list[tuple[dic
     marqué envoyé que quand le hub l'a pris (un hub d'avant ce partage le refuse).
     """
     conn.execute(_SENT)
+    rank = ranks(conn)
     out = []
-    for source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, tool, pool_before, before, after in conn.execute(
-        "SELECT source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, kind, pool_before, before, after FROM fm_passes p "
+    for source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, tool, pool_before, before, after, version in conn.execute(
+        "SELECT source_id, ts, uid, item_id, rune_id, passed, pool, pool_change, kind, pool_before, before, after, game_version FROM fm_passes p "
         "WHERE before IS NOT NULL AND after IS NOT NULL "
         "AND NOT EXISTS (SELECT 1 FROM share_fm_sent s WHERE s.kind = 'fm' AND s.source_id = p.source_id) ORDER BY ts LIMIT ?",
         (limit,),
@@ -253,11 +266,13 @@ def collect_fm(conn: sqlite3.Connection, limit: int = 100_000) -> list[tuple[dic
         data = {
             "object": object_token(uid), "item_id": item_id, "rune_id": rune_id, "tool": tool, "passed": int(passed),
             "pool_before": pool_before, "pool_after": pool, "pool_change": pool_change,
-            "before": json.loads(before), "after": json.loads(after),
+            "before": json.loads(before), "after": json.loads(after), "seq": rank[("fm", source_id)],
         }  # fmt: skip
+        if version:
+            data["v"] = version
         out.append(({"kind": "fm", "key": fm_key("fm", uid, ts, rune_id), "at": _minute(ts), "data": data}, "fm", source_id))
-    for source_id, ts, uid, item_id, rune_id, status, code, before in conn.execute(
-        "SELECT source_id, ts, uid, item_id, rune_id, status, code, before FROM fm_refusals r "
+    for source_id, ts, uid, item_id, rune_id, status, code, before, version in conn.execute(
+        "SELECT source_id, ts, uid, item_id, rune_id, status, code, before, game_version FROM fm_refusals r "
         "WHERE NOT EXISTS (SELECT 1 FROM share_fm_sent s WHERE s.kind = 'fm_refusal' AND s.source_id = r.source_id) ORDER BY ts LIMIT ?",
         (limit,),
     ).fetchall():
@@ -265,8 +280,28 @@ def collect_fm(conn: sqlite3.Connection, limit: int = 100_000) -> list[tuple[dic
             "object": None if uid is None else object_token(uid), "item_id": item_id, "rune_id": rune_id,
             "status": status, "code": code, "before": None if before is None else json.loads(before),
         }  # fmt: skip
+        if version:
+            data["v"] = version
+        if ("fm_refusal", source_id) in rank:
+            data["seq"] = rank[("fm_refusal", source_id)]
         record = {"kind": "fm_refusal", "key": fm_key("refus", uid, ts, rune_id), "at": _minute(ts), "data": data}
         out.append((record, "fm_refusal", source_id))
+    return out
+
+
+def ranks(conn: sqlite3.Connection) -> dict[tuple[str, int], int]:
+    """Rang de chaque passage et refus sur son exemplaire (1, 2, 3…), dans l'ordre de capture.
+
+    Tous les passages comptent, même ceux qui ne partent pas : le rang d'un passage ne change pas
+    quand un autre est complété plus tard."""
+    rows = [("fm", source_id, uid) for source_id, uid in conn.execute("SELECT source_id, uid FROM fm_passes")]
+    rows += [("fm_refusal", source_id, uid) for source_id, uid in conn.execute("SELECT source_id, uid FROM fm_refusals WHERE uid IS NOT NULL")]
+    rows.sort(key=lambda row: (row[2], row[1]))
+    out, previous, n = {}, None, 0
+    for kind, source_id, uid in rows:
+        n = n + 1 if uid == previous else 1
+        previous = uid
+        out[(kind, source_id)] = n
     return out
 
 
@@ -302,16 +337,19 @@ def apply(conn: sqlite3.Connection, record: dict, keymap_path: Path | None = Non
         return True
     if kind == "fm":
         conn.execute(
-            "INSERT OR IGNORE INTO shared_fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO shared_fm_passes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
+            "game_version = COALESCE(excluded.game_version, game_version), seq = COALESCE(excluded.seq, seq)",
             (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["tool"], data["passed"],
              data["pool_before"], data["pool_after"], data["pool_change"],
-             json.dumps(data["before"], separators=(",", ":")), json.dumps(data["after"], separators=(",", ":"))),
+             json.dumps(data["before"], separators=(",", ":")), json.dumps(data["after"], separators=(",", ":")),
+             data.get("v"), data.get("seq")),
         )  # fmt: skip
     elif kind == "fm_refusal":
         before = None if data["before"] is None else json.dumps(data["before"], separators=(",", ":"))
         conn.execute(
-            "INSERT OR IGNORE INTO shared_fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["status"], data["code"], before),
+            "INSERT INTO shared_fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET "
+            "game_version = COALESCE(excluded.game_version, game_version), seq = COALESCE(excluded.seq, seq)",
+            (record["key"], at, data["object"], data["item_id"], data["rune_id"], data["status"], data["code"], before, data.get("v"), data.get("seq")),
         )
     elif kind == "hdv":
         listings = tuple(

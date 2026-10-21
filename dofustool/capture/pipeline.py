@@ -5,6 +5,7 @@ n'a pas exactement la forme attendue est ignoré (il reste dans l'archive brute)
 """
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class Pipeline:
         # fight_path : où écrire le combat en cours pour la fenêtre d'affichage. Sans lui, le combat n'est pas suivi.
         self._fight_path = fight_path
         self._forge_path = forge_path  # où signaler à la fenêtre d'affichage qu'un objet vient d'être posé sur l'atelier
+        self._version: tuple[float, str | None] = (0.0, None)  # version du jeu, relue toutes les dix minutes
         self._forge_written = (0.0, 0)  # dernier signalement : (date, exemplaire)
         self.fight = live.Tracker() if fight_path else None
         if fight_path is not None:
@@ -226,7 +228,7 @@ class Pipeline:
                 refusal = fm.parse_refusal(msg.body, mapping)
                 if refusal is not None and source_id is not None:
                     before = watch.fm_objects.get(watch.fm_item[0]) if watch.fm_item else None
-                    if db.save_fm_refusal(self.market, source_id, msg.ts, *refusal, watch.fm_item, rune, before):
+                    if db.save_fm_refusal(self.market, source_id, msg.ts, *refusal, watch.fm_item, rune, before, self.game_version()):
                         log.info("Forgemagie : passage refusé par le serveur (état %d).", refusal[0])
                 return
             if result is not None and not result.forged and result.passed and source_id is not None:
@@ -242,7 +244,8 @@ class Pipeline:
             known = self.market.execute("SELECT 1 FROM fm_items WHERE uid = ?", (uid,)).fetchone()
             kind, pool_before = self._fm_tools()[rune], watch.fm_pools.get(uid)
             watch.fm_pools[uid] = result.pool
-            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid), kind, pool_before, watch.character_id):
+            if source_id is not None and db.save_fm_pass(self.market, source_id, msg.ts, result, rune, watch.fm_objects.get(uid), kind, pool_before, watch.character_id,
+                                                         self.game_version()):
                 if known is None:
                     row = self.market.execute("SELECT name FROM items WHERE id = ?", (result.object.item_id,)).fetchone()
                     log.info("Forgemagie : premier passage de rune sur %s.", row[0] if row else f"item {result.object.item_id}")
@@ -424,6 +427,14 @@ class Pipeline:
                 self._stock_moved = msg.ts
             return True
         return False
+
+    def game_version(self) -> str | None:
+        """Version du jeu, notée à chaque passage de forgemagie (les données du jeu peuvent être mises à jour en cours de route)."""
+        checked, version = self._version
+        if time.time() - checked > 600:
+            version = db.game_version(self.market)
+            self._version = (time.time(), version)
+        return version
 
     def _fm_tools(self) -> dict[int, str]:
         """Ce qui peut se poser sur l'atelier à côté de l'objet : {objet : type} (messages.fm.TOOL_TYPES)."""

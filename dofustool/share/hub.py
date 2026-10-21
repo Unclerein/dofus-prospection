@@ -113,6 +113,10 @@ class Hub:
             if merged == known:
                 return False
             record = {**record, "at": max(row[0], record["at"]), "data": {"entries": merged}}
+        elif row is not None and kind in ("fm", "fm_refusal"):
+            # Même passage renvoyé : il ne remplace l'ancien que s'il apporte quelque chose de plus (version, rang).
+            if not set(record["data"]) > set(json.loads(row[1])["data"]):
+                return False
         elif row is not None and row[0] >= record["at"]:
             return False
         self._db.execute("DELETE FROM records WHERE kind = ? AND key = ?", (kind, key))

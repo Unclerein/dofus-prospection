@@ -301,7 +301,8 @@ CREATE TABLE IF NOT EXISTS fm_passes (
     pool_before REAL,              -- puits avant le passage, s'il a été vu
     before      TEXT,              -- effets de l'objet juste avant (JSON), s'ils ont été vus
     after       TEXT,              -- effets de l'objet juste après (JSON)
-    character_id INTEGER           -- personnage connecté pendant le passage, s'il est connu
+    character_id INTEGER,          -- personnage connecté pendant le passage, s'il est connu
+    game_version TEXT              -- version du jeu au moment du passage (static_meta), NULL si inconnue
 );
 CREATE INDEX IF NOT EXISTS fm_passes_uid ON fm_passes (uid, ts);
 -- Calculs longs qui ne dépendent que des relevés de prix : gardés d'un lancement à l'autre, refaits à
@@ -344,7 +345,8 @@ CREATE TABLE IF NOT EXISTS fm_refusals (
     rune_id   INTEGER,            -- ce qui était posé à côté, s'il est connu
     status    INTEGER NOT NULL,   -- 0 : refus sans contenu ; autre : état renvoyé par le serveur
     code      INTEGER,            -- numéro renvoyé avec cet état
-    before    TEXT                -- effets de l'objet au moment du refus (JSON), s'ils sont connus
+    before    TEXT,               -- effets de l'objet au moment du refus (JSON), s'ils sont connus
+    game_version TEXT             -- version du jeu au moment du refus, NULL si inconnue
 );
 -- Passages de forgemagie des autres joueurs, reçus par le hub : anonymes, pour l'étude des chances.
 CREATE TABLE IF NOT EXISTS shared_fm_passes (
@@ -359,7 +361,9 @@ CREATE TABLE IF NOT EXISTS shared_fm_passes (
     pool        REAL,
     pool_change INTEGER NOT NULL,
     before      TEXT NOT NULL,
-    after       TEXT NOT NULL
+    after       TEXT NOT NULL,
+    game_version TEXT,             -- version du jeu, si l'expéditeur la connaissait
+    seq         INTEGER            -- rang du passage sur cet exemplaire (passages et refus confondus)
 );
 CREATE TABLE IF NOT EXISTS shared_fm_refusals (
     key     TEXT PRIMARY KEY,
@@ -369,7 +373,25 @@ CREATE TABLE IF NOT EXISTS shared_fm_refusals (
     rune_id INTEGER,
     status  INTEGER NOT NULL,
     code    INTEGER,
-    before  TEXT
+    before  TEXT,
+    game_version TEXT,
+    seq     INTEGER
+);
+-- Fiches des objets (bornes de leurs lignes) telles qu'elles étaient à chaque version : une ligne par changement.
+-- item_effects ne garde que la dernière ; ici, un passage ancien se relit avec la fiche de son époque.
+CREATE TABLE IF NOT EXISTS item_effects_history (
+    item_id INTEGER NOT NULL,
+    version TEXT NOT NULL,             -- version du jeu publiée par DofusDB pour cette fiche
+    effects TEXT NOT NULL,             -- JSON [[effet, min, max], ...]
+    seen_at REAL NOT NULL,
+    PRIMARY KEY (item_id, version)
+);
+-- Poids d'un point de chaque caractéristique (effectPowerRate), par version des données du jeu.
+CREATE TABLE IF NOT EXISTS density_history (
+    version   TEXT NOT NULL,
+    effect_id INTEGER NOT NULL,
+    density   REAL NOT NULL,
+    PRIMARY KEY (version, effect_id)
 );
 -- Un dossier par exemplaire forgemagé : ses jets avant et après, et ce qu'il est devenu.
 CREATE TABLE IF NOT EXISTS fm_items (
@@ -504,6 +526,14 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
             conn.execute(f"ALTER TABLE fm_passes ADD COLUMN {name} {kind}")
     if columns and "character_id" not in columns:  # renseigné depuis l'archive au prochain démarrage de la capture
         conn.execute("ALTER TABLE fm_passes ADD COLUMN character_id INTEGER")
+    if columns and "game_version" not in columns:  # renseignée au démarrage de la capture (tag_game_version)
+        conn.execute("ALTER TABLE fm_passes ADD COLUMN game_version TEXT")
+    for table, added in (("fm_refusals", ("game_version TEXT",)), ("shared_fm_passes", ("game_version TEXT", "seq INTEGER")),
+                         ("shared_fm_refusals", ("game_version TEXT", "seq INTEGER"))):
+        have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for column in added:
+            if have and column.split()[0] not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
     return conn
 
@@ -1183,7 +1213,7 @@ def save_offline_total(conn: sqlite3.Connection, source_id: int, total: int, ts:
 
 def save_fm_pass(
     conn: sqlite3.Connection, source_id: int, ts: float, result, rune_id: int, before, kind: str = "rune", pool_before: float | None = None,
-    character_id: int | None = None,
+    character_id: int | None = None, game_version: str | None = None,
 ) -> bool:  # fmt: skip
     """Enregistre un passage (messages.fm.Result). before : effets de l'objet juste avant, s'ils sont connus ;
     kind : ce qui a été posé (messages.fm.TOOL_TYPES) ; pool_before : puits juste avant, s'il est connu ;
@@ -1201,15 +1231,16 @@ def save_fm_pass(
     with conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO fm_passes (source_id, ts, uid, item_id, rune_id, passed, lost, pool, pool_change, kind, pool_before, before, after, "
-            "character_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "character_id, game_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (source_id, ts, obj.uid, obj.item_id, rune_id, int(result.passed), lost, result.pool, result.pool_change,
-             kind, pool_before, encoded_before, encoded_after, character_id),
+             kind, pool_before, encoded_before, encoded_after, character_id, game_version),
         )  # fmt: skip
         if not cur.rowcount:
             conn.execute(
                 "UPDATE fm_passes SET kind = ?, after = COALESCE(after, ?), before = COALESCE(before, ?), "
-                "pool_before = COALESCE(pool_before, ?), lost = COALESCE(lost, ?), character_id = COALESCE(character_id, ?) WHERE source_id = ?",
-                (kind, encoded_after, encoded_before, pool_before, lost, character_id, source_id),
+                "pool_before = COALESCE(pool_before, ?), lost = COALESCE(lost, ?), character_id = COALESCE(character_id, ?), "
+                "game_version = COALESCE(game_version, ?) WHERE source_id = ?",
+                (kind, encoded_after, encoded_before, pool_before, lost, character_id, game_version, source_id),
             )
             return False
         conn.execute(
@@ -1228,16 +1259,79 @@ def save_fm_pass(
 
 
 def save_fm_refusal(
-    conn: sqlite3.Connection, source_id: int, ts: float, status: int, code: int | None, item: tuple[int, int] | None, rune_id: int | None, before
+    conn: sqlite3.Connection, source_id: int, ts: float, status: int, code: int | None, item: tuple[int, int] | None, rune_id: int | None, before,
+    game_version: str | None = None,
 ) -> bool:  # fmt: skip
     """Enregistre un passage refusé par le serveur. item : (exemplaire, objet) posé sur l'atelier, s'il est connu."""
     uid, item_id = item if item is not None else (None, None)
     with conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO fm_refusals VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (source_id, ts, uid, item_id, rune_id, status, code, json.dumps([list(e) for e in before]) if before is not None else None),
+            "INSERT OR IGNORE INTO fm_refusals (source_id, ts, uid, item_id, rune_id, status, code, before, game_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source_id, ts, uid, item_id, rune_id, status, code, json.dumps([list(e) for e in before]) if before is not None else None, game_version),
         )
     return bool(cur.rowcount)
+
+
+def game_version(conn: sqlite3.Connection) -> str | None:
+    """Version du jeu des données importées (« v6.0_3.7.11.11 » donne « 3.7.11.11 »), ou None."""
+    try:
+        row = conn.execute("SELECT value FROM static_meta WHERE key = 'version'").fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or not row[0] or row[0] == "inconnue":
+        return None
+    return str(row[0]).rsplit("_", 1)[-1]
+
+
+def tag_game_version(conn: sqlite3.Connection) -> int:
+    """Donne la version actuelle du jeu aux passages et refus sans version, faits depuis l'import de ses données.
+
+    Les plus anciens restent sans version : on ne devine pas celle d'avant. Renvoie le nombre de passages marqués."""
+    version = game_version(conn)
+    row = conn.execute("SELECT value FROM static_meta WHERE key = 'imported_at'").fetchone()
+    if version is None or row is None:
+        return 0
+    since = float(row[0])
+    with conn:
+        count = conn.execute("UPDATE fm_passes SET game_version = ? WHERE game_version IS NULL AND ts >= ?", (version, since)).rowcount
+        conn.execute("UPDATE fm_refusals SET game_version = ? WHERE game_version IS NULL AND ts >= ?", (version, since))
+    return count
+
+
+def record_densities(conn: sqlite3.Connection, densities: dict[int, float]) -> bool:
+    """Garde les poids des caractéristiques de la version actuelle du jeu, s'ils ne l'étaient pas encore."""
+    version = game_version(conn)
+    if version is None or not densities:
+        return False
+    if conn.execute("SELECT 1 FROM density_history WHERE version = ? LIMIT 1", (version,)).fetchone():
+        return False
+    with conn:
+        conn.executemany("INSERT OR IGNORE INTO density_history VALUES (?, ?, ?)", [(version, e, d) for e, d in densities.items()])
+    return True
+
+
+def record_template(conn: sqlite3.Connection, item_id: int, effects, version: str | None, now: float) -> bool:
+    """Garde la fiche d'un objet si elle a changé depuis la dernière gardée. effects : [(effet, min, max), ...]."""
+    encoded = json.dumps(sorted([list(e) for e in effects]), separators=(",", ":"))
+    last = conn.execute("SELECT effects FROM item_effects_history WHERE item_id = ? ORDER BY seen_at DESC LIMIT 1", (item_id,)).fetchone()
+    if last is not None and last[0] == encoded:
+        return False
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO item_effects_history VALUES (?, ?, ?, ?)", (item_id, version or "inconnue", encoded, now))
+    return True
+
+
+def snapshot_templates(conn: sqlite3.Connection, version: str | None, now: float) -> int:
+    """Point de départ de l'historique : la fiche actuelle de chaque objet qui n'en a pas encore."""
+    rows: dict[int, list] = {}
+    for item_id, effect, low, high in conn.execute(
+        "SELECT item_id, effect_id, min_value, max_value FROM item_effects WHERE item_id NOT IN (SELECT item_id FROM item_effects_history)"
+    ):
+        rows.setdefault(item_id, []).append([effect, low, high])
+    with conn:
+        conn.executemany("INSERT OR IGNORE INTO item_effects_history VALUES (?, ?, ?, ?)",
+                         [(item_id, version or "inconnue", json.dumps(sorted(effects), separators=(",", ":")), now) for item_id, effects in rows.items()])  # fmt: skip
+    return len(rows)
 
 
 def set_fm_base_cost(conn: sqlite3.Connection, uid: int, cost: int | None) -> None:
