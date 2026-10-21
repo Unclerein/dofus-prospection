@@ -215,6 +215,8 @@ def summarize(
         "craft_margin": plain_price * (1 - tax) - cost if plain_price is not None and cost is not None else None,
         "match_count": len(matching),
         "match_price": match_price,
+        # Première fois qu'une annonce correspondante, la moins chère, a été vue (par ce PC ou le groupe).
+        "match_first_seen": matching[0][2] if matching else None,
         "match_median": statistics.median(entry[0] for entry in matching) if matching else None,
         # Ce que la forgemagie ajoute au prix affiché, avant le coût des runes.
         "premium_vs_plain": match_price - plain_price if match_price is not None and plain_price is not None else None,
@@ -285,6 +287,7 @@ def ranking(
                 "Marge du craft": s["craft_margin"],
                 "Correspondent": s["match_count"] if flt is not None else None,
                 "Moins cher selon critère": s["match_price"],
+                "Vue depuis": s["match_first_seen"] if flt is not None else None,
                 "Prime sur la base": s["premium_vs_plain"],
                 "Gain sur le craft": s["premium_vs_craft"],
                 "Attention": f"le moins cher a perdu : {warning}" if warning else "",
@@ -292,7 +295,7 @@ def ranking(
         )
     columns = [
         "item_id", "Objet", "Niveau", "Annonces", "Coût de craft", "Moins cher", "Moins cher de base", "Marge du craft",
-        "Correspondent", "Moins cher selon critère", "Prime sur la base", "Gain sur le craft", "Attention",
+        "Correspondent", "Moins cher selon critère", "Vue depuis", "Prime sur la base", "Gain sur le craft", "Attention",
     ]  # fmt: skip
     return pd.DataFrame(rows, columns=columns)
 

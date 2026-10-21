@@ -1866,6 +1866,7 @@ function sortValue(l, key, d) {
   if (key === 'quality') return l.quality === null ? -1 : l.quality;
   if (key === 'exo') return l.exo.length ? `${d.names[l.exo[0]]} ${String(l.values[l.exo[0]] || 0).padStart(6, '0')}` : '';
   if (key === 'seen') return l.last_seen || 0;
+  if (key === 'first') return l.first_seen || 0;
   return l.values[key] || 0;
 }
 
@@ -1935,7 +1936,7 @@ function listingsTable(listings, d, f, withDates, focused = () => false) {
   const short = (name) => name.replace('% Résistance', 'Ré').replace('Dommages', 'Do').replace('Dommage', 'Do').replace('Intelligence', 'Int').replace('Vitalité', 'Vita').replace('Agilité', 'Agi').replace('Sagesse', 'Sag').replace('Initiative', 'Ini').replace('Prospection', 'PP').replace('% Critique', 'Crit');
   return h('div', { class: 'scroll' }, h('table', { class: 'dense', style: `min-width: ${420 + d.lines.length * 44}px` },
     h('thead', {}, h('tr', {}, head('price', 'Prix'), head('type', 'Type', true), head('quality', 'Jets', true), head('exo', 'Exo', true),
-      d.lines.map((line) => head(line.id, d.assets[line.id] ? statIcon(d.assets[line.id]) : short(line.name), false, line.name)), withDates && head('seen', 'Vue pour la dernière fois'))),
+      d.lines.map((line) => head(line.id, d.assets[line.id] ? statIcon(d.assets[line.id]) : short(line.name), false, line.name)), head('first', 'Vue depuis', false, 'Date à laquelle quelqu’un du groupe a vu cette annonce pour la première fois. Le jeu ne dit pas quand elle a été mise en vente : elle peut être plus ancienne.'), withDates && head('seen', 'Vue pour la dernière fois'))),
     h('tbody', {}, listings.map((l) => h('tr', {
       class: [l.mine && 'mine', focused(l) && 'focus'].filter(Boolean).join(' '),
       onmouseenter: (event) => showTip(event, itemTooltip(l, d)),
@@ -1948,6 +1949,7 @@ function listingsTable(listings, d, f, withDates, focused = () => false) {
         : [h('span', { class: 'bar thin' }, h('span', { style: `width: ${l.quality}%` })), h('span', { class: 'muted' }, ` ${l.quality} %`)]),
       h('td', { class: 'l' }, l.exo.length ? h('div', { class: 'tags' }, l.exo.map((i) => h('span', { class: 'tag exo with-ico' }, statIcon(d.assets[i]), `${d.names[i]} ${l.values[i]}`))) : h('span', { class: 'muted' }, '—')),
       d.lines.map((line) => { const v = l.values[line.id] || 0; return h('td', { class: v >= line.max && line.max > line.min ? 'max' : v > line.max ? 'max' : v < line.min ? 'low' : 'soft' }, v); }),
+      h('td', { class: 'muted' }, when(l.first_seen, false)),
       withDates && h('td', { class: 'muted' }, when(l.last_seen)))))));
 }
 
@@ -2036,7 +2038,8 @@ async function forgeRanking() {
       h('td', { class: 'l' }, itemCell(r.icon, r['Objet'], `${r.type ? r.type + ' · ' : ''}niv. ${r['Niveau']}${r.mage ? ' · ' + r.mage : ''} · ${r['Annonces']} annonces` + (r['Attention'] ? ` · ${r['Attention']}` : ''), r.item_id)),
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
       h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Moins cher selon critère'])),
-        h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`)),
+        h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`),
+        r['Vue depuis'] && h('div', { class: 'small muted', title: 'Date à laquelle quelqu’un du groupe a vu cette annonce pour la première fois. Le jeu ne dit pas quand elle a été mise en vente : elle peut être plus ancienne.' }, `vue depuis le ${when(r['Vue depuis'], false)}`)),
       h('td', { class: 'l' }, value === null
         ? h('span', { class: 'tag' }, ui.start === 'base' ? 'aucun exemplaire de base en vente' : 'coût de craft inconnu')
         : h('div', { class: 'bar-cell' }, h('span', { class: 'bar' }, h('span', { style: `width: ${Math.max(0, Math.round(value / top * 100))}%` })), h('span', { class: 'num', style: 'text-align: right' }, signed(value)))),
