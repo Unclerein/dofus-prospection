@@ -248,3 +248,46 @@ def test_negative_base_line_reads_signed():
     crossed = classify([(VITA, 250), (CRIT, 2)], template, opposite)  # passé au-delà de 0 : over, pas un exo
     assert crossed.values[MINUS_CRIT] == 2 and not crossed.exo and crossed.over == (MINUS_CRIT,)
     assert Filter({MINUS_CRIT: -3}).matches(reduced) and not Filter({MINUS_CRIT: -3}).matches(base)
+
+
+def test_repriced_listing_keeps_its_history():
+    from dofustool.messages.hdv_listings import HdvListings, Listing
+
+    c = db.connect(":memory:")
+    c.execute("INSERT INTO items VALUES (900, 'Cape', 1, 'type', 60, 1, 0, 0)")
+    c.executemany("INSERT INTO item_effects VALUES (900, ?, ?, ?)", [(VITA, 201, 250), (CHANCE, 21, 40), (PA, 1, 1)])
+    c.execute("INSERT INTO item_effects VALUES (901, ?, 1, 1)", (PA,))  # objet aux jets fixes
+    c.execute("INSERT INTO items VALUES (901, 'Dofus', 1, 'type', 60, 1, 0, 0)")
+    cape = lambda uid, price, vita: Listing(uid, (price, 0, 0, 0), ((VITA, vita), (CHANCE, 30), (PA, 1)))  # noqa: E731
+    save = lambda item, at, *listings: db.save_hdv_listings(c, HdvListings(item, listings), at)  # noqa: E731
+
+    save(900, 100.0, cape(1, 500_000, 230), cape(2, 700_000, 240))
+    save(900, 200.0, cape(5, 450_000, 230), cape(2, 700_000, 240))  # le vendeur baisse : nouveau numéro
+    save(900, 300.0, cape(8, 450_000, 230), cape(9, 700_000, 240))  # maintenance : tout est renuméroté
+    rows = {price: (first, previous) for price, _, first, _, previous in forge.read_listings(c, 900, {VITA: (201, 250)})}
+    assert rows[450_000] == (100.0, (500_000, 200.0))  # vue depuis le premier relevé, ancien prix gardé
+    assert rows[700_000] == (100.0, None)
+    assert [entry[0] for entry in forge.read_listings(c, 900, {VITA: (201, 250)}, current=False)] == [450_000, 700_000]  # rien de « vendu »
+
+    save(900, 400.0, Listing(8, (300_000, 0, 0, 0), ((VITA, 201), (CHANCE, 21), (PA, 1))), cape(9, 700_000, 240))
+    assert forge.read_listings(c, 900, {VITA: (201, 250)})[0][2:] == (400.0, 400.0, None)  # numéro réutilisé : un autre exemplaire
+
+    dofus = lambda uid, price: Listing(uid, (price, 0, 0, 0), ((PA, 1),))  # noqa: E731
+    save(901, 100.0, dofus(1, 9_000_000))
+    save(901, 200.0, dofus(2, 8_000_000))  # vendu, puis un autre identique : pas un changement de prix
+    assert forge.read_listings(c, 901, {PA: (1, 1)})[0][4] is None
+
+
+def test_relink_history_once():
+    c = db.connect(":memory:")
+    c.executemany("INSERT INTO item_effects VALUES (900, ?, ?, ?)", [(VITA, 201, 250), (CHANCE, 21, 40)])
+    effects = f"[[{VITA}, 230], [{CHANCE}, 30]]"
+    c.executemany(
+        "INSERT INTO hdv_listings (item_id, uid, p1, p10, p100, p1000, effects, captured_at, first_seen) VALUES (900, ?, ?, 0, 0, 0, ?, ?, ?)",
+        [(1, 500_000, effects, 100.0, 50.0), (5, 450_000, effects, 300.0, 200.0)],
+    )
+    c.execute("DELETE FROM hdv_relinked")
+    db.relink_history(c)
+    db.relink_history(c)  # une seule fois
+    assert c.execute("SELECT uid, replaced_uid, previous_price, price_changed_at FROM hdv_replaced").fetchall() == [(5, 1, 500_000, 200.0)]
+    assert c.execute("SELECT first_seen FROM hdv_listings WHERE uid = 5").fetchone()[0] == 50.0

@@ -1875,6 +1875,13 @@ function sortValue(l, key, d) {
 const $tip = h('div', { class: 'item-tip', hidden: true, role: 'tooltip' });
 document.body.append($tip);
 
+// Ancien prix d'une annonce dont le vendeur a changé le prix (même exemplaire, remis en vente) : baisse en vert.
+function previousPrice(price, previous, at) {
+  if (!previous || previous === price) return null;
+  return h('div', { class: 'small ' + (price < previous ? 'gain' : 'warn'), style: 'font-weight: 400',
+    title: `Prix changé par le vendeur, relevé le ${when(at)}. Avant : ${fmt(previous)}.` }, `${price < previous ? '↓' : '↑'} avant ${fmt(previous)}`);
+}
+
 function itemTooltip(l, d) {
   // Ordre du jeu : les lignes de dégâts d'une arme, puis les exos, puis les caractéristiques de base.
   const fixed = (d.fixed || []).map((line) => h('div', { class: 'tip-line fixed' },
@@ -1939,7 +1946,7 @@ function listingsTable(listings, d, f, withDates, focused = () => false) {
       onmousemove: placeTip,
       onmouseleave: () => { $tip.hidden = true; },
     },
-      h('td', { style: 'font-weight: 600' }, fmt(l.price)),
+      h('td', { style: 'font-weight: 600' }, fmt(l.price), previousPrice(l.price, l.previous_price, l.price_changed_at)),
       h('td', { class: 'l' }, typeTag(l), l.mine && h('span', { class: 'tag mine' }, 'à toi')),
       h('td', { class: 'l' }, l.quality === null ? h('span', { class: 'muted' }, '—')
         : [h('span', { class: 'bar thin' }, h('span', { style: `width: ${l.quality}%` })), h('span', { class: 'muted' }, ` ${l.quality} %`)]),
@@ -2035,6 +2042,7 @@ async function forgeRanking() {
       h('td', { class: r['Moins cher de base'] === null ? 'muted' : 'soft' }, fmt(r['Moins cher de base'])),
       h('td', {}, h('div', { style: 'font-weight: 500' }, fmt(r['Moins cher selon critère'])),
         h('div', { class: 'small ' + (r['Correspondent'] === 1 ? 'warn' : 'muted'), style: r['Correspondent'] === 1 ? 'font-weight: 600' : '' }, r['Correspondent'] === 1 ? '1 seule annonce' : `${r['Correspondent']} annonces`),
+        previousPrice(r['Moins cher selon critère'], r['Ancien prix'], r['Prix changé le']),
         r['Vue depuis'] && h('div', { class: 'small muted', title: 'Date à laquelle quelqu’un du groupe a vu cette annonce pour la première fois. Le jeu ne dit pas quand elle a été mise en vente : elle peut être plus ancienne.' }, `vue depuis le ${when(r['Vue depuis'], false)}`)),
       h('td', { class: 'l' }, value === null
         ? h('span', { class: 'tag' }, ui.start === 'base' ? 'aucun exemplaire de base en vente' : 'coût de craft inconnu')

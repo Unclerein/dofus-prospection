@@ -177,6 +177,20 @@ CREATE TABLE IF NOT EXISTS hdv_listings (
     first_seen  REAL,
     PRIMARY KEY (item_id, uid)
 ) WITHOUT ROWID;
+-- Annonce d'équipement qui en remplace une autre, le même exemplaire (mêmes jets) : le jeu donne un nouvel
+-- identifiant à une annonce dont le vendeur change le prix, et renumérote toutes les annonces à la
+-- maintenance. previous_price : le dernier prix différent de l'actuel, price_changed_at : quand il a changé.
+CREATE TABLE IF NOT EXISTS hdv_replaced (
+    item_id          INTEGER NOT NULL,
+    uid              INTEGER NOT NULL,
+    replaced_uid     INTEGER NOT NULL,
+    previous_price   INTEGER,
+    price_changed_at REAL,
+    PRIMARY KEY (item_id, uid)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS hdv_replaced_old ON hdv_replaced (item_id, replaced_uid);
+-- Rattrapage des liens entre annonces sur l'historique déjà en base : fait une fois.
+CREATE TABLE IF NOT EXISTS hdv_relinked (version INTEGER NOT NULL);
 -- Annonces encore en vente lors de la dernière consultation de chaque item.
 CREATE VIEW IF NOT EXISTS hdv_current AS
     SELECT h.* FROM hdv_listings h
@@ -535,6 +549,11 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
             if have and column.split()[0] not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
+    if conn.execute("SELECT 1 FROM hdv_relinked").fetchone() is None:
+        try:
+            relink_history(conn)
+        except sqlite3.OperationalError:
+            pass  # base occupée : ce sera fait à la prochaine ouverture
     return conn
 
 
@@ -639,15 +658,80 @@ def save_market_history(
         )
 
 
+# Nombre de jets possibles à partir duquel deux exemplaires aux mêmes jets sont presque toujours le même.
+DISTINCT_ROLLS = 1000
+
+
+def _link_listings(conn: sqlite3.Connection, item_id: int, at: float, new: list, gone: list) -> None:
+    """Relie les annonces apparues (uid, prix, effets) à celles disparues au même relevé (uid, prix, effets) :
+    le même exemplaire, aux mêmes jets, remis en vente. Dans chaque groupe de jets identiques, d'abord au même
+    prix (renumérotation de la maintenance) ; puis, s'il reste une annonce de chaque côté et que l'objet a assez
+    de jets possibles pour qu'un double soit improbable, un changement de prix. Sinon (âme, objet aux jets
+    fixes…), une vente suivie d'une autre annonce identique passerait pour un changement de prix."""
+    rolls = 1
+    for low, high in conn.execute("SELECT min_value, max_value FROM item_effects WHERE item_id = ?", (item_id,)):
+        rolls *= abs(high - low) + 1
+    groups: dict[str, tuple[list, list]] = {}
+    for uid, price, effects in new:
+        if effects != "[]":
+            groups.setdefault(effects, ([], []))[0].append((uid, price))
+    for uid, price, effects in gone:
+        if effects in groups:
+            groups[effects][1].append((uid, price))
+    for appeared, vanished in groups.values():
+        pairs = []
+        for entry in list(appeared):
+            twin = next((old for old in vanished if old[1] == entry[1]), None)
+            if twin is not None:
+                pairs.append((entry, twin))
+                appeared.remove(entry)
+                vanished.remove(twin)
+        if len(appeared) == 1 and len(vanished) == 1 and rolls >= DISTINCT_ROLLS:
+            pairs.append((appeared[0], vanished[0]))
+        for (uid, price), (old_uid, old_price) in pairs:
+            first = conn.execute("SELECT first_seen FROM hdv_listings WHERE item_id = ? AND uid = ?", (item_id, old_uid)).fetchone()[0]
+            before = conn.execute(
+                "SELECT previous_price, price_changed_at FROM hdv_replaced WHERE item_id = ? AND uid = ?", (item_id, old_uid)
+            ).fetchone()
+            previous = (old_price, at) if old_price != price else (before or (None, None))
+            conn.execute("UPDATE hdv_listings SET first_seen = MIN(first_seen, ?) WHERE item_id = ? AND uid = ?", (first, item_id, uid))
+            conn.execute("INSERT OR REPLACE INTO hdv_replaced VALUES (?, ?, ?, ?, ?)", (item_id, uid, old_uid, *previous))
+
+
 def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None:
     """Enregistre les annonces d'un message décodé (messages.hdv_listings).
 
     Une annonce déjà connue garde sa date de première vue ; les annonces absentes du message
-    restent en base avec leur ancienne date : la vue hdv_current ne les montre plus.
+    restent en base avec leur ancienne date : la vue hdv_current ne les montre plus. Une annonce
+    nouvelle aux mêmes jets qu'une annonce disparue est le même exemplaire, remis en vente
+    (voir _link_listings) : elle en reprend la date de première vue, et l'ancien prix s'il a changé.
+    Un identifiant revu avec d'autres jets est un autre exemplaire : le jeu réutilise les numéros.
     """
     with conn:
+        latest = conn.execute("SELECT MAX(captured_at) FROM hdv_listings WHERE item_id = ?", (hdv.item_id,)).fetchone()[0]
+        newest = latest is None or captured_at > latest
+        known = {
+            uid: (price, effects, seen)
+            for uid, price, effects, seen in conn.execute(
+                "SELECT uid, p1, effects, captured_at FROM hdv_listings WHERE item_id = ?", (hdv.item_id,)
+            )
+        }
+        listed = [(l.uid, l.prices[0], json.dumps([list(e) for e in l.effects])) for l in hdv.listings]
+        here = {uid for uid, _, _ in listed}
+        new = [entry for entry in listed if entry[0] not in known or known[entry[0]][1] != entry[2]]
+        gone = [(uid, price, effects) for uid, (price, effects, seen) in known.items() if seen == latest and uid not in here]
+        for uid, price, effects in listed if newest else ():
+            if uid not in known:
+                continue
+            old_price, old_effects, _ = known[uid]
+            if old_effects != effects:  # un autre exemplaire sous un numéro réutilisé
+                conn.execute("DELETE FROM hdv_replaced WHERE item_id = ? AND uid = ?", (hdv.item_id, uid))
+                conn.execute("UPDATE hdv_listings SET first_seen = ? WHERE item_id = ? AND uid = ?", (captured_at, hdv.item_id, uid))
+            elif old_price != price and effects != "[]":  # prix changé sans changer de numéro
+                conn.execute("INSERT OR REPLACE INTO hdv_replaced VALUES (?, ?, ?, ?, ?)", (hdv.item_id, uid, uid, old_price, captured_at))
         conn.executemany(
-            "INSERT INTO hdv_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO hdv_listings (item_id, uid, p1, p10, p100, p1000, effects, captured_at, first_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (item_id, uid) DO UPDATE SET "
             " first_seen = MIN(first_seen, excluded.first_seen), "
             " p1 = CASE WHEN excluded.captured_at >= captured_at THEN excluded.p1 ELSE p1 END, "
@@ -661,6 +745,34 @@ def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None
                 for l in hdv.listings
             ),
         )
+        if newest and new and gone:
+            _link_listings(conn, hdv.item_id, captured_at, new, gone)
+
+
+def relink_history(conn: sqlite3.Connection) -> None:
+    """Relie après coup les annonces déjà en base (voir _link_listings), relevé par relevé : chaque date de
+    première ou de dernière vue d'un objet est un relevé complet de ses annonces. Fait une fois."""
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("SELECT 1 FROM hdv_relinked").fetchone() is None:
+            rows: dict[int, list] = {}
+            for item_id, uid, price, effects, first, seen in conn.execute(
+                "SELECT item_id, uid, p1, effects, first_seen, captured_at FROM hdv_listings WHERE effects != '[]' AND p1 > 0"
+            ):
+                rows.setdefault(item_id, []).append((uid, price, effects, first or seen, seen))
+            for item_id, listings in rows.items():
+                times = sorted({entry[3] for entry in listings} | {entry[4] for entry in listings})
+                for before, at in zip(times, times[1:]):
+                    new = [(uid, price, effects) for uid, price, effects, first, _ in listings if first == at]
+                    gone = [(uid, price, effects) for uid, price, effects, _, seen in listings if seen == before]
+                    if new and gone:
+                        _link_listings(conn, item_id, at, new, gone)
+            conn.execute("INSERT INTO hdv_relinked VALUES (1)")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def save_holdings(conn: sqlite3.Connection, container: str, storage, captured_at: float) -> bool:

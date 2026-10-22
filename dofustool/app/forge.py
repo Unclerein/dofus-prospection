@@ -108,11 +108,19 @@ def _describe(ids: tuple[int, ...], values: dict[int, int], names: dict[int, str
 
 def read_listings(
     conn: sqlite3.Connection, item_id: int, template: Template, current: bool = True, ignored: frozenset[int] | None = None
-) -> list[tuple[int, Classification, float, float]]:
-    """Renvoie (prix, lecture de la forgemagie, première vue, dernière vue), du moins cher au plus cher."""
+) -> list[tuple[int, Classification, float, float, tuple[int, float] | None]]:
+    """Renvoie (prix, lecture de la forgemagie, première vue, dernière vue, ancien prix), du moins cher au plus cher.
+
+    Ancien prix : (prix, date du changement) si le vendeur a changé le prix de l'exemplaire, sinon None.
+    Sans current, les annonces remises en vente sous un autre numéro (même exemplaire) ne comptent qu'une fois."""
     table = "hdv_current" if current else "hdv_listings"
+    replaced = "" if current else (
+        " AND NOT EXISTS (SELECT 1 FROM hdv_replaced x WHERE x.item_id = h.item_id AND x.replaced_uid = h.uid AND x.uid != h.uid)"
+    )
     rows = conn.execute(
-        f"SELECT p1, effects, first_seen, captured_at FROM {table} WHERE item_id = ? AND p1 > 0 ORDER BY p1", (item_id,)
+        f"SELECT h.p1, h.effects, h.first_seen, h.captured_at, r.previous_price, r.price_changed_at FROM {table} h "
+        f"LEFT JOIN hdv_replaced r ON r.item_id = h.item_id AND r.uid = h.uid WHERE h.item_id = ? AND h.p1 > 0{replaced} ORDER BY h.p1",
+        (item_id,),
     )
     if ignored is None:
         ignored = non_stat_effects(conn)
@@ -122,8 +130,9 @@ def read_listings(
             classify([tuple(e) for e in json.loads(effects) if e[0] not in ignored], template),
             first_seen or seen,
             seen,
+            (previous, changed_at) if previous is not None else None,
         )
-        for price, effects, first_seen, seen in rows.fetchall()
+        for price, effects, first_seen, seen, previous, changed_at in rows.fetchall()
     ]
 
 
@@ -138,7 +147,7 @@ def own_listings(conn: sqlite3.Connection, item_id: int, template: Template) -> 
     ]
 
 
-def mark_own(listings: list[tuple[int, Classification, float, float]], own: list[tuple[int, Classification]]) -> list[bool]:
+def mark_own(listings: list[tuple], own: list[tuple[int, Classification]]) -> list[bool]:
     """Pour chaque annonce, vrai si c'est l'un de mes exemplaires : même prix et mêmes jets.
 
     Les annonces de l'HDV n'ont pas le même identifiant que mes lots : c'est la seule façon de les reconnaître.
@@ -155,11 +164,11 @@ def mark_own(listings: list[tuple[int, Classification, float, float]], own: list
 
 
 def listings_frame(
-    listings: list[tuple[int, Classification, float, float]], template: Template, names: dict[int, str]
+    listings: list[tuple], template: Template, names: dict[int, str]
 ) -> pd.DataFrame:
     lines = base_lines(template)
     rows = []
-    for price, item, first_seen, _ in listings:
+    for price, item, first_seen, *_ in listings:
         row = {
             "Prix": price,
             "Forgemagie": item.label,
@@ -178,10 +187,10 @@ def listings_frame(
     return frame
 
 
-def exo_counts(listings: list[tuple[int, Classification, float, float]]) -> dict[int, int]:
+def exo_counts(listings: list[tuple]) -> dict[int, int]:
     """Nombre d'annonces par caractéristique ajoutée."""
     counts: dict[int, int] = {}
-    for _, item, _, _ in listings:
+    for _, item, *_ in listings:
         for effect_id in item.exo:
             counts[effect_id] = counts.get(effect_id, 0) + 1
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
@@ -193,7 +202,7 @@ def craft_cost(ws: Workspace, item_id: int) -> float | None:
 
 
 def summarize(
-    ws: Workspace, item_id: int, listings: list[tuple[int, Classification, float, float]], flt: Filter | None
+    ws: Workspace, item_id: int, listings: list[tuple], flt: Filter | None
 ) -> dict:
     """Chiffres clés d'un équipement : craft, moins cher, moins cher de base, moins cher selon les critères."""
     tax = ws.calculator.tax
@@ -217,6 +226,8 @@ def summarize(
         "match_price": match_price,
         # Première fois qu'une annonce correspondante, la moins chère, a été vue (par ce PC ou le groupe).
         "match_first_seen": matching[0][2] if matching else None,
+        # Son ancien prix, si le vendeur l'a changé : (prix, date du changement).
+        "match_previous": matching[0][4] if matching else None,
         "match_median": statistics.median(entry[0] for entry in matching) if matching else None,
         # Ce que la forgemagie ajoute au prix affiché, avant le coût des runes.
         "premium_vs_plain": match_price - plain_price if match_price is not None and plain_price is not None else None,
@@ -288,6 +299,8 @@ def ranking(
                 "Correspondent": s["match_count"] if flt is not None else None,
                 "Moins cher selon critère": s["match_price"],
                 "Vue depuis": s["match_first_seen"] if flt is not None else None,
+                "Ancien prix": s["match_previous"][0] if flt is not None and s["match_previous"] else None,
+                "Prix changé le": s["match_previous"][1] if flt is not None and s["match_previous"] else None,
                 "Prime sur la base": s["premium_vs_plain"],
                 "Gain sur le craft": s["premium_vs_craft"],
                 "Attention": f"le moins cher a perdu : {warning}" if warning else "",
@@ -295,7 +308,7 @@ def ranking(
         )
     columns = [
         "item_id", "Objet", "Niveau", "Annonces", "Coût de craft", "Moins cher", "Moins cher de base", "Marge du craft",
-        "Correspondent", "Moins cher selon critère", "Vue depuis", "Prime sur la base", "Gain sur le craft", "Attention",
+        "Correspondent", "Moins cher selon critère", "Vue depuis", "Ancien prix", "Prix changé le", "Prime sur la base", "Gain sur le craft", "Attention",
     ]  # fmt: skip
     return pd.DataFrame(rows, columns=columns)
 

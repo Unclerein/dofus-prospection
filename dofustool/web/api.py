@@ -1786,7 +1786,7 @@ class Api:
                 return {**head, "template_known": False}
 
             def listing(entry, mine: bool = False) -> dict:
-                price, c, first_seen, last_seen = entry
+                price, c, first_seen, last_seen, previous = entry
                 return {
                     "mine": mine,
                     "price": price, "label": c.label, "plain": c.plain,
@@ -1794,6 +1794,7 @@ class Api:
                     "transcended": c.transcended, "hunting": c.hunting,
                     "values": c.values, "exo": list(c.exo), "over": list(c.over), "missing": list(c.missing),
                     "first_seen": first_seen, "last_seen": last_seen,
+                    "previous_price": previous[0] if previous else None, "price_changed_at": previous[1] if previous else None,
                 }  # fmt: skip
 
             current = forge.read_listings(conn, item_id, template)
