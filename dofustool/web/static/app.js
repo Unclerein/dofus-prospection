@@ -2955,6 +2955,14 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 21, date: '22 octobre 2026', title: 'Forgemagie : ancien prix, lignes négatives, missions prioritaires', hash: '#/forge', go: 'Ouvrir la forgemagie', points: [
+    ['Ancien prix :', 'quand un vendeur change son prix, l’ancien s’affiche sous le nouveau (« ↓ avant 3 690 000 »), sur la page d’un objet et dans le classement. Le jeu donne un nouveau numéro à l’annonce : on la retrouve par ses jets identiques.'],
+    ['Vue depuis :', 'la date de première vue de chaque annonce ne repart plus de zéro à chaque changement de prix ni à la maintenance du mardi, et une annonce remise en vente ne compte plus comme vendue.'],
+    ['Lignes négatives :', 'un malus de base (« -7 à -5 % critique ») apparaît dans la page de l’objet avec son signe et se filtre (-2 ou mieux, 0 pour un malus effacé). Un malus réduit au-delà de son meilleur jet est un over.'],
+    ['Runes sur un malus :', 'reconnues dans le journal : la rune y pèse la moitié de son poids tant que la ligne reste négative, son poids normal pour l’amener à 0 (vérifié sur le puits, nouvelle règle dans la Collecte).'],
+    ['Collecte :', 'les missions sont classées par priorité pour finir la formule (portée de la rune, objets mal roulés, overs, exos, seuils…) ; la mission des orbes est retirée.'],
+    ['Partage :', 'chaque passage note la version du jeu et son ordre sur l’objet ; l’historique déjà partagé repart une fois vers le hub.'],
+  ] },
   { id: 20, date: '16 octobre 2026', title: 'Forgemagie : la Collecte, missions et classement', hash: '#/forge/collecte', go: 'Ouvrir la Collecte', points: [
     ['Pourquoi :', 'retrouver par la mesure les vraies chances de la forgemagie, pour un simulateur calé sur de vrais passages. Forgemagie › Collecte rappelle le but et montre où en est le groupe.'],
     ['Progression :', 'une barre globale et une par situation (lignes normales, over et exo, seuils, objets légers, orbes, diversité des objets). Une case pleine n’avance plus : il faut aller là où ça manque.'],
