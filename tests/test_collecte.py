@@ -137,15 +137,20 @@ def test_rune_size_is_read_from_its_name():
 def test_the_one_percent_threshold_is_settled_between_25_and_30():
     from types import SimpleNamespace
 
-    def tries(extra, n, passed):
-        return [SimpleNamespace(line_kind="over", extra_before=extra, line_before=10, line_after=11 if i < passed else 10) for i in range(n)]
+    def tries(extra, n, passed, weight=3):
+        # Over de +1 sur une ligne déjà au-delà de son max : toute la rune compte en poids over.
+        return [SimpleNamespace(line_kind="over", extra_before=extra, line_before=10, line_max=8, rune_value=1, rune_weight=weight,
+                                line_after=11 if i < passed else 10) for i in range(n)]
 
-    above = tries(32, 400, 3)  # 30 et plus : environ 1 %
-    at_30 = collecte.judge_beyond_25(collecte.Context(above + tries(27, 150, 50), [], []))
+    crossing_30 = tries(28, 400, 3)  # 28 + 3 : franchit 30, environ 1 %
+    at_30 = collecte.judge_beyond_25(collecte.Context(crossing_30 + tries(23, 150, 50), [], []))
     assert at_30[0] == "probable" and "seuil est à 30" in at_30[1]
-    at_25 = collecte.judge_beyond_25(collecte.Context(above + tries(27, 150, 1), [], []))
+    at_25 = collecte.judge_beyond_25(collecte.Context(crossing_30 + tries(23, 150, 1), [], []))
     assert at_25[0] == "probable" and "seuil est à 25" in at_25[1]
-    assert collecte.judge_beyond_25(collecte.Context(tries(32, 50, 1), [], []))[0] == "verifier"
+    assert collecte.judge_beyond_25(collecte.Context(tries(28, 50, 1), [], []))[0] == "verifier"
+    # Déjà au-delà de 30, ou une rune lourde : ni l'un ni l'autre ne franchit le seuil au sens de la rumeur.
+    assert collecte.crossing(tries(32, 1, 0)[0]) is None and collecte.crossing(tries(20, 1, 0, weight=30)[0]) is None
+    assert collecte.crossing(tries(23, 1, 0)[0]) == 25 and collecte.crossing(tries(28, 1, 0)[0]) == 30
 
 
 def test_missions_put_the_formula_gaps_first():

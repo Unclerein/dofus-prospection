@@ -44,13 +44,15 @@ ITEM_BINS = ((0.6, "moins de 60 %"), (0.8, "60–80 %"), (0.95, "80–95 %"), (m
 EXTRA_BINS = ((10, "0–10"), (25, "10–25"), (50, "25–50"), (math.inf, "50–101"))
 POOL_LEVELS = ("sans puits", "petit puits", "gros puits")  # 0, moins de 20, 20 et plus
 
-NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET = 600, 700, 2000, 8000
+NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET = 600, 700, 300, 8000
 GAP_TARGET = 1000  # zones où la formule reste floue
 REACH_LOW, REACH_HIGH = 15, 30  # ligne entre 15 et 30 fois le bonus de la rune : la portée de la rune
 LOW_FILL = 0.6  # objet rempli à moins de 60 % de son poids max
 HIGH_LEVEL, LOW_LEVEL = 150, 100
 RANK_TARGET, LOADED_TARGET = 600, 300
 LOADED = 8  # poids over/exo porté ailleurs sur l'objet à partir duquel un premier over compte comme « chargé »
+# Seuil du 1 % : seules les petites runes départagent le seuil de la taille de la rune (une rune lourde passe mal partout).
+EDGE_RUNE = 10
 MODELS_TARGET, MODEL_PASSES = 50, 100  # 50 modèles d'objets avec au moins 100 passages chacun
 
 
@@ -83,8 +85,9 @@ def blocks() -> list[Block]:
         Block("ranks", "Rang des overs", "Premier, deuxième, troisième point au-delà du max d'une même ligne, sur un objet sous 25 de poids over/exo ; "
               "et des premiers overs sur un objet qui porte déjà un over ou un exo ailleurs, pour savoir si c'est le rang ou ce poids qui compte.",
               {"r|1": RANK_TARGET, "r|2": RANK_TARGET, "r|3": RANK_TARGET, "r|1|chargé": LOADED_TARGET}),
-        Block("edges", "Seuil du 1 %", "Tentatives sur un objet qui porte déjà 25 à 29, puis 30 ou plus, de poids over/exo : "
-              "le seuil où il ne reste qu'environ 1 % de critique est-il à 25 ou à 30 ?", {"s|25": EDGE_TARGET, "s|30": EDGE_TARGET}),
+        Block("edges", "Seuil du 1 %", f"Tentatives d'over ou d'exo dont la rune ferait passer le poids over/exo de l'objet au-delà de 25, "
+              f"puis au-delà de 30, avec une rune de poids inférieur à {EDGE_RUNE} : le seuil où il ne reste qu'environ 1 % est-il à 25 ou à 30 ?",
+              {"s|25": EDGE_TARGET, "s|30": EDGE_TARGET}),
         Block("light", "Objets légers", f"Objets de poids max inférieur à {LIGHT} : la formule tient-elle en bas de l'échelle ?", {"l": LIGHT_TARGET}),
         Block("gaps", "Zones floues de la formule", "Ce qui manque pour finir la formule : lignes entre 15 et 30 fois le bonus de la rune, "
               "objets haut niveau peu remplis, objets de niveau 100 ou moins.", {"z|portée": GAP_TARGET, "z|peu rempli": GAP_TARGET, "z|bas niveau": GAP_TARGET}),
@@ -113,14 +116,13 @@ def cells_of(row) -> list[str]:
         if pool is not None:
             level = POOL_LEVELS[0 if pool <= 0 else 1 if pool < 20 else 2]
             out.append(f"o|{row.line_kind}|{band(row.extra_before, EXTRA_BINS)}|{level}")
-        if 25 <= row.extra_before < 30:
-            out.append("s|25")
-        elif 30 <= row.extra_before < 40:
-            out.append("s|30")
     elif row.line_max and pool is not None and row.item_weight_max:
         line = band(row.line_before / row.line_max, LINE_BINS)
         item = band(row.item_weight_before / row.item_weight_max, ITEM_BINS)
         out.append(f"n|{line}|{item}|{'avec' if pool > 0 else 'sans'}")
+    edge = crossing(row)
+    if edge is not None:
+        out.append(f"s|{edge}")
     rank = over_rank(row)
     if rank is not None and rank <= 3:
         out.append(f"r|{rank}")
@@ -212,6 +214,33 @@ def _extra(row) -> bool:
     return row.line_kind in ("over", "exo")
 
 
+def added_extra(row) -> float | None:
+    """Poids over/exo que la rune ajouterait à l'objet si elle passait : toute la rune pour un exo, la part
+    au-delà du max pour une ligne de base. None si la rune ou la fiche manque."""
+    if row.rune_weight is None or not row.rune_value or row.line_kind in ("?", "malus"):
+        return None
+    if row.line_kind == "exo":
+        return row.rune_weight
+    if not row.line_max:
+        return None
+    beyond = row.line_before + row.rune_value - max(row.line_before, row.line_max)
+    return row.rune_weight * min(1.0, max(0.0, beyond / row.rune_value))
+
+
+def crossing(row) -> int | None:
+    """25 ou 30 : le seuil que cette tentative ferait franchir au poids over/exo de l'objet, avec une petite rune ;
+    sinon None. Un objet qui porte déjà 25 (ou 30) ne franchit plus ce seuil : la rumeur porte sur la rune qui le fait passer."""
+    added = added_extra(row)
+    if not added or added >= EDGE_RUNE:
+        return None
+    after = row.extra_before + added
+    if row.extra_before < 25 <= after < 30:
+        return 25
+    if row.extra_before < 30 <= after:
+        return 30
+    return None
+
+
 # Dans l'ordre de priorité : les premières sont celles qui manquent le plus pour finir la formule.
 MISSIONS = [
     Mission("portee", "Au bout de la portée", "2 000 passages sur une ligne qui vaut déjà 15 à 30 fois le bonus de la rune, sans dépasser 95 % de son max.",
@@ -224,11 +253,13 @@ MISSIONS = [
             lambda r: "" if _extra(r) and r.extra_before < 25 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|") and ("|0–10|" in c or "|10–25|" in c)),
     Mission("exo-sec", "Exo à sec", "100 tentatives d'exo sans puits.", 100, 400, "puits-aide",
             lambda r: "" if r.line_kind == "exo" and pool_of(r) == 0 else None, lambda it: it.weight < 400, lambda c: c.startswith("o|exo|") and c.endswith("sans puits")),
-    Mission("au-dela-25", "Au-delà de 25", "150 tentatives d'over ou d'exo sur un objet qui porte déjà 25 à 29 de poids over/exo, et 150 à 30 ou plus.", 150, 500, "seuil-25",
-            lambda r: ("25 à 29" if 25 <= r.extra_before < 30 else "30 et plus" if r.extra_before >= 30 else None) if _extra(r) else None,
-            lambda it: it.weight < LIGHT, lambda c: c in ("s|25", "s|30") or "|25–50|" in c or "|50–101|" in c,
-            "Le moins cher : monter un over avec des runes de poids 1 (Fo, Cha) sur un objet léger, puis tenter entre 25 et 29, puis au-delà de 30.",
-            ("25 à 29", "30 et plus")),
+    Mission("au-dela-25", "Franchir le seuil", f"150 tentatives d'over ou d'exo dont la rune ferait passer le poids over/exo de l'objet au-delà de 25, "
+            f"et 150 au-delà de 30, avec une rune de poids inférieur à {EDGE_RUNE}.", 150, 500, "seuil-25",
+            lambda r: {25: "franchir 25", 30: "franchir 30"}.get(crossing(r)),
+            lambda it: it.weight < LIGHT, lambda c: c in ("s|25", "s|30"),
+            "Le moins cher : un objet léger qui porte déjà 20 à 24 de poids over/exo, et une rune de poids 1 à 3 (Fo, Cha, Ini) qui le fait passer "
+            "au-delà de 25 ; puis à 25–29, une petite rune qui le fait passer au-delà de 30.",
+            ("franchir 25", "franchir 30")),
     Mission("over-charge", "Premier over, objet chargé", "50 premiers overs (ligne au max) sur un objet qui porte déjà entre 8 et 25 de poids over/exo ailleurs.",
             50, 400, "rang-over", lambda r: "" if over_rank(r) == 1 and LOADED <= other_extra(r) < 25 else None, lambda it: it.weight < 400,
             lambda c: c == "r|1|chargé", "Par exemple : un objet avec un exo ou un over déjà passé, et une autre ligne montée à son max ; on tente l'over sur celle-ci."),
@@ -454,29 +485,37 @@ def judge_cap(ctx):
 
 
 def judge_beyond_25(ctx):
-    """Réussite des tentatives over/exo selon le poids over/exo déjà porté : 20 à 24, 25 à 29, 30 et plus."""
-    bands = {"20 à 24": (20, 25), "25 à 29": (25, 30), "30 et plus": (30, 1000)}
-    rates = {}
-    for label, (low, high) in bands.items():
-        tries = [r for r in ctx.rows if _extra(r) and low <= r.extra_before < high]
-        rates[label] = (sum(r.line_after > r.line_before for r in tries), len(tries))
+    """Réussite des tentatives over/exo à petite rune selon le seuil que la rune ferait franchir au poids over/exo de
+    l'objet : aucun (l'objet reste entre 15 et 24, la référence), 25, ou 30."""
+    groups = {"reste sous 25": [], "franchit 25": [], "franchit 30": []}
+    for r in ctx.rows:
+        added = added_extra(r)
+        if not added or added >= EDGE_RUNE:
+            continue
+        edge = crossing(r)
+        if edge is not None:
+            groups[f"franchit {edge}"].append(r)
+        elif 15 <= r.extra_before + added < 25:
+            groups["reste sous 25"].append(r)
+    rates = {label: (sum(r.line_after > r.line_before for r in tries), len(tries)) for label, tries in groups.items()}
     show = lambda x: f"{pct(x[0] / x[1])} ({x[1]})" if x[1] else "— (0)"  # noqa: E731
-    text = "Tentatives passées selon le poids over/exo déjà porté : " + ", ".join(f"{label} : {show(rate)}" for label, rate in rates.items()) + "."
-    middle, above = rates["25 à 29"], rates["30 et plus"]
+    text = (f"Tentatives passées, rune de poids inférieur à {EDGE_RUNE}, selon le seuil qu'elle ferait franchir : "
+            + ", ".join(f"{label} : {show(rate)}" for label, rate in rates.items()) + ".")
+    middle, above = rates["franchit 25"], rates["franchit 30"]
     cases = middle[1] + above[1]
     if not cases:
-        return "verifier", "Aucune tentative au-delà de 25 de poids over/exo pour l'instant.", 0, 0.0
+        return "verifier", "Aucune tentative qui franchisse 25 ou 30 de poids over/exo avec une petite rune pour l'instant.", 0, 0.0
     if above[1] >= 100 and wilson(*above)[0] > 0.05:
-        return "refute", text + " Au-delà de 30, ça passe bien plus d'une fois sur cent.", cases, 0.7
-    if above[1] < 300 or wilson(*above)[1] > 0.03:
-        return "verifier", text + " Il faut 300 tentatives à 30 ou plus, et 100 entre 25 et 29.", cases, min(1.0, above[1] / 300) * 0.5
+        return "refute", text + " En franchissant 30, ça passe bien plus d'une fois sur cent.", cases, 0.7
+    if above[1] < 150 or wilson(*above)[1] > 0.03:
+        return "verifier", text + " Il faut 150 tentatives qui franchissent 30, et 100 qui franchissent 25.", cases, min(1.0, above[1] / 150) * 0.5
     if middle[1] < 100:
-        return "verifier", text + " Au-delà de 30, c'est bien autour de 1 % ; reste à savoir entre 25 et 29.", cases, 0.5
+        return "verifier", text + " En franchissant 30, c'est bien autour de 1 % ; reste à savoir pour 25.", cases, 0.5
     if gap(middle, above) >= 2:
-        return "probable", text + " Le seuil est à 30 : entre 25 et 29, ça passe encore normalement.", cases, 0.8
+        return "probable", text + " Le seuil est à 30 : une rune qui fait franchir 25 passe encore normalement.", cases, 0.8
     if middle[0] / middle[1] <= 0.03:
-        return "probable", text + " Le seuil est à 25 : entre 25 et 29, c'est déjà autour de 1 %, comme au-delà de 30.", cases, 0.8
-    return "verifier", text + " Entre 25 et 29, ni normal ni 1 % : à creuser.", cases, 0.4
+        return "probable", text + " Le seuil est à 25 : une rune qui fait franchir 25 passe déjà autour de 1 %, comme pour 30.", cases, 0.8
+    return "verifier", text + " En franchissant 25, ni normal ni 1 % : à creuser.", cases, 0.4
 
 
 def judge_neutral(ctx):
@@ -634,8 +673,9 @@ RULES = [
          "Sur une ligne qui pèse 100 à son max, un over ne passe donc que d'un point de poids.",
          "Mesuré sur nos passages (remplace « pas d'over sur une ligne qui pèse 100 ou plus »)", judge_line_cap),
     Rule("plafond-101", "Plafond de 101 de poids over et exo", "Over et exo réunis, un objet ne peut pas porter plus de 101 de poids.", "Communauté, validé par le groupe", judge_cap),
-    Rule("seuil-25", "1 % de critique au-delà de 25… ou de 30 ?", "Quand l'objet porte déjà assez de poids over/exo, une nouvelle tentative ne passe qu'en critique, "
-         "environ une fois sur cent. La communauté place le seuil à 25 ; Xilef le place à 30 (jusqu'à 29, les chances restent normales).",
+    Rule("seuil-25", "1 % pour franchir 25… ou 30 ?", "Une tentative d'over ou d'exo dont la rune ferait passer le poids over/exo de l'objet au-delà "
+         "du seuil ne passe qu'environ une fois sur cent. La communauté place le seuil à 25 ; Xilef le place à 30 (jusqu'à 29, les chances "
+         "restent normales). Ce n'est pas le poids déjà porté qui compte, mais celui que la rune ferait atteindre.",
          "Communauté et Xilef, à départager", judge_beyond_25, "au-dela-25"),
     Rule("neutre-50", "La part de neutres ne dépend pas de la ligne", "Sur une ligne normale, la part des succès qui coûtent quelque chose (lignes ou puits) est la même, ligne basse ou presque au max.",
          "Mesuré sur nos passages", judge_neutral, "lignes-basses"),
@@ -823,7 +863,7 @@ def fits(mission_id: str, effects: dict[int, int], base: dict[int, tuple[int, in
     if mission_id == "duel-crit":
         return base.get(CRIT, (None, None))[1] in (4, 7)
     if mission_id == "au-dela-25":
-        return extra >= 25
+        return 20 <= extra < 30  # une petite rune y fait franchir 25 ou 30
     if mission_id == "over-charge":
         return LOADED <= extra < 25 and at_max
     if mission_id == "lignes-basses":
