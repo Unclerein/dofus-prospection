@@ -46,6 +46,9 @@ POOL_LEVELS = ("sans puits", "petit puits", "gros puits")  # 0, moins de 20, 20 
 
 NORMAL_TARGET, EXTRA_TARGET, EDGE_TARGET, LIGHT_TARGET = 600, 700, 300, 8000
 GAP_TARGET = 1000  # zones où la formule reste floue
+REACH_BANDS = ((20, "15–19"), (25, "20–24"), (30, "25–29"))  # ligne en nombre de bonus de la rune : début, milieu, fin de la chute
+REACH_TARGET = 500  # par tranche : le début de la zone ne doit pas remplir à lui seul la case
+LOW_PER_ITEM = 50  # passages comptés au plus par modèle d'objet de bas niveau : il faut de la variété
 REACH_LOW, REACH_HIGH = 15, 30  # ligne entre 15 et 30 fois le bonus de la rune : la portée de la rune
 LOW_FILL = 0.6  # objet rempli à moins de 60 % de son poids max
 HIGH_LEVEL, LOW_LEVEL = 150, 100
@@ -90,7 +93,8 @@ def blocks() -> list[Block]:
               {"s|25": EDGE_TARGET, "s|30": EDGE_TARGET}),
         Block("light", "Objets légers", f"Objets de poids max inférieur à {LIGHT} : la formule tient-elle en bas de l'échelle ?", {"l": LIGHT_TARGET}),
         Block("gaps", "Zones floues de la formule", "Ce qui manque pour finir la formule : lignes entre 15 et 30 fois le bonus de la rune, "
-              "objets haut niveau peu remplis, objets de niveau 100 ou moins.", {"z|portée": GAP_TARGET, "z|peu rempli": GAP_TARGET, "z|bas niveau": GAP_TARGET}),
+              f"objets haut niveau peu remplis, objets de niveau 100 ou moins ({LOW_PER_ITEM} passages comptés au plus par objet).",
+              {**{f"z|portée|{label}": REACH_TARGET for _, label in REACH_BANDS}, "z|peu rempli": GAP_TARGET, "z|bas niveau": GAP_TARGET}),
     ]  # fmt: skip
 
 
@@ -131,7 +135,7 @@ def cells_of(row) -> list[str]:
     if row.item_weight_max and row.item_weight_max < LIGHT:
         out.append("l")
     if in_reach_zone(row):
-        out.append("z|portée")
+        out.append("z|portée|" + next(label for limit, label in REACH_BANDS if row.line_before / row.rune_value < limit))
     if low_fill(row):
         out.append("z|peu rempli")
     if row.item_level is not None and row.item_level <= LOW_LEVEL and not _extra(row):
@@ -244,7 +248,7 @@ def crossing(row) -> int | None:
 # Dans l'ordre de priorité : les premières sont celles qui manquent le plus pour finir la formule.
 MISSIONS = [
     Mission("portee", "Au bout de la portée", "2 000 passages sur une ligne qui vaut déjà 15 à 30 fois le bonus de la rune, sans dépasser 95 % de son max.",
-            2000, 800, "taille-rune", lambda r: "" if in_reach_zone(r) else None, lambda it: it.weight < 400, lambda c: c == "z|portée",
+            2000, 800, "taille-rune", lambda r: "" if in_reach_zone(r) else None, lambda it: it.weight < 400, lambda c: c.startswith("z|portée"),
             "Le moins cher : une petite rune (+1) sur une ligne déjà haute mais loin de son max, par exemple 20 en Force sur un objet à 40 de max."),
     Mission("mal-roule", "Objet mal roulé", "1 000 passages sur un objet de niveau 150 ou plus rempli à moins de 60 % de son poids max.",
             1000, 800, "poids-objet", lambda r: "" if low_fill(r) else None, lambda it: it.level >= HIGH_LEVEL, lambda c: c == "z|peu rempli",
@@ -841,11 +845,16 @@ def compute(conn: sqlite3.Connection, density: dict[int, float] | None = None) -
     mine_passes = 0
     progress = {m.id: Counter() for m in MISSIONS}
     done: dict[str, tuple[float, int | None]] = {}
+    low_items: Counter = Counter()
     for ts, _, event in events:
         if isinstance(event, Tool):
             cells = []
         else:
             cells = cells_of(event)
+            if "z|bas niveau" in cells:
+                low_items[event.item_id] += 1
+                if low_items[event.item_id] > LOW_PER_ITEM:
+                    cells.remove("z|bas niveau")
         worth = max((value(owner[c].counts[c], goal[c]) for c in cells), default=1.0)
         for c in cells:
             owner[c].counts[c] += 1
