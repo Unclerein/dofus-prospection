@@ -17,6 +17,7 @@ from dofustool.protocol.session import Message
 from dofustool.protocol.tcp import C2S, S2C
 from dofustool.web.api import Api
 
+from . import test_breeding as breeding_test
 from .test_app import app_db  # noqa: F401  (fixture : une base complète sur disque)
 from .test_pipeline import any_frame, feed
 from .test_protocol import REQUEST, any_, framed, ld, varint, vi
@@ -46,6 +47,10 @@ BUILDS = [
         "fm_object": {"wrap": 3, "object": 1, "quantity": 3, "item_id": 4, "uid": 5, "effects": 7, "effect_value": 5, "effect_id": 10},
         "fm_result": {"status": 1, "result": 2, "pool": 2, "pool_change": 3, "object": 4, "quantity": 3, "item_id": 4, "uid": 5, "effects": 7, "effect_value": 5, "effect_id": 10},
         "offline_sales": {"total": 1},
+        "stable": {"wrap": 1, "mounts": 1, "uid": 1, "data": 2, "male": 2, "parents": 3, "serenity": 5, "gauges": 6, "gauge_type": 1,
+                   "gauge_value": 2, "level": 8, "sterile": 10, "color": 12, "xp": 13},
+        "paddock": {"wrap": 1, "paddock_id": 1, "content": 2, "active": 1, "objects": 4, "object_value": 2, "object_index": 3, "mounts": 5},
+        "paddock_update": {"wrap": 1, "active": 1, "objects": 4, "object_value": 2, "object_index": 3, "mounts": 5},
     },
     {
         "avg_prices": {"entries": 3, "item_id": 1, "price": 2},
@@ -60,6 +65,10 @@ BUILDS = [
         "fm_object": {"wrap": 2, "object": 4, "quantity": 1, "item_id": 2, "uid": 6, "effects": 3, "effect_value": 2, "effect_id": 1},
         "fm_result": {"status": 3, "result": 1, "pool": 5, "pool_change": 1, "object": 2, "quantity": 1, "item_id": 2, "uid": 6, "effects": 3, "effect_value": 2, "effect_id": 1},
         "offline_sales": {"total": 4},
+        "stable": {"wrap": 2, "mounts": 3, "uid": 4, "data": 1, "male": 7, "parents": 2, "serenity": 9, "gauges": 4, "gauge_type": 2,
+                   "gauge_value": 1, "level": 3, "sterile": 11, "color": 5, "xp": 6},
+        "paddock": {"wrap": 3, "paddock_id": 2, "content": 1, "active": 6, "objects": 2, "object_value": 3, "object_index": 1, "mounts": 4},
+        "paddock_update": {"wrap": 2, "active": 6, "objects": 2, "object_value": 3, "object_index": 1, "mounts": 4},
     },
 ]
 
@@ -234,6 +243,11 @@ def archive_with(build, keys, bank_after=600.0, with_equipment=True) -> tuple[Ar
     for step in range(3):
         add(1920.0 + step, S2C, "fm_object", fm_object_body(build["fm_object"]))
         add(1920.5 + step, S2C, "fm_result", fm_result_body(build["fm_result"], pool=10.0 + step))
+    # L'interface d'élevage : l'étable, l'enclos ouvert, puis sa mise à jour au tick suivant.
+    stable = build["stable"]
+    add(1930.0, S2C, "stable", breeding_test.stable_body(st=stable, extra=15))
+    add(1930.1, S2C, "paddock", breeding_test.paddock_body(f=build["paddock"], st=stable))
+    add(1940.1, S2C, "paddock_update", breeding_test.update_body(f=build["paddock_update"], st=stable))
     # Du bruit : d'autres requêtes d'un seul entier, et des messages sans rapport.
     archive.add(conn, Message(0, 1950.0, C2S, "zz1", vi(1, 207_619_076), 1, 4))
     archive.add(conn, Message(0, 1951.0, S2C, "zz2", vi(1, 5) + ld(2, b"bonjour"), 2, None))
@@ -381,6 +395,7 @@ def test_pipeline_recovers_alone_from_a_game_update(tmp_path, caplog):
     assert raw["avg_prices"]["key"] == KEYS["avg_prices"] and raw["job_levels"]["fields"] == build["job_levels"]
     assert identify.pending(raw) == {
         "bank", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update", "fm_object", "fm_result", "offline_sales",
+        "stable", "paddock", "paddock_update",
     }  # pas encore vus sur ce build
 
     # Plus tard le joueur ouvre l'onglet Vendre : le message est retrouvé et décodé à la vérification suivante.

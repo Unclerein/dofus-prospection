@@ -247,5 +247,48 @@
     "fields": {
       "uid": 1
     }
+  },
+  "stable": {
+    "key": "hqv",
+    "fields": {
+      "wrap": 1,
+      "mounts": 1,
+      "uid": 1,
+      "data": 2,
+      "male": 2,
+      "parents": 3,
+      "serenity": 5,
+      "gauges": 6,
+      "gauge_type": 1,
+      "gauge_value": 2,
+      "level": 8,
+      "sterile": 10,
+      "color": 12,
+      "xp": 13
+    }
+  },
+  "paddock": {
+    "key": "hpa",
+    "fields": {
+      "wrap": 1,
+      "paddock_id": 1,
+      "content": 2,
+      "active": 1,
+      "objects": 4,
+      "object_value": 2,
+      "object_index": 3,
+      "mounts": 5
+    }
+  },
+  "paddock_update": {
+    "key": "hrf",
+    "fields": {
+      "wrap": 1,
+      "active": 1,
+      "objects": 4,
+      "object_value": 2,
+      "object_index": 3,
+      "mounts": 5
+    }
   }
 }

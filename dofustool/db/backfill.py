@@ -10,7 +10,7 @@ import time
 
 from .. import db
 from ..archive import ARCHIVE_PATH
-from ..messages import avg_prices, characters, fm, hdv_listings, market_history, sales, storage, trades
+from ..messages import avg_prices, breeding, characters, fm, hdv_listings, market_history, sales, storage, trades
 from ..messages import exchange
 from ..messages import inventory as moves
 from ..messages import load_runtime_keymap as load_keymap
@@ -124,6 +124,7 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
             if hdv is not None:
                 db.save_hdv_listings(market, hdv, ts)
                 counts["listes HDV enregistrées"] += 1
+    counts.update(_breeding(archive, market, keymap))
     bank, listing = keymap.get("bank"), keymap.get("inventory")
     opening = keymap.get("storage_open")
     if listing is not None and listing.fields.get("uid") and bank is not None and opening is not None:
@@ -258,6 +259,32 @@ def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[st
                 if levels is not None:
                     db.save_job_levels(market, chosen[connection_id], levels, ts)
                     counts["relevés de métiers lus"] += 1
+    return counts
+
+
+def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -> dict[str, int]:
+    """L'étable et les enclos, dans l'ordre : la dernière vue de chaque monture et de chaque enclos l'emporte.
+    Une mise à jour d'enclos ne dit pas lequel c'est : celui ouvert en dernier sur la même connexion."""
+    stable, paddock, update = keymap.get("stable"), keymap.get("paddock"), keymap.get("paddock_update")
+    if stable is None:
+        return {}
+    counts = {"étables lues": 0, "enclos lus": 0}
+    keys = [m.key for m in (stable, paddock, update) if m is not None]
+    opened: dict[int, int] = {}
+    rows = archive.execute(
+        f"SELECT connection_id, ts, key, body FROM messages WHERE key IN ({','.join('?' * len(keys))}) ORDER BY ts", keys
+    )
+    for connection_id, ts, key, body in rows:
+        if key == stable.key and (mounts := breeding.parse_stable(body, stable)) is not None:
+            db.save_stable(market, mounts, ts)
+            counts["étables lues"] += 1
+        elif paddock is not None and key == paddock.key and (seen := breeding.parse_paddock(body, paddock, stable)) is not None:
+            opened[connection_id] = seen.paddock_id
+            db.save_paddock(market, seen.paddock_id, seen, ts)
+            counts["enclos lus"] += 1
+        elif update is not None and key == update.key and connection_id in opened:
+            if (seen := breeding.parse_paddock_update(body, update, stable)) is not None:
+                db.save_paddock(market, opened[connection_id], seen, ts)
     return counts
 
 

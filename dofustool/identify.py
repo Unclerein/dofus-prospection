@@ -6,8 +6,8 @@ cohérents avec leur expérience, une moyenne des ventes qui redonne le prix moy
 Un candidat n'est retenu que si le vrai parseur l'accepte ; s'il y en a plusieurs pour un même
 message, rien n'est retenu.
 
-Ne lit que des nombres et la forme des champs. Le seul texte examiné est le nom d'un personnage,
-dont on vérifie seulement qu'il est lisible.
+Ne lit que des nombres et la forme des champs. Les seuls textes examinés sont le nom d'un personnage,
+dont on vérifie seulement qu'il est lisible, et l'identifiant d'une monture, dont on vérifie la forme.
 """
 import json
 import shutil
@@ -19,14 +19,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .analysis.jobxp import level_to_xp
-from .messages import Mapping, avg_prices, characters, fm, hdv_listings, market_history, sales, storage, trades
+from .messages import Mapping, avg_prices, breeding, characters, fm, hdv_listings, market_history, sales, storage, trades
 from .protocol.tcp import C2S, S2C
-from .protocol.wire import I32, LEN, VARINT, WireError, iter_fields, read_varint
+from .protocol.wire import I32, LEN, VARINT, WireError, iter_fields, read_varint, to_signed
 
 NAMES = (
     "avg_prices", "inventory", "bank", "character_list", "character_select",
     "job_levels", "market_history", "hdv_listings", "my_sales", "info_text", "my_sale_update",
-    "fm_object", "fm_result", "offline_sales",
+    "fm_object", "fm_result", "offline_sales", "stable", "paddock", "paddock_update",
 )  # fmt: skip
 RUNES_SQL = "SELECT id FROM items WHERE type_name LIKE 'Rune %'"
 FM_MAX_BYTES = 1500  # un objet posé sur l'atelier ou un résultat de passage tient dans cette taille
@@ -48,6 +48,7 @@ class Context:
     avg: dict[int, int]
     runes: set[int] = field(default_factory=set)
     offline_total: int | None = None  # dernier total de ventes hors ligne annoncé par le jeu
+    rides: set[int] = field(default_factory=set)  # couleurs de montures (RidesData), vides sans les données du jeu
 
     @classmethod
     def load(cls, market: sqlite3.Connection) -> "Context":
@@ -60,7 +61,20 @@ class Context:
             avg,
             {row[0] for row in market.execute(RUNES_SQL)},
             (market.execute("SELECT total FROM offline_sales ORDER BY ts DESC, source_id DESC LIMIT 1").fetchone() or (None,))[0],
+            _rides(),
         )
+
+
+def _rides() -> set[int]:
+    path = Path(__file__).resolve().parents[1] / "data" / "static" / "dofus.sqlite"
+    try:
+        static = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            return {row[0] for row in static.execute("SELECT id FROM RidesData")}
+        finally:
+            static.close()
+    except sqlite3.Error:
+        return set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +511,154 @@ def text_signature(body: bytes) -> tuple[int, int, bool] | None:
     return numbers[0], next(iter(texts), 0), digits  # 0 : texte sans paramètre
 
 
+def _mount_entries(entries: list[bytes]) -> tuple[int, int, list[list]] | None:
+    """(champ de l'identifiant, champ de la fiche, champs de chaque fiche) : chaque entrée est faite d'un identifiant
+    de monture (36 caractères) et d'une fiche."""
+    uid_field = data_field = None
+    datas = []
+    for entry in entries:
+        sub = _fields(entry)
+        if sub is None or len(sub) != 2 or any(t != LEN for _, t, _ in sub):
+            return None
+        ids = [n for n, _, v in sub if breeding.UID.match(v)]
+        if len(ids) != 1:
+            return None
+        other = next(n for n, _, _ in sub if n != ids[0])
+        if (uid_field, data_field) not in ((None, None), (ids[0], other)):
+            return None
+        uid_field, data_field = ids[0], other
+        data = _fields(next(v for n, _, v in sub if n == other))
+        if data is None:
+            return None
+        datas.append(data)
+    return (uid_field, data_field, datas) if datas else None
+
+
+def match_stable(body: bytes, ctx: Context) -> tuple[dict[str, int], bool] | None:
+    """L'étable : une liste de montures. Les champs de la fiche se reconnaissent à leurs valeurs : la sérénité seule
+    a des négatifs, l'expérience est grande, le niveau vaut 1 sans expérience, la couleur est une couleur du jeu,
+    les jauges vont par trois. Des deux champs qui ne valent que 1, le stérile n'apparaît que sur des montures aux
+    jauges pleines (elles se sont accouplées), le sexe aussi sur d'autres. Sans monture stérile, le résultat est partiel."""
+    top = _fields(body)
+    if not top or len(top) != 1 or top[0][1] != LEN:
+        return None
+    inner = _fields(top[0][2])
+    groups = _repeated(inner or [])
+    if not groups:
+        return None
+    mounts_field = max(groups, key=lambda n: len(groups[n]))
+    found = _mount_entries(groups[mounts_field][:600])
+    if found is None or len(found[2]) < 3:
+        return None
+    uid_field, data_field, datas = found
+    rows = [_varints(d) for d in datas]
+    per_mount = [Counter(n for n, t, _ in d if t == LEN) for d in datas]
+    gauges = [n for n in {n for c in per_mount for n in c} if all(c.get(n) == 3 for c in per_mount)]
+    if len(gauges) != 1:
+        return None
+    gauge_rows = [_varints(_fields(v) or []) for d in datas for n, t, v in d if n == gauges[0]]
+    gauge_numbers = {n for g in gauge_rows for n in g}
+    types = [n for n in gauge_numbers if {g[n] for g in gauge_rows if n in g} <= {1, 2}]
+    values = [n for n in gauge_numbers if n not in types and all(g[n] <= breeding.GAUGE_MAX for g in gauge_rows if n in g)]
+    if len(types) != 1 or len(values) != 1:
+        return None
+    # Les parents : deux couleurs du jeu ; sans les données du jeu, un bloc absent des montures capturées.
+    parents = [n for n in {n for c in per_mount for n in c} if n != gauges[0] and all(c.get(n, 0) <= 1 for c in per_mount)
+               and (all(set(_varints(_fields(v) or []).values()) <= ctx.rides for d in datas for m, t, v in d if m == n) if ctx.rides
+                    else not all(c.get(n) for c in per_mount))]  # fmt: skip
+    if len(parents) != 1:
+        return None
+    present = {n for row in rows for n in row}
+    everywhere = [n for n in present if all(n in row for row in rows)]
+    serenity = [n for n in everywhere if any(to_signed(row[n]) < 0 for row in rows) and all(abs(to_signed(row[n])) <= breeding.SERENITY_LIMIT for row in rows)]
+    xp = [n for n in present if n not in everywhere and max(row.get(n, 0) for row in rows) >= 1000]
+    if len(serenity) != 1 or len(xp) != 1:
+        return None
+    small = [n for n in everywhere if n != serenity[0] and all(0 < row[n] <= 1000 for row in rows)]
+    level = [n for n in small if all(row[n] == 1 for row in rows if xp[0] not in row) and any(xp[0] not in row for row in rows)]
+    color = [n for n in small if n not in level and all(row[n] in (ctx.rides or {row[n]}) for row in rows)]
+    if len(level) != 1 or len(color) != 1:
+        return None
+    full = [all(g.get(values[0], 0) >= breeding.GAUGE_MAX for n, t, v in d if n == gauges[0] for g in [_varints(_fields(v) or [])])
+            for d in datas]  # fmt: skip
+    flags = [n for n in present if n not in everywhere and n not in xp and {row[n] for row in rows if n in row} == {1}]
+    sterile = [n for n in flags if all(full[i] for i, row in enumerate(rows) if n in row)]
+    male = [n for n in flags if n not in sterile]
+    partial = False
+    if len(male) != 1 or len(sterile) > 1:
+        return None
+    if not sterile:
+        sterile, partial = [0], True  # aucune monture stérile : le champ reste à retrouver
+    fields = {
+        "wrap": top[0][0], "mounts": mounts_field, "uid": uid_field, "data": data_field, "male": male[0], "parents": parents[0],
+        "serenity": serenity[0], "gauges": gauges[0], "gauge_type": types[0], "gauge_value": values[0], "level": level[0],
+        "sterile": sterile[0], "color": color[0], "xp": xp[0],
+    }  # fmt: skip
+    return (fields, partial) if breeding.parse_stable(body, Mapping("", fields)) else None
+
+
+def _paddock_content(content: bytes, stable: Mapping) -> dict[str, int] | None:
+    """Champs du contenu d'un enclos : objets d'élevage (numéro 0 à 5 et points), objets en marche, montures."""
+    sub = _fields(content)
+    if sub is None or any(t != LEN for _, t, _ in sub):
+        return None
+    groups = _repeated(sub)
+    mounts = [n for n, entries in groups.items() if _mount_entries(entries) is not None]
+    objects = []
+    for n, entries in groups.items():
+        rows = [_fields(e) for e in entries]
+        if n in mounts or len(entries) > breeding.OBJECTS or any(r is None or any(t != VARINT for _, t, _ in r) for r in rows):
+            continue
+        rows = [_varints(r) for r in rows]
+        numbers = {k for row in rows for k in row}
+        index = [k for k in numbers if {row[k] for row in rows if k in row} <= set(range(1, breeding.OBJECTS)) and len(rows) >= 3]
+        if len(index) == 1 and len(numbers) == 2:
+            objects.append((n, index[0], next(k for k in numbers if k != index[0])))
+    if len(mounts) != 1 or len(objects) != 1:
+        return None
+    active = [n for n, entries in groups.items() if n not in mounts and n != objects[0][0] and len(entries) == 1
+              and (packed := _packed(entries[0])) is not None and all(i < breeding.OBJECTS for i in packed)]  # fmt: skip
+    if len(active) > 1:
+        return None
+    fields = {"active": active[0] if active else 0, "objects": objects[0][0], "object_value": objects[0][2], "object_index": objects[0][1], "mounts": mounts[0]}
+    return fields
+
+
+def match_paddock(body: bytes, stable: Mapping) -> tuple[dict[str, int], bool] | None:
+    """Un enclos à son ouverture : son numéro, puis son contenu. Sans objet en marche, le résultat est partiel."""
+    top = _fields(body)
+    if not top or len(top) != 1 or top[0][1] != LEN:
+        return None
+    inner = _fields(top[0][2])
+    if inner is None or len(inner) != 2:
+        return None
+    ids = [n for n, t, _ in inner if t == VARINT]
+    contents = [(n, v) for n, t, v in inner if t == LEN]
+    if len(ids) != 1 or len(contents) != 1:
+        return None
+    fields = _paddock_content(contents[0][1], stable)
+    if fields is None:
+        return None
+    fields = {"wrap": top[0][0], "paddock_id": ids[0], "content": contents[0][0], **fields}
+    if breeding.parse_paddock(body, Mapping("", fields), stable) is None:
+        return None
+    return fields, fields["active"] == 0
+
+
+def match_paddock_update(body: bytes, stable: Mapping) -> tuple[dict[str, int], bool] | None:
+    """L'enclos renvoyé à chaque tick : le même contenu, sans son numéro."""
+    top = _fields(body)
+    if not top or len(top) != 1 or top[0][1] != LEN:
+        return None
+    fields = _paddock_content(top[0][2], stable)
+    if fields is None:
+        return None
+    fields = {"wrap": top[0][0], **fields}
+    if breeding.parse_paddock_update(body, Mapping("", fields), stable) is None:
+        return None
+    return fields, fields["active"] == 0
+
+
 # --- balayage d'une connexion ------------------------------------------------
 
 
@@ -571,6 +733,9 @@ def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], 
             listing = match_hdv_listings(body, ctx)
             if listing:
                 found["hdv_listings"] = Found("hdv_listings", key, listing[0], listing[1])
+            stable = match_stable(body, ctx)
+            if stable:
+                found["stable"] = Found("stable", key, stable[0], stable[1])
         scan.matches[slot] = found
     scan.dirty.clear()
 
@@ -583,6 +748,18 @@ def identify(scan: Scan, ctx: Context, wanted=NAMES) -> tuple[dict[str, Found], 
                 name = "inventory" if early else "bank"
                 item = Found(name, item.key, item.fields)
             candidates.setdefault(name, []).append(item)
+
+    # Enclos : ses montures se lisent avec les champs de l'étable, envoyée juste avant à l'ouverture de l'interface.
+    stables = candidates.get("stable", [])
+    if len(stables) == 1 and ("paddock" in wanted or "paddock_update" in wanted):
+        stable = Mapping(stables[0].key, stables[0].fields)
+        for (direction, key), body in scan.best.items():
+            if direction != S2C or key == stable.key:
+                continue
+            for name, matcher in (("paddock", match_paddock), ("paddock_update", match_paddock_update)):
+                fields = matcher(body, stable)
+                if fields:
+                    candidates.setdefault(name, []).append(Found(name, key, fields[0], fields[1]))
 
     # Message d'information : une clé dont tous les messages courts ont la même forme (un numéro de texte et
     # des paramètres), et dont plusieurs ont des paramètres entièrement chiffrés.

@@ -12,7 +12,7 @@ from pathlib import Path
 from .. import db, identify
 from ..archive import Archive
 from ..fight import live
-from ..messages import Mapping, avg_prices, characters, exchange, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
+from ..messages import Mapping, avg_prices, breeding, characters, exchange, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
 from ..protocol.session import Message, Session
 from ..protocol.tcp import C2S, S2C
 from . import Segment
@@ -55,6 +55,7 @@ class _ConnWatch:
     fm_objects: dict[int, tuple] = field(default_factory=dict)  # derniers effets connus des objets posés sur l'atelier
     fm_pools: dict[int, float] = field(default_factory=dict)  # puits connu de chaque objet après son dernier passage
     fm_item: tuple[int, int] | None = None  # (exemplaire, objet) posé en dernier sur l'atelier
+    paddock: int | None = None  # enclos ouvert : ses mises à jour ne disent pas lequel c'est
 
 
 class Pipeline:
@@ -315,6 +316,30 @@ class Pipeline:
                     watch.inventory = listing
                     if db.save_holdings(self.market, db.INVENTORY, listing, msg.ts) and first:
                         log.info("Inventaire enregistré : %d piles.", len(listing.stacks))
+            return
+
+        stable = self.keymap.get("stable")
+        if stable is not None and msg.key == stable.key:
+            mounts = breeding.parse_stable(msg.body, stable)
+            if mounts is not None:
+                db.save_stable(self.market, mounts, msg.ts)
+                log.info("Étable enregistrée : %d montures.", len(mounts))
+            return
+
+        mapping = self.keymap.get("paddock")
+        if mapping is not None and msg.key == mapping.key:
+            paddock = breeding.parse_paddock(msg.body, mapping, stable)
+            if paddock is not None:
+                watch.paddock = paddock.paddock_id
+                db.save_paddock(self.market, paddock.paddock_id, paddock, msg.ts)
+                log.info("Enclos %d enregistré : %d montures.", paddock.paddock_id, len(paddock.mounts))
+            return
+
+        mapping = self.keymap.get("paddock_update")
+        if mapping is not None and msg.key == mapping.key:
+            paddock = breeding.parse_paddock_update(msg.body, mapping, stable)
+            if paddock is not None and watch.paddock is not None:  # toutes les 10 s, interface ouverte
+                db.save_paddock(self.market, watch.paddock, paddock, msg.ts)
             return
 
         mapping = self.keymap.get("hdv_listings")

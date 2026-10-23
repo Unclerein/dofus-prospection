@@ -191,6 +191,30 @@ CREATE TABLE IF NOT EXISTS hdv_replaced (
 CREATE INDEX IF NOT EXISTS hdv_replaced_old ON hdv_replaced (item_id, replaced_uid);
 -- Rattrapage des liens entre annonces sur l'historique déjà en base : fait une fois.
 CREATE TABLE IF NOT EXISTS hdv_relinked (version INTEGER NOT NULL);
+-- Élevage : chaque monture telle qu'elle a été vue en dernier, et où (place 0 : l'étable, sinon le numéro de l'enclos).
+-- Les jauges et la sérénité sont celles du moment seen_at : l'enclos les fait bouger ensuite (voir analysis.breeding).
+CREATE TABLE IF NOT EXISTS mounts (
+    uid       TEXT PRIMARY KEY,
+    place     INTEGER NOT NULL,
+    male      INTEGER NOT NULL,
+    color     INTEGER NOT NULL,
+    parents   TEXT NOT NULL,
+    serenity  INTEGER NOT NULL,
+    love      INTEGER NOT NULL,
+    maturity  INTEGER NOT NULL,
+    stamina   INTEGER NOT NULL,
+    level     INTEGER NOT NULL,
+    xp        INTEGER NOT NULL,
+    sterile   INTEGER NOT NULL,
+    seen_at   REAL NOT NULL
+) WITHOUT ROWID;
+-- Un enclos à sa dernière vue : points de ses 6 objets d'élevage (JSON) et objets en marche.
+CREATE TABLE IF NOT EXISTS paddocks (
+    paddock_id INTEGER PRIMARY KEY,
+    objects    TEXT NOT NULL,
+    active     TEXT NOT NULL,
+    seen_at    REAL NOT NULL
+);
 -- Annonces encore en vente lors de la dernière consultation de chaque item.
 CREATE VIEW IF NOT EXISTS hdv_current AS
     SELECT h.* FROM hdv_listings h
@@ -696,6 +720,40 @@ def _link_listings(conn: sqlite3.Connection, item_id: int, at: float, new: list,
             previous = (old_price, at) if old_price != price else (before or (None, None))
             conn.execute("UPDATE hdv_listings SET first_seen = MIN(first_seen, ?) WHERE item_id = ? AND uid = ?", (first, item_id, uid))
             conn.execute("INSERT OR REPLACE INTO hdv_replaced VALUES (?, ?, ?, ?, ?)", (item_id, uid, old_uid, *previous))
+
+
+def _save_mounts(conn: sqlite3.Connection, mounts, place: int, at: float) -> None:
+    """Remplace les montures d'un emplacement : celles qui n'y sont plus ont été déplacées, vendues ou extraites."""
+    conn.execute("DELETE FROM mounts WHERE place = ? AND seen_at <= ?", (place, at))
+    conn.executemany(
+        "INSERT INTO mounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (uid) DO UPDATE SET "
+        "place = excluded.place, male = excluded.male, color = excluded.color, parents = excluded.parents, "
+        "serenity = excluded.serenity, love = excluded.love, maturity = excluded.maturity, stamina = excluded.stamina, "
+        "level = excluded.level, xp = excluded.xp, sterile = excluded.sterile, seen_at = excluded.seen_at "
+        "WHERE excluded.seen_at >= mounts.seen_at",
+        (
+            (m.uid, place, int(m.male), m.color, json.dumps(list(m.parents)), m.serenity, m.love, m.maturity, m.stamina,
+             m.level, m.xp, int(m.sterile), at)
+            for m in mounts
+        ),
+    )
+
+
+def save_stable(conn: sqlite3.Connection, mounts, at: float) -> None:
+    """L'étable entière (messages.breeding.parse_stable)."""
+    with conn:
+        _save_mounts(conn, mounts, 0, at)
+
+
+def save_paddock(conn: sqlite3.Connection, paddock_id: int, paddock, at: float) -> None:
+    """Un enclos (messages.breeding.Paddock) : ses objets, ceux en marche, et ses montures."""
+    with conn:
+        conn.execute(
+            "INSERT INTO paddocks VALUES (?, ?, ?, ?) ON CONFLICT (paddock_id) DO UPDATE SET "
+            "objects = excluded.objects, active = excluded.active, seen_at = excluded.seen_at WHERE excluded.seen_at >= paddocks.seen_at",
+            (paddock_id, json.dumps(list(paddock.objects)), json.dumps(sorted(set(paddock.active))), at),
+        )
+        _save_mounts(conn, paddock.mounts, paddock_id, at)
 
 
 def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None:
