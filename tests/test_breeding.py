@@ -190,3 +190,22 @@ def test_overlay_announces_each_gesture_once():
     assert [a.title for a in due] == ["Coupe le caresseur"] and breeding_text(due[0]) == "1 DD entre 1 et 2 000"
     assert board.due(NOW + 500 * sim.TICK_S) == []  # déjà annoncé
     assert board.due(NOW + 900 * sim.TICK_S) == []  # trop tard : les DD sont sorties de la zone
+
+
+def test_a_banner_goes_away_once_the_gesture_is_done():
+    from dofustool.overlay import Board
+
+    c = db.connect(":memory:")
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(active=(1,), herd=[dict(serenity=-4940, love=5040, stamina=20000)]), PADDOCK, STABLE), NOW)
+    watch, board = Breeding(c), Board()
+    at = NOW + 495 * sim.TICK_S
+    [advice] = watch.due(at)
+    gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
+    board.note("ÉLEVAGE · ENCLOS 1", advice.title, "", at, shown_s=300, kind="élevage", gesture=gesture)
+    assert watch.done(at + 20) == []  # rien n'a bougé
+    db.save_toggle(c, 1, at + 30, sim.PATTER, False)  # le caresseur est coupé
+    assert watch.done(at + 35) == [gesture] and watch.done(at + 40) == []
+    board.dismiss(gesture, at + 35)
+    board.hold(at + 36)  # le jeu passe derrière : le bandeau effacé ne revient pas
+    board.expire(at + 37)
+    assert board.banners == []

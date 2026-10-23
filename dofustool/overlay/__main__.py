@@ -271,6 +271,8 @@ class Window:
                 try:
                     for advice in self.breeding.due(now):
                         self.breed(advice, now)
+                    for gesture in self.breeding.done(now):
+                        self.board.dismiss(gesture, now)
                 except sqlite3.Error:
                     pass  # base occupée, ou d'avant l'élevage : au prochain passage
             if self.show_rune and not self.is_demo:
@@ -307,7 +309,9 @@ class Window:
         text = breeding_text(advice)
         if advice.kind == "stop":
             text += " · avant " + time.strftime("%H:%M", time.localtime(advice.until))
-        self.board.note(f"ÉLEVAGE · ENCLOS {advice.paddock_id}", advice.title, text, now, shown_s=self.breeding_shown, kind="élevage", deadline=advice.until)
+        gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
+        self.board.note(f"ÉLEVAGE · ENCLOS {advice.paddock_id}", advice.title, text, now, shown_s=self.breeding_shown, kind="élevage",
+                        deadline=advice.until, gesture=gesture)  # fmt: skip
         if self.chime:
             sound.play(SOUND_PATH)
 
@@ -362,6 +366,9 @@ class DemoBreeding:
         ready = [a for a in self.script if a.at <= now]
         self.script = [a for a in self.script if a.at > now]
         return ready
+
+    def done(self, now: float):
+        return []
 
 
 def demo_sales(conn: sqlite3.Connection | None) -> tuple[list[tuple[float, Sale]], dict[int, str]]:

@@ -45,6 +45,8 @@ class Banner:
     shown_s: float = 0.0  # durée propre, sinon celle du tableau
     kind: str = ""  # « élevage » : couleur et cadran à part
     deadline: float = 0.0  # heure limite : la pastille décompte le temps qu'il reste
+    gesture: tuple | None = None  # élevage : le geste demandé ; le bandeau s'efface quand il est fait
+    dismissed: bool = False  # effacé avant son terme : il ne revient pas au retour du jeu
 
 
 class Feed:
@@ -88,11 +90,11 @@ class Board:
         return banner
 
     def note(self, label: str, title: str, text: str, now: float, item_id: int = 0, badge: str = "", star: bool = False, shown_s: float = 6.0,
-             kind: str = "", deadline: float = 0.0) -> Banner:  # fmt: skip
+             kind: str = "", deadline: float = 0.0, gesture: tuple | None = None) -> Banner:  # fmt: skip
         """Un bandeau d'annonce (mission, succès, élevage) : il ne se regroupe avec aucun autre."""
         self.expire(now)
         banner = Banner(item_id, 0, 0, now + shown_s, born=now, label=label, title=title, text=text, badge=badge, star=star, shown_s=shown_s,
-                        kind=kind, deadline=deadline)  # fmt: skip
+                        kind=kind, deadline=deadline, gesture=gesture)  # fmt: skip
         self.banners.append(banner)
         del self.banners[: -self.limit]
         return banner
@@ -100,9 +102,18 @@ class Board:
     def expire(self, now: float) -> None:
         self.banners = [banner for banner in self.banners if banner.until > now]
 
+    def dismiss(self, gesture: tuple, now: float, fade_s: float = 0.35) -> None:
+        """Efface en fondu les bandeaux de ce geste : il vient d'être fait."""
+        for banner in self.banners:
+            if banner.gesture == gesture and not banner.dismissed:
+                banner.dismissed = True
+                banner.until = min(banner.until, now + fade_s)
+
     def hold(self, now: float) -> None:
         """Le jeu n'est pas à l'écran : les bandeaux attendent, leur délai ne commencera qu'à son retour."""
         for banner in self.banners:
+            if banner.dismissed:
+                continue  # déjà fait : il ne revient pas
             banner.until = now + (banner.shown_s or self.shown_s)
             banner.born = now  # il apparaîtra au retour du jeu
 
@@ -205,6 +216,7 @@ class Breeding:
         self.key: tuple | None = None
         self.advice: list[breeding.Advice] = []
         self.fired: dict[tuple, float] = {}
+        self.waiting: dict[tuple, float] = {}  # gestes annoncés pas encore faits : quand ils l'ont été
 
     def due(self, now: float) -> list[breeding.Advice]:
         key = self.conn.execute(
@@ -217,8 +229,31 @@ class Breeding:
         for advice in self.advice:
             gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
             if advice.at <= now <= max(advice.until, advice.at + 60) and now - self.fired.get(gesture, -1e18) >= BREEDING_AGAIN_S:
-                self.fired[gesture] = now
+                self.fired[gesture] = self.waiting[gesture] = now
                 out.append(advice)
+        return out
+
+    def done(self, now: float) -> list[tuple]:
+        """Gestes annoncés que le joueur vient de faire : objet coupé, ou bascule faite (vu par ses clics ou une ouverture
+        de l'enclos depuis l'annonce)."""
+        if not self.waiting:
+            return []
+        out = []
+        paddocks = {p.paddock_id: p for p in breeding.load(self.conn)}
+        for gesture, at in list(self.waiting.items()):
+            paddock_id, kind, running, then = gesture
+            p = paddocks.get(paddock_id)
+            if p is None:
+                continue
+            active, seen = set(p.active), p.seen_at
+            for ts, index, on in p.toggles:
+                (active.add if on else active.discard)(index)
+                seen = max(seen, ts)
+            if seen < at:
+                continue  # rien de nouveau sur cet enclos depuis l'annonce
+            if running not in active and (then is None or then in active):
+                out.append(gesture)
+                del self.waiting[gesture]
         return out
 
 
