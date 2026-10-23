@@ -216,6 +216,11 @@ CREATE TABLE IF NOT EXISTS paddock_toggles (
     active     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS paddock_toggles_at ON paddock_toggles (paddock_id, ts);
+-- Noms français des dragodindes (identifiant RidesData → « Amande et Rousse »), demandés une fois à DofusDB.
+CREATE TABLE IF NOT EXISTS ride_names (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
 -- Aperçus d'accouplement : les deux parents tels qu'ils étaient (couleur, parents, niveau, sexe…) et les chances de chaque
 -- couleur pour le bébé, telles que le jeu les affiche. De quoi retrouver la formule des couleurs.
 CREATE TABLE IF NOT EXISTS mating_previews (

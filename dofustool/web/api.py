@@ -713,6 +713,18 @@ class Api:
         finally:
             conn.close()
 
+    def genetics(self, target: int | None) -> dict:
+        """Les couleurs de dragodindes avec ce qu'on en possède, et le chemin vers la couleur visée."""
+        from ..analysis import genetics
+
+        if not hasattr(self, "_ride_tree"):
+            self._ride_tree = genetics.load_tree()
+        conn = self.connect()
+        try:
+            return genetics.overview(conn, self._ride_tree, target)
+        finally:
+            conn.close()
+
     # --- métiers -------------------------------------------------------------
 
     def jobs(self) -> dict:
