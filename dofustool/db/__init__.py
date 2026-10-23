@@ -216,6 +216,21 @@ CREATE TABLE IF NOT EXISTS paddock_toggles (
     active     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS paddock_toggles_at ON paddock_toggles (paddock_id, ts);
+-- Aperçus d'accouplement : les deux parents tels qu'ils étaient (couleur, parents, niveau, sexe…) et les chances de chaque
+-- couleur pour le bébé, telles que le jeu les affiche. De quoi retrouver la formule des couleurs.
+CREATE TABLE IF NOT EXISTS mating_previews (
+    ts       REAL NOT NULL,
+    parents  TEXT NOT NULL,
+    outcomes TEXT NOT NULL,
+    extra    TEXT NOT NULL,
+    PRIMARY KEY (ts, parents)
+) WITHOUT ROWID;
+-- Accouplements faits : les deux parents, le bébé.
+CREATE TABLE IF NOT EXISTS mating_births (
+    ts      REAL PRIMARY KEY,
+    parents TEXT NOT NULL,
+    baby    TEXT NOT NULL
+);
 -- Un enclos à sa dernière vue : points de ses 6 objets d'élevage (JSON) et objets en marche.
 CREATE TABLE IF NOT EXISTS paddocks (
     paddock_id INTEGER PRIMARY KEY,
@@ -762,6 +777,56 @@ def save_paddock(conn: sqlite3.Connection, paddock_id: int, paddock, at: float) 
             (paddock_id, json.dumps(list(paddock.objects)), json.dumps(sorted(set(paddock.active))), at),
         )
         _save_mounts(conn, paddock.mounts, paddock_id, at)
+
+
+def mount_sheet(conn: sqlite3.Connection, uid: str) -> dict | None:
+    """Fiche d'une monture connue, telle qu'elle est en base : de quoi rejouer un aperçu d'accouplement."""
+    row = conn.execute("SELECT male, color, parents, level, xp, sterile, love, maturity, stamina FROM mounts WHERE uid = ?", (uid,)).fetchone()
+    if row is None:
+        return None
+    male, color, parents, level, xp, sterile, love, maturity, stamina = row
+    return {"uid": uid, "male": bool(male), "color": color, "parents": json.loads(parents), "level": level, "xp": xp, "sterile": bool(sterile),
+            "gauges": [love, maturity, stamina]}  # fmt: skip
+
+
+def _sheet_of(mount) -> dict:
+    return {"uid": mount.uid, "male": mount.male, "color": mount.color, "parents": list(mount.parents), "level": mount.level, "xp": mount.xp,
+            "sterile": mount.sterile, "gauges": [mount.love, mount.maturity, mount.stamina]}  # fmt: skip
+
+
+def save_mating_preview(conn: sqlite3.Connection, ts: float, pair: tuple[str, str], preview) -> bool:
+    """Un aperçu d'accouplement ; False si l'un des parents est inconnu (étable jamais ouverte depuis la capture)."""
+    sheets = [mount_sheet(conn, uid) for uid in pair]
+    if any(s is None for s in sheets):
+        return False
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO mating_previews VALUES (?, ?, ?, ?)",
+            (ts, json.dumps(sheets), json.dumps([list(o) for o in preview.outcomes]), json.dumps(preview.extra)),
+        )
+    return True
+
+
+def save_mating_birth(conn: sqlite3.Connection, ts: float, parents, baby) -> None:
+    """Un accouplement fait : les parents (devenus stériles) et le bébé ; le bébé rejoint l'étable."""
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO mating_births VALUES (?, ?, ?)", (ts, json.dumps([_sheet_of(m) for m in parents]), json.dumps(_sheet_of(baby))))
+    _save_mounts_keep(conn, [*parents, baby], ts)
+
+
+def _save_mounts_keep(conn: sqlite3.Connection, mounts, at: float) -> None:
+    """Met à jour ces montures sans toucher aux autres : à l'étable si on ne sait pas encore où elles sont."""
+    with conn:
+        for m in mounts:
+            place = conn.execute("SELECT place FROM mounts WHERE uid = ?", (m.uid,)).fetchone()
+            conn.execute(
+                "INSERT INTO mounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (uid) DO UPDATE SET "
+                "male = excluded.male, color = excluded.color, parents = excluded.parents, serenity = excluded.serenity, "
+                "love = excluded.love, maturity = excluded.maturity, stamina = excluded.stamina, level = excluded.level, "
+                "xp = excluded.xp, sterile = excluded.sterile, seen_at = excluded.seen_at WHERE excluded.seen_at >= mounts.seen_at",
+                (m.uid, place[0] if place else 0, int(m.male), m.color, json.dumps(list(m.parents)), m.serenity, m.love, m.maturity,
+                 m.stamina, m.level, m.xp, int(m.sterile), at),
+            )  # fmt: skip
 
 
 def save_toggle(conn: sqlite3.Connection, paddock_id: int, ts: float, index: int, active: bool) -> None:

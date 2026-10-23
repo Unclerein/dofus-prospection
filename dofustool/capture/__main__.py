@@ -13,7 +13,7 @@ import time
 
 from .. import config, db
 from ..archive import ARCHIVE_PATH, Archive
-from ..db.backfill import backfill_fm, fm_backfill_due
+from ..db.backfill import backfill_breeding, backfill_fm, fm_backfill_due
 from ..messages import load_keymap, runtime_keymap_path
 from . import GAME_PORT
 from .pipeline import Pipeline, log
@@ -79,6 +79,12 @@ def main() -> int:
             log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
     except Exception as exc:  # le rattrapage ne doit jamais empêcher la capture
         log.warning("Rattrapage du journal de forgemagie non fait : %s", exc)
+    try:  # élevage vu avant que la capture sache le lire (étable, enclos, aperçus d'accouplement) : relu une fois
+        done = backfill_breeding(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
+        if done:
+            log.info("Élevage relu dans l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
+    except Exception as exc:
+        log.warning("Rattrapage de l'élevage non fait : %s", exc)
     # Version du jeu des passages récents, poids des caractéristiques et fiches des objets de cette version :
     # de quoi relire un passage avec les règles de son époque après une mise à jour du jeu.
     try:

@@ -3064,6 +3064,13 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 23, date: '23 octobre 2026', title: 'Élevage : tes enclos suivis, et prévenu au bon moment', hash: '#/breeding', go: 'Ouvrir l’élevage', points: [
+    ['Page Élevage :', 'ton étable en chiffres (fécondes, fertiles, stériles) et chaque enclos maintenant : sérénité de tes DD face à la zone visée, jauges, objets d’élevage et le temps avant qu’ils soient vides.'],
+    ['Sérénité intelligente :', 'la zone à viser se déduit des jauges qui restent à remplir (amour et maturité : 1 à 2 000). L’app te dit quand passer du caresseur au baffeur, au moment qui laisse au moins 5 minutes pour couper, puis quand couper.'],
+    ['Jauges :', 'prévenu quand toutes les DD d’un enclos ont la jauge pleine (« Coupe la dragofesse ») ou quand un objet en marche est vide.'],
+    ['Par-dessus le jeu :', 'un bandeau vert avec un petit son discret, qui reste 5 minutes et s’efface dès que le geste est fait. Réglable dans Config.'],
+    ['Comment :', 'ouvre l’interface d’élevage (touche D) capture lancée : la capture lit l’étable, l’enclos et tes clics sur ses objets, sans rien envoyer au jeu. Les aperçus d’accouplement sont aussi gardés, pour retrouver la formule des couleurs.'],
+  ] },
   { id: 22, date: '23 octobre 2026', title: 'Collecte : seuil du 1 % et poids de l’objet revus', hash: '#/forge/collecte', go: 'Ouvrir la Collecte', points: [
     ['Seuil du 1 % :', 'ce qui compte, c’est le poids over/exo que la rune ferait atteindre à l’objet (franchir 25 ou 30), pas celui qu’il porte déjà. Mesuré avec des petites runes, pour ne pas confondre avec la taille de la rune ; la mission devient « Franchir le seuil ».'],
     ['Remplissage :', 'la règle compare maintenant à ligne et rune égales : certaine, environ 49 % d’échecs sur un objet rempli à 90 % ou plus contre 14 % sous 76 %. C’est pour ça qu’on retire le PA avant une exo lourde.'],

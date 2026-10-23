@@ -3,7 +3,9 @@
   - stable         : toutes les montures de l'étable ;
   - paddock        : un enclos à son ouverture (numéro, objets d'élevage, objets actifs, montures) ;
   - paddock_update : le même enclos, renvoyé toutes les 10 s tant que l'interface reste ouverte ;
-  - paddock_start / paddock_stop : le joueur lance ou coupe un objet de l'enclos ouvert (du client vers le serveur).
+  - paddock_start / paddock_stop : le joueur lance ou coupe un objet de l'enclos ouvert (du client vers le serveur) ;
+  - mating_preview_request / mating_confirm : le joueur choisit un couple, puis l'accouple (deux identifiants) ;
+  - mating_preview : les chances de chaque couleur pour le bébé de ce couple ; mating_birth : les parents et le bébé.
 
 Une monture : un identifiant (texte de 36 caractères, celui du jeu), son sexe, sa couleur (identifiant
 RidesData), les couleurs de ses parents, sa sérénité (−5 000 à 5 000), ses trois jauges (0 à 20 000),
@@ -15,9 +17,10 @@ dans l'entrée « stable » de la table des clés, que les deux autres messages 
 Donnée personnelle : elle reste dans la base locale.
 """
 import re
+import struct
 from dataclasses import dataclass
 
-from ..protocol.wire import LEN, VARINT, WireError, iter_fields, read_varint, to_signed
+from ..protocol.wire import I32, LEN, VARINT, WireError, iter_fields, read_varint, to_signed
 from . import Mapping
 
 LOVE, MATURITY, STAMINA = 0, 1, 2  # types des trois jauges d'une monture ; une jauge à 0 n'envoie pas sa valeur,
@@ -123,6 +126,91 @@ def parse_toggle(body: bytes, mapping: Mapping) -> int | None:
     if len(fields) != 1 or fields[0][0] != mapping.fields["index"] or fields[0][1] != VARINT or fields[0][2] >= OBJECTS:
         return None
     return fields[0][2]
+
+
+def parse_pair(body: bytes, mapping: Mapping) -> tuple[str, str] | None:
+    """Couple choisi (du client vers le serveur) : les identifiants des deux montures."""
+    f = mapping.fields
+    found: dict[int, str] = {}
+    try:
+        for number, wire_type, value in iter_fields(body):
+            if number not in (f["first"], f["second"]) or wire_type != LEN or not UID.match(value):
+                return None
+            found[number] = value.decode("ascii")
+    except WireError:
+        return None
+    return (found[f["first"]], found[f["second"]]) if len(found) == 2 else None
+
+
+@dataclass(frozen=True, slots=True)
+class Preview:
+    outcomes: tuple[tuple[int, float, bool], ...]  # (couleur, chance en %, couleur de la génération cible)
+    extra: dict[str, int]  # les autres nombres du message, à plat (« 7.1 » : 8700…), pas encore compris
+
+
+def parse_preview(body: bytes, mapping: Mapping) -> Preview | None:
+    """Aperçu d'accouplement : chaque couleur possible et sa chance. Les chances font 100 % à l'arrondi près."""
+    f = mapping.fields
+    outcomes: list[tuple[int, float, bool]] = []
+    extra: dict[str, int] = {}
+    try:
+        top = list(iter_fields(body))
+        if len(top) != 1 or top[0][0] != f["wrap"] or top[0][1] != LEN:
+            return None
+        for number, wire_type, value in iter_fields(top[0][2]):
+            if number == f["outcomes"] and wire_type == LEN:
+                color, chance, target = None, None, False
+                for n, t, v in iter_fields(value):
+                    if n == f["color"] and t == VARINT:
+                        color = v
+                    elif n == f["chance"] and t == I32:
+                        chance = struct.unpack("<f", bytes(v) if isinstance(v, (bytes, bytearray)) else int(v).to_bytes(4, "little"))[0]
+                    elif n == f["target"] and t == VARINT:
+                        target = v == 1
+                if color is None or chance is None or not 0 <= chance <= 100:
+                    return None
+                outcomes.append((color, round(chance, 4), target))
+            elif wire_type == VARINT:
+                extra[str(number)] = value
+            elif wire_type == LEN:
+                for n, t, v in iter_fields(value):
+                    if t != VARINT:
+                        return None
+                    extra[f"{number}.{n}"] = v
+            else:
+                return None
+    except (WireError, struct.error):
+        return None
+    if not outcomes or not 99 <= sum(c for _, c, _ in outcomes) <= 101:
+        return None
+    return Preview(tuple(outcomes), extra)
+
+
+def parse_birth(body: bytes, mapping: Mapping, stable: Mapping | None) -> tuple[tuple[Mount, ...], Mount] | None:
+    """Accouplement fait : les deux parents tels qu'ils sont désormais (stériles), puis le bébé."""
+    if stable is None:
+        return None
+    f = mapping.fields
+    parents: list[Mount] = []
+    baby = None
+    try:
+        top = list(iter_fields(body))
+        if len(top) != 1 or top[0][0] != f["wrap"] or top[0][1] != LEN:
+            return None
+        for number, wire_type, value in iter_fields(top[0][2]):
+            if number in (f["parents"], f["baby"]) and wire_type == LEN:
+                mount = parse_mount(value, stable)
+                if mount is None:
+                    return None
+                if number == f["parents"]:
+                    parents.append(mount)
+                else:
+                    baby = mount
+            elif wire_type != VARINT:
+                return None
+    except WireError:
+        return None
+    return (tuple(parents), baby) if len(parents) == 2 and baby is not None else None
 
 
 def parse_stable(body: bytes, mapping: Mapping) -> tuple[Mount, ...] | None:

@@ -302,5 +302,37 @@
     "fields": {
       "index": 2
     }
+  },
+  "mating_preview_request": {
+    "key": "hnw",
+    "fields": {
+      "first": 3,
+      "second": 4
+    }
+  },
+  "mating_preview": {
+    "key": "hrv",
+    "fields": {
+      "wrap": 2,
+      "outcomes": 5,
+      "target": 2,
+      "color": 4,
+      "chance": 5
+    }
+  },
+  "mating_confirm": {
+    "key": "hqz",
+    "fields": {
+      "first": 3,
+      "second": 4
+    }
+  },
+  "mating_birth": {
+    "key": "hpw",
+    "fields": {
+      "wrap": 1,
+      "parents": 1,
+      "baby": 5
+    }
   }
 }

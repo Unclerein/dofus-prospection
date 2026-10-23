@@ -91,6 +91,20 @@ def fm_backfill_due(market: sqlite3.Connection) -> bool:
     return False
 
 
+BREEDING_BACKFILL = "breeding_backfill"  # marque dans status : l'élevage a été relu dans l'archive une fois
+
+
+def backfill_breeding(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int] | None:
+    """Relit une fois l'élevage dans l'archive (étable, enclos, aperçus d'accouplement, naissances) : ce qui a été vu
+    avant que la capture sache le lire. None si c'est déjà fait."""
+    if db.get_status(market).get(BREEDING_BACKFILL):
+        return None
+    counts = _breeding(archive, market, load_keymap())
+    if counts:  # sans table des clés de l'élevage (mise à jour du jeu pas encore rattrapée), on réessaiera
+        db.set_status(market, **{BREEDING_BACKFILL: "1"})
+    return counts
+
+
 def backfill(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int]:
     keymap = load_keymap()
     counts = {"lus": 0, "relevés ajoutés": 0, "rejetés": 0}
@@ -267,11 +281,14 @@ def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -
     Une mise à jour d'enclos ne dit pas lequel c'est : celui ouvert en dernier sur la même connexion."""
     stable, paddock, update = keymap.get("stable"), keymap.get("paddock"), keymap.get("paddock_update")
     start, stop = keymap.get("paddock_start"), keymap.get("paddock_stop")
+    request, confirm = keymap.get("mating_preview_request"), keymap.get("mating_confirm")
+    preview, birth = keymap.get("mating_preview"), keymap.get("mating_birth")
     if stable is None:
         return {}
-    counts = {"étables lues": 0, "enclos lus": 0}
-    keys = [m.key for m in (stable, paddock, update, start, stop) if m is not None]
+    counts = {"étables lues": 0, "enclos lus": 0, "aperçus d'accouplement": 0, "naissances": 0}
+    keys = [m.key for m in (stable, paddock, update, start, stop, request, confirm, preview, birth) if m is not None]
     opened: dict[int, int] = {}
+    pairs: dict[int, tuple[str, str]] = {}  # dernier couple choisi sur chaque connexion
     rows = archive.execute(
         f"SELECT connection_id, ts, key, body FROM messages WHERE key IN ({','.join('?' * len(keys))}) ORDER BY ts", keys
     )
@@ -283,6 +300,16 @@ def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -
             opened[connection_id] = seen.paddock_id
             db.save_paddock(market, seen.paddock_id, seen, ts)
             counts["enclos lus"] += 1
+        elif any(m is not None and key == m.key for m in (request, confirm)):
+            mapping = request if request is not None and key == request.key else confirm
+            if (pair := breeding.parse_pair(body, mapping)) is not None:
+                pairs[connection_id] = pair
+        elif preview is not None and key == preview.key and connection_id in pairs:
+            if (seen := breeding.parse_preview(body, preview)) is not None and db.save_mating_preview(market, ts, pairs[connection_id], seen):
+                counts["aperçus d'accouplement"] += 1
+        elif birth is not None and key == birth.key and (born := breeding.parse_birth(body, birth, stable)) is not None:
+            db.save_mating_birth(market, ts, *born)
+            counts["naissances"] += 1
         elif update is not None and key == update.key and connection_id in opened:
             if (seen := breeding.parse_paddock_update(body, update, stable)) is not None:
                 db.save_paddock(market, opened[connection_id], seen, ts)

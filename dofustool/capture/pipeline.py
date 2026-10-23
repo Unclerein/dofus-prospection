@@ -56,6 +56,7 @@ class _ConnWatch:
     fm_pools: dict[int, float] = field(default_factory=dict)  # puits connu de chaque objet après son dernier passage
     fm_item: tuple[int, int] | None = None  # (exemplaire, objet) posé en dernier sur l'atelier
     paddock: int | None = None  # enclos ouvert : ses mises à jour ne disent pas lequel c'est
+    mating: tuple[str, str] | None = None  # dernier couple choisi dans l'interface d'élevage, en attente de son aperçu
 
 
 class Pipeline:
@@ -333,6 +334,28 @@ class Pipeline:
                 watch.paddock = paddock.paddock_id
                 db.save_paddock(self.market, paddock.paddock_id, paddock, msg.ts)
                 log.info("Enclos %d enregistré : %d montures.", paddock.paddock_id, len(paddock.mounts))
+            return
+
+        for name in ("mating_preview_request", "mating_confirm"):
+            mapping = self.keymap.get(name)
+            if mapping is not None and msg.key == mapping.key and msg.direction == C2S:
+                watch.mating = breeding.parse_pair(msg.body, mapping)
+                return
+
+        mapping = self.keymap.get("mating_preview")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            preview = breeding.parse_preview(msg.body, mapping)
+            if preview is not None and watch.mating is not None:
+                if db.save_mating_preview(self.market, msg.ts, watch.mating, preview):
+                    log.info("Aperçu d'accouplement enregistré : %d couleurs.", len(preview.outcomes))
+            return
+
+        mapping = self.keymap.get("mating_birth")
+        if mapping is not None and msg.key == mapping.key and msg.direction == S2C:
+            born = breeding.parse_birth(msg.body, mapping, stable)
+            if born is not None:
+                db.save_mating_birth(self.market, msg.ts, *born)
+                log.info("Naissance enregistrée.")
             return
 
         for name, on in (("paddock_start", True), ("paddock_stop", False)):

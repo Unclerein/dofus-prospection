@@ -232,3 +232,37 @@ def test_overlay_announces_a_full_gauge_once_until_it_is_dealt_with():
     assert watch.due(NOW + 3 * 3600) == []  # une seule fois tant qu'on n'y a pas touché
     db.save_toggle(c, 1, NOW + 3 * 3600 + 1, sim.LOVER, False)
     assert watch.done(NOW + 3 * 3600 + 5) == [(1, "full", sim.LOVER, None)]
+
+
+def test_mating_preview_and_birth_are_recorded():
+    import struct
+
+    from dofustool.tools import mating_export
+
+    pair = ld(3, uid(1)) + ld(4, uid(4))
+    assert breeding.parse_pair(pair, KEYMAP["mating_preview_request"]) == (uid(1).decode(), uid(4).decode())
+    assert breeding.parse_pair(ld(3, uid(1)), KEYMAP["mating_preview_request"]) is None
+
+    def outcome(color, chance, target=False):
+        return ld(5, (vi(2, 1) if target else b"") + vi(4, color) + varint(5 << 3 | 5) + struct.pack("<f", chance))
+
+    body = ld(2, vi(2, 1) + outcome(46, 38.1, True) + outcome(10, 30.96) + outcome(18, 30.94) + ld(7, vi(1, 8700) + vi(2, 60)) + vi(8, 4))
+    preview = breeding.parse_preview(body, KEYMAP["mating_preview"])
+    assert preview.outcomes == ((46, 38.1, True), (10, 30.96, False), (18, 30.94, False))
+    assert preview.extra == {"2": 1, "7.1": 8700, "7.2": 60, "8": 4}
+    assert breeding.parse_preview(ld(2, outcome(46, 38.1)), KEYMAP["mating_preview"]) is None  # ne fait pas 100 %
+
+    c = db.connect(":memory:")
+    db.save_stable(c, breeding.parse_stable(stable_body(), STABLE), NOW)
+    assert db.save_mating_preview(c, NOW + 1, (uid(1).decode(), uid(4).decode()), preview)
+    assert not db.save_mating_preview(c, NOW + 2, (uid(1).decode(), uid(99).decode()), preview)  # monture inconnue
+    f = KEYMAP["mating_birth"].fields
+    birth = ld(f["wrap"], ld(f["parents"], mount(1, sterile=True, love=20000, maturity=20000, stamina=20000, level=53, xp=40000))
+               + ld(f["parents"], mount(4, sterile=True, love=20000, maturity=20000, stamina=20000, level=53, xp=40000))
+               + vi(3, 90) + ld(f["baby"], mount(9, male=True, color=10, parents=(18, 10), serenity=-3252)))
+    parents, baby = breeding.parse_birth(birth, KEYMAP["mating_birth"], STABLE)
+    db.save_mating_birth(c, NOW + 3, parents, baby)
+    assert c.execute("SELECT COUNT(*) FROM mounts WHERE sterile = 1").fetchone() == (2,)  # les parents sont devenus stériles
+    assert c.execute("SELECT color, parents FROM mounts WHERE uid = ?", (uid(9).decode(),)).fetchone() == (10, "[18, 10]")
+    text = mating_export.lines(c)
+    assert len(text) == 2 and "46 (cible) 38.10 %" in text[0] and "bébé couleur 10 mâle" in text[1] and uid(1).decode() not in "".join(text)
