@@ -209,3 +209,26 @@ def test_a_banner_goes_away_once_the_gesture_is_done():
     board.hold(at + 36)  # le jeu passe derrière : le bandeau effacé ne revient pas
     board.expire(at + 37)
     assert board.banners == []
+
+
+def test_gauges_full_and_objects_empty_are_foreseen():
+    p = sim.Paddock(1, 0.0, [0, 0, 0, 50, 5000, 0], {sim.TROUGH, sim.LOVER}, herd(1000, 1000, love=19_000, maturity=0))
+    empty, full = sim.forecast(p)
+    assert full == {sim.LOVER: 100 * sim.TICK_S}  # l'amour plein en 100 ticks ; la dragofesse s'arrête alors de dépenser
+    assert empty == {sim.TROUGH: 5 * sim.TICK_S}  # l'abreuvoir n'avait que 50 points
+    kinds = [(g.kind, g.title) for g in sim.gestures(p)]
+    assert kinds == [("empty", "L’abreuvoir est vide"), ("full", "Coupe la dragofesse")]
+    idle = sim.Paddock(1, 0.0, [0, 0, 0, 0, 5000, 0], {sim.LOVER}, herd(-500, love=0))
+    assert sim.forecast(idle) == ({}, {})  # sérénité négative : l'amour ne monte pas, rien n'arrive
+
+
+def test_overlay_announces_a_full_gauge_once_until_it_is_dealt_with():
+    c = db.connect(":memory:")
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(active=(4,), objects=(0, 0, 0, 0, 5000, 0),
+                                                              herd=[dict(serenity=1000, love=19_000, stamina=20000)]), PADDOCK, STABLE), NOW)  # fmt: skip
+    watch = Breeding(c)
+    [full] = watch.due(NOW + 100 * sim.TICK_S)
+    assert full.kind == "full" and breeding_text(full) == "Amour plein"
+    assert watch.due(NOW + 3 * 3600) == []  # une seule fois tant qu'on n'y a pas touché
+    db.save_toggle(c, 1, NOW + 3 * 3600 + 1, sim.LOVER, False)
+    assert watch.done(NOW + 3 * 3600 + 5) == [(1, "full", sim.LOVER, None)]

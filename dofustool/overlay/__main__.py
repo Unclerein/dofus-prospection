@@ -309,9 +309,10 @@ class Window:
         text = breeding_text(advice)
         if advice.kind == "stop":
             text += " · avant " + time.strftime("%H:%M", time.localtime(advice.until))
+        deadline = advice.until if advice.kind in ("stop", "switch") else 0.0  # objet vide, jauges pleines : pas d'heure limite
         gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
         self.board.note(f"ÉLEVAGE · ENCLOS {advice.paddock_id}", advice.title, text, now, shown_s=self.breeding_shown, kind="élevage",
-                        deadline=advice.until, gesture=gesture)  # fmt: skip
+                        deadline=deadline, gesture=gesture)  # fmt: skip
         if self.chime:
             sound.play(SOUND_PATH)
 
@@ -355,11 +356,13 @@ class DemoBreeding:
     """Deux gestes inventés pour voir les bandeaux d'élevage : une bascule, puis l'arrêt dans la zone."""
 
     def __init__(self, now: float) -> None:
-        from ..analysis.breeding import PATTER, SLAPPER, Advice
+        from ..analysis.breeding import LOVER, PATTER, SLAPPER, TROUGH, Advice
 
         self.script = [
             Advice(1, "switch", now + 0.5, now + 300, (1, 2000), PATTER, SLAPPER, 10),
             Advice(2, "stop", now + 3.5, now + 1980, (1, 2000), SLAPPER, None, 8),
+            Advice(1, "full", now + 6.5, now + 3600, None, LOVER, None, 10),
+            Advice(2, "empty", now + 9.5, now + 3600, None, TROUGH, None, 8),
         ]
 
     def due(self, now: float):

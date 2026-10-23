@@ -1278,6 +1278,7 @@ function loadJobState() {
 const SERENITY_LIMIT = 5000;
 const GAUGE_MAX = 20000;
 const signedNumber = (n) => (n < 0 ? '−' + fmt(-n) : fmt(n));
+const fullWord = (gauge) => (gauge === 'amour' ? 'plein' : 'pleine');  // l'amour est masculin
 const clock = (ts) => new Date(ts * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
 /** Temps restant jusqu'à une heure, en clair ; tenu à jour chaque seconde par tickCountdowns. */
@@ -1311,18 +1312,25 @@ function serenityScale(p) {
     h('div', { class: 'serenity-ticks muted' }, h('span', {}, '−5 000'), h('span', {}, '0'), h('span', {}, '5 000')));
 }
 
-function gaugeRow(name, range) {
-  const [low, high] = range;
+function gaugeRow(name, gauge, now) {
+  const [low, high] = gauge.range;
   const full = low >= GAUGE_MAX;
+  const eta = !full && gauge.full_at && gauge.full_at > now ? h('span', { class: 'gauge-eta' }, `${fullWord(name)} dans `, countdown(gauge.full_at)) : null;
   return h('div', { class: 'gauge-row' },
     h('span', { class: 'gauge-name' }, name),
     h('span', { class: 'gauge-bar' }, h('span', { class: 'gauge-fill' + (full ? ' full' : ''), style: `width: ${(low / GAUGE_MAX) * 100}%` }),
       high > low && h('span', { class: 'gauge-spread', style: `left: ${(low / GAUGE_MAX) * 100}%; width: ${((high - low) / GAUGE_MAX) * 100}%` })),
-    h('span', { class: 'gauge-value' + (full ? ' gain' : '') }, full ? 'pleine' : low === high ? fmt(low) : `${fmt(low)} à ${fmt(high)}`));
+    h('span', { class: 'gauge-value' + (full ? ' gain' : '') }, full ? fullWord(name) : low === high ? fmt(low) : `${fmt(low)} à ${fmt(high)}`, eta));
+}
+
+/** Une ligne de geste à venir, sous le prochain : quoi, et dans combien de temps. */
+function gestureLine(g, now) {
+  return h('li', {}, h('span', {}, g.title, g.kind === 'full' ? h('span', { class: 'muted' }, ` · ${g.gauge} ${fullWord(g.gauge)}`) : null),
+    h('span', { class: 'muted' }, g.at > now ? ['dans ', countdown(g.at)] : 'maintenant'));
 }
 
 function paddockCard(p, now) {
-  const a = p.advice;
+  const [a, ...later] = p.gestures;
   const waiting = a && a.at > now;
   const next = a
     ? h('div', { class: 'breed-next' + (waiting ? '' : ' due') },
@@ -1330,13 +1338,16 @@ function paddockCard(p, now) {
       h('div', { class: 'breed-title' }, a.title),
       h('div', { class: 'breed-when' }, waiting
         ? ['dans ', h('strong', {}, countdown(a.at)), ` · à ${clock(a.at)}`]
-        : ['encore ', h('strong', {}, countdown(a.until)), ` · avant ${clock(a.until)}`]),
-      a.kind === 'switch' && h('div', { class: 'muted small' }, `Coupe le ${a.running}, lance le ${a.then} : toutes les DD passeront dans la zone, avec au moins 5 minutes pour couper.`))
+        : a.kind === 'stop' || a.kind === 'switch' ? ['encore ', h('strong', {}, countdown(a.until)), ` · avant ${clock(a.until)}`] : 'depuis ' + clock(a.at)),
+      a.kind === 'switch' && h('div', { class: 'muted small' }, `Coupe le ${a.running}, lance le ${a.then} : toutes les DD passeront dans la zone, avec au moins 5 minutes pour couper.`),
+      a.kind === 'full' && h('div', { class: 'muted small' }, `${a.gauge[0].toUpperCase()}${a.gauge.slice(1)} ${fullWord(a.gauge)} pour toutes les DD de l’enclos.`),
+      later.length ? h('ul', { class: 'breed-later' }, later.slice(0, 4).map((g) => gestureLine(g, now))) : null)
     : h('div', { class: 'breed-next idle' }, h('div', { class: 'breed-kicker' }, 'Prochain geste'), h('div', { class: 'breed-title soft' }, p.hint));
   const objects = h('div', { class: 'paddock-objects' }, p.objects.map((o) => h('div', { class: 'paddock-object' + (o.active ? ' on' : '') + (o.points ? '' : ' empty') },
     h('div', { class: 'object-name' }, h('span', { class: 'dot' + (o.active ? ' on' : '') }), o.name),
     h('div', { class: 'object-points' }, fmt(o.points)),
-    h('div', { class: 'muted small' }, o.active ? `${o.rate} par tick` : o.points ? 'à l’arrêt' : 'vide'))));
+    h('div', { class: 'muted small' }, o.active ? (o.points ? `${o.rate} par tick` : 'vide') : o.points ? 'à l’arrêt' : 'vide'),
+    o.active && o.empty_at && o.empty_at > now ? h('div', { class: 'small object-eta' }, 'vide dans ', countdown(o.empty_at)) : null)));
   return h('section', { class: 'panel paddock', 'aria-label': `Enclos ${p.id}` },
     h('div', { class: 'panel-head' }, h('h2', {}, `Enclos ${p.id}`),
       h('span', { class: 'muted small' }, `${p.mounts} DD · vu ${ago(p.seen_at, now)}`)),
@@ -1344,7 +1355,7 @@ function paddockCard(p, now) {
       next,
       h('div', { class: 'paddock-state' },
         p.mounts ? serenityScale(p) : null,
-        p.mounts ? h('div', { class: 'gauges' }, Object.entries(p.gauges).map(([name, range]) => gaugeRow(name, range))) : null)),
+        p.mounts ? h('div', { class: 'gauges' }, Object.entries(p.gauges).map(([name, gauge]) => gaugeRow(name, gauge, now))) : null)),
     objects);
 }
 

@@ -686,7 +686,7 @@ table.mage-steps td.act { width: 88px; }
 .serenity-herd.in { background: var(--gain); }
 .serenity-ticks { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; }
 .gauges { display: flex; flex-direction: column; gap: 8px; }
-.gauge-row { display: grid; grid-template-columns: 86px 1fr 104px; align-items: center; gap: 12px; }
+.gauge-row { display: grid; grid-template-columns: 86px 1fr 170px; align-items: center; gap: 12px; }
 .gauge-name { color: var(--muted); font-size: 13px; text-transform: capitalize; }
 .gauge-bar { position: relative; height: 6px; border-radius: 3px; background: var(--row); overflow: hidden; }
 .gauge-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--soft); }
@@ -701,3 +701,7 @@ table.mage-steps td.act { width: 88px; }
 .object-points { font-size: 17px; font-weight: 600; }
 .kpis.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 900px) { .kpis.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .paddock-objects { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.gauge-eta { display: block; font-size: 11px; color: var(--muted); }
+.breed-later { list-style: none; margin: 8px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line-strong); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.breed-later li { display: flex; justify-content: space-between; gap: 12px; }
+.object-eta { color: var(--warn-soft); }

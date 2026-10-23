@@ -224,13 +224,18 @@ class Breeding:
         ).fetchone()
         if key != self.key:
             self.key = key
-            self.advice = [a for a in (breeding.advise(p, self.tiers) for p in breeding.load(self.conn)) if a is not None]
+            self.advice = [a for p in breeding.load(self.conn) for a in breeding.gestures(p, self.tiers)]
         out = []
         for advice in self.advice:
             gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
-            if advice.at <= now <= max(advice.until, advice.at + 60) and now - self.fired.get(gesture, -1e18) >= BREEDING_AGAIN_S:
-                self.fired[gesture] = self.waiting[gesture] = now
-                out.append(advice)
+            if not advice.at <= now <= max(advice.until, advice.at + 60):
+                continue
+            # Objet vide, jauges pleines : une fois, jusqu'à ce qu'on y touche. Sérénité : au plus une fois par heure.
+            lasting = advice.kind in ("empty", "full")
+            if (gesture in self.fired) if lasting else now - self.fired.get(gesture, -1e18) < BREEDING_AGAIN_S:
+                continue
+            self.fired[gesture] = self.waiting[gesture] = now
+            out.append(advice)
         return out
 
     def done(self, now: float) -> list[tuple]:
@@ -251,16 +256,24 @@ class Breeding:
                 seen = max(seen, ts)
             if seen < at:
                 continue  # rien de nouveau sur cet enclos depuis l'annonce
-            if running not in active and (then is None or then in active):
+            refilled = kind == "empty" and p.seen_at >= at and p.objects[running] > 0
+            if (running not in active and (then is None or then in active)) or refilled:
                 out.append(gesture)
                 del self.waiting[gesture]
+                if kind in ("empty", "full"):
+                    self.fired.pop(gesture, None)  # réglé : pourra être annoncé de nouveau plus tard
         return out
 
 
 def breeding_text(advice: breeding.Advice) -> str:
     """Le détail d'un bandeau d'élevage : la zone visée, et ce qu'il faut couper."""
-    low, high = (kamas(abs(v)) if v >= 0 else "−" + kamas(abs(v)) for v in advice.zone)
     who = f"{advice.mounts} DD"
+    if advice.kind == "full":
+        full = f"{advice.gauge.capitalize()} {breeding.FULL[advice.gauge]}"
+        return f"{full} pour les {who}" if advice.mounts > 1 else full
+    if advice.kind == "empty":
+        return f"Recharge-le ou coupe-le · {who}"
+    low, high = (kamas(abs(v)) if v >= 0 else "−" + kamas(abs(v)) for v in advice.zone)
     if advice.kind == "switch":
         return f"{breeding.OBJECT_NAMES[advice.running].capitalize()} → {breeding.OBJECT_NAMES[advice.then]} · {who} vers {low} à {high}"
     return f"{who} entre {low} et {high}"

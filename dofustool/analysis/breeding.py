@@ -28,8 +28,11 @@ from pathlib import Path
 
 SLAPPER, PATTER, BLASTER, TROUGH, LOVER, FEEDER = range(6)
 OBJECT_NAMES = ("baffeur", "caresseur", "foudroyeur", "abreuvoir", "dragofesse", "mangeoire")
+THE = ("le baffeur", "le caresseur", "le foudroyeur", "l’abreuvoir", "la dragofesse", "la mangeoire")
+TO_THE = ("au baffeur", "au caresseur", "au foudroyeur", "à l’abreuvoir", "à la dragofesse", "à la mangeoire")
 SERENITY, LOVE, MATURITY, STAMINA = range(4)  # colonnes de l'état d'une monture
 GAUGE_NAMES = {LOVE: "amour", MATURITY: "maturité", STAMINA: "endurance"}
+FULL = {"amour": "plein", "maturité": "pleine", "endurance": "pleine"}  # l'amour est masculin
 GAUGE_OF = {BLASTER: STAMINA, TROUGH: MATURITY, LOVER: LOVE}
 ZONES = {STAMINA: (-5000, -1), MATURITY: (-2000, 2000), LOVE: (1, 5000)}
 LIMIT, GAUGE_MAX = 5000, 20_000
@@ -135,19 +138,28 @@ class Advice:
     """Le prochain geste pour la sérénité d'un enclos."""
 
     paddock_id: int
-    kind: str  # « switch » : passer à l'objet inverse ; « stop » : couper l'objet, tout le monde est dans la zone
+    # « switch » : passer à l'objet inverse ; « stop » : couper l'objet, tout le monde est dans la zone ;
+    # « full » : toutes les montures ont la jauge de cet objet pleine ; « empty » : l'objet est vide.
+    kind: str
     at: float  # quand le faire
     until: float  # au plus tard : toutes les montures restent dans la zone jusque-là (pour une bascule : la marge)
-    zone: tuple[int, int]
-    running: int  # objet en marche à couper
+    zone: tuple[int, int] | None
+    running: int  # objet en marche à couper (ou vide)
     then: int | None  # objet à lancer ensuite (bascule)
     mounts: int
 
     @property
     def title(self) -> str:
         if self.kind == "switch":
-            return f"Passe au {OBJECT_NAMES[self.then]}"
-        return f"Coupe le {OBJECT_NAMES[self.running]}"
+            return f"Passe {TO_THE[self.then]}"
+        if self.kind == "empty":
+            return f"{THE[self.running].capitalize()} est vide"
+        return f"Coupe {THE[self.running]}"
+
+    @property
+    def gauge(self) -> str | None:
+        """Jauge remplie par l'objet (pour « full »)."""
+        return GAUGE_NAMES.get(GAUGE_OF.get(self.running, -1))
 
 
 def _serenity_direction(active: set[int]) -> int:
@@ -193,6 +205,57 @@ def advise(p: Paddock, tiers=TIERS, margin_s: float = MARGIN_S, horizon_s: float
         if state.objects[running] <= 0 and running in state.active:
             return None  # l'objet se vide avant : à recharger (annoncé à part)
     return None
+
+
+EVENT_KEEP_S = 6 * 3600.0  # un objet vide ou une jauge pleine reste à signaler tant qu'on n'y a pas touché, jusqu'à 6 h
+
+
+def forecast(p: Paddock, tiers=TIERS, horizon_s: float = HORIZON_S) -> tuple[dict[int, float], dict[int, float]]:
+    """(vide, plein) : quand chaque objet en marche sera vide, et quand toutes les montures auront la jauge de chaque objet
+    en marche pleine. Ce qui l'est déjà à la dernière vue compte à cette heure-là. Clics compris."""
+    state = p.copy()
+    toggles = sorted(state.toggles)
+    now = state.seen_at
+    empty: dict[int, float] = {}
+    full: dict[int, float] = {}
+
+    def check() -> None:
+        for index in state.active:
+            if state.objects[index] <= 0:
+                empty.setdefault(index, now)
+            gauge = GAUGE_OF.get(index)
+            if gauge is not None and state.mounts and all(m[gauge] >= GAUGE_MAX for m in state.mounts):
+                full.setdefault(index, now)
+
+    check()
+    for _ in range(int(horizon_s / TICK_S)):
+        while toggles and toggles[0][0] <= now:
+            _, index, on = toggles.pop(0)
+            (state.active.add if on else state.active.discard)(index)
+        before = list(state.objects)
+        step(state, tiers)
+        now += TICK_S
+        check()
+        if state.objects == before and not toggles:
+            break  # plus rien ne bouge : rien d'autre n'arrivera
+    return empty, full
+
+
+def gestures(p: Paddock, tiers=TIERS) -> list[Advice]:
+    """Tous les gestes à venir d'un enclos, dans l'ordre : sérénité, jauges pleines, objets vides. Un objet qui ne dépense
+    plus rien parce que toutes les jauges qu'il remplit sont pleines n'est pas annoncé vide."""
+    out = []
+    serenity = advise(p, tiers)
+    if serenity is not None:
+        out.append(serenity)
+    empty, full = forecast(p, tiers)
+    mounts = len(p.mounts)
+    for index, at in full.items():
+        out.append(Advice(p.paddock_id, "full", at, at + EVENT_KEEP_S, None, index, None, mounts))
+    for index, at in empty.items():
+        if index not in full or at < full[index]:
+            out.append(Advice(p.paddock_id, "empty", at, at + EVENT_KEEP_S, None, index, None, mounts))
+    return sorted(out, key=lambda a: a.at)
 
 
 def load(conn: sqlite3.Connection) -> list[Paddock]:
@@ -258,7 +321,6 @@ def summary(conn: sqlite3.Connection, now: float, tiers=TIERS) -> dict:
     """Ce que montre la page Élevage : l'étable en chiffres, et chaque enclos maintenant, avec son prochain geste."""
     paddocks = []
     for p in load(conn):
-        advice = advise(p, tiers)
         current = project(p, now, tiers)
         zone = target_zone(current.mounts)
         mounts = current.mounts
@@ -266,15 +328,20 @@ def summary(conn: sqlite3.Connection, now: float, tiers=TIERS) -> dict:
         def spread(column: int) -> list[int] | None:
             return [min(m[column] for m in mounts), max(m[column] for m in mounts)] if mounts else None
 
+        empty, full = forecast(p, tiers)
+        filler = {g: i for i, g in GAUGE_OF.items()}
         paddocks.append({
             "id": p.paddock_id, "seen_at": p.seen_at, "mounts": len(mounts), "zone": list(zone) if zone else None,
-            "serenity": spread(SERENITY), "gauges": {GAUGE_NAMES[g]: spread(g) for g in (LOVE, MATURITY, STAMINA)},
+            "serenity": spread(SERENITY),
+            "gauges": {GAUGE_NAMES[g]: {"range": spread(g), "full_at": full.get(filler[g]) if filler[g] in current.active else None}
+                       for g in (LOVE, MATURITY, STAMINA)},
             "objects": [{"index": i, "name": OBJECT_NAMES[i], "points": current.objects[i], "active": i in current.active,
-                         "rate": rate(current.objects[i], tiers)} for i in range(len(OBJECT_NAMES))],
-            "advice": None if advice is None or advice.until < now else {
-                "kind": advice.kind, "title": advice.title, "at": advice.at, "until": advice.until,
-                "running": OBJECT_NAMES[advice.running], "then": OBJECT_NAMES[advice.then] if advice.then is not None else None,
-            },
+                         "rate": rate(current.objects[i], tiers), "empty_at": empty.get(i) if i in current.active and i not in full else None}
+                        for i in range(len(OBJECT_NAMES))],
+            "gestures": [{
+                "kind": g.kind, "title": g.title, "at": g.at, "until": g.until, "gauge": g.gauge,
+                "running": OBJECT_NAMES[g.running], "then": OBJECT_NAMES[g.then] if g.then is not None else None,
+            } for g in gestures(p, tiers) if g.until >= now],
             "hint": hint(current, zone),
         })  # fmt: skip
     return {"now": now, "stable": stable_counts(conn), "paddocks": paddocks}
