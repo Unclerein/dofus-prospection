@@ -179,3 +179,17 @@ def test_passes_keep_the_game_version_and_the_rules_of_their_time():
     assert [json.loads(e) for _, e in history] == [[[118, 30, 50], [125, 100, 200]], [[118, 30, 55], [125, 100, 200]]]
     base_effects.store(conn, 10, [(118, 30, 55), (125, 100, 200)])
     assert conn.execute("SELECT COUNT(*) FROM item_effects_history WHERE item_id = 10").fetchone()[0] == 2  # inchangée : rien de plus
+
+
+def test_item_fill_and_item_weight_are_judged_apart():
+    from types import SimpleNamespace
+
+    def tries(n, failed, weight, fill):
+        return [SimpleNamespace(line_kind="bas", line_max=100, rune_value=5, line_before=40, line_after=45, item_level=200,
+                                item_weight_max=weight, item_weight_before=fill * weight, outcome="ec" if i < failed else "sn")
+                for i in range(n)]
+
+    full_fails = tries(400, 200, 700, 0.95) + tries(400, 50, 700, 0.5)
+    assert collecte.judge_item_weight(collecte.Context(full_fails, [], []))[0] == "certain"
+    same = tries(400, 100, 700, 0.8) + tries(400, 100, 300, 0.8)  # même remplissage, poids max différent : rien ne change
+    assert collecte.judge_heavy_item(collecte.Context(same, [], []))[0] == "refute"
