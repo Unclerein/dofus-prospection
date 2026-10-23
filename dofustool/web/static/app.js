@@ -2955,6 +2955,11 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 22, date: '23 octobre 2026', title: 'Collecte : seuil du 1 % et poids de l’objet revus', hash: '#/forge/collecte', go: 'Ouvrir la Collecte', points: [
+    ['Seuil du 1 % :', 'ce qui compte, c’est le poids over/exo que la rune ferait atteindre à l’objet (franchir 25 ou 30), pas celui qu’il porte déjà. Mesuré avec des petites runes, pour ne pas confondre avec la taille de la rune ; la mission devient « Franchir le seuil ».'],
+    ['Remplissage :', 'la règle compare maintenant à ligne et rune égales : certaine, environ 49 % d’échecs sur un objet rempli à 90 % ou plus contre 14 % sous 76 %. C’est pour ça qu’on retire le PA avant une exo lourde.'],
+    ['Objet lourd :', 'nouvelle règle. À remplissage, ligne et rune égaux, un objet de poids max 600 ou plus ne passe qu’à peine moins bien (environ −1 point) : la gêne vient de son remplissage et de ses grosses lignes.'],
+  ] },
   { id: 21, date: '22 octobre 2026', title: 'Forgemagie : ancien prix, lignes négatives, missions prioritaires', hash: '#/forge', go: 'Ouvrir la forgemagie', points: [
     ['Ancien prix :', 'quand un vendeur change son prix, l’ancien s’affiche sous le nouveau (« ↓ avant 3 690 000 »), sur la page d’un objet et dans le classement. Le jeu donne un nouveau numéro à l’annonce : on la retrouve par ses jets identiques.'],
     ['Vue depuis :', 'la date de première vue de chaque annonce ne repart plus de zéro à chaque changement de prix ni à la maintenance du mardi, et une annonce remise en vente ne compte plus comme vendue.'],
