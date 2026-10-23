@@ -30,6 +30,8 @@ class Config:
     sale_notifications: bool = True  # bandeau par-dessus le jeu quand un objet se vend
     huppermage_rune: bool = False  # en combat, pastille de l'élément de ma dernière rune (Huppermage)
     fm_banners: bool = True  # forgemagie : mission du moment à l'atelier, et succès du groupe, par-dessus le jeu
+    breeding_banners: bool = True  # élevage : bandeau quand il faut basculer ou couper un objet d'enclos
+    breeding_sound: bool = True  # élevage : petit son avec ce bandeau
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -69,6 +71,8 @@ def _from_raw(raw: dict) -> Config:
         sale_notifications=bool(launcher.get("sale_notifications", defaults.sale_notifications)),
         huppermage_rune=bool(launcher.get("huppermage_rune", defaults.huppermage_rune)),
         fm_banners=bool(launcher.get("fm_banners", defaults.fm_banners)),
+        breeding_banners=bool(launcher.get("breeding_banners", defaults.breeding_banners)),
+        breeding_sound=bool(launcher.get("breeding_sound", defaults.breeding_sound)),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -151,6 +155,8 @@ def from_values(values: dict) -> Config:
         sale_notifications=bool(values.get("sale_notifications", True)),
         huppermage_rune=bool(values.get("huppermage_rune", False)),
         fm_banners=bool(values.get("fm_banners", True)),
+        breeding_banners=bool(values.get("breeding_banners", True)),
+        breeding_sound=bool(values.get("breeding_sound", True)),
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -226,6 +232,9 @@ sale_notifications = {"true" if cfg.sale_notifications else "false"}
 huppermage_rune = {"true" if cfg.huppermage_rune else "false"}
 # Forgemagie : mission du moment en ouvrant l'atelier, et succès du groupe, par-dessus le jeu.
 fm_banners = {"true" if cfg.fm_banners else "false"}
+# Élevage : bandeau par-dessus le jeu quand il faut basculer ou couper un objet d'enclos, et un petit son avec.
+breeding_banners = {"true" if cfg.breeding_banners else "false"}
+breeding_sound = {"true" if cfg.breeding_sound else "false"}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

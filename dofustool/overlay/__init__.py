@@ -10,6 +10,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from ..analysis import breeding
 from ..analysis.collecte import fits, pick
 
 SHOWN_S = 3.0  # durée d'un bandeau après la dernière vente qui l'a touché
@@ -42,6 +43,8 @@ class Banner:
     badge: str | None = None  # None : la quantité vendue ; "" : pas de pastille
     star: bool = False  # une étoile à la place de l'image
     shown_s: float = 0.0  # durée propre, sinon celle du tableau
+    kind: str = ""  # « élevage » : couleur et cadran à part
+    deadline: float = 0.0  # heure limite : la pastille décompte le temps qu'il reste
 
 
 class Feed:
@@ -84,10 +87,12 @@ class Board:
         del self.banners[: -self.limit]  # trop de bandeaux : les plus anciens cèdent la place
         return banner
 
-    def note(self, label: str, title: str, text: str, now: float, item_id: int = 0, badge: str = "", star: bool = False, shown_s: float = 6.0) -> Banner:
-        """Un bandeau d'annonce (mission, succès) : il ne se regroupe avec aucun autre."""
+    def note(self, label: str, title: str, text: str, now: float, item_id: int = 0, badge: str = "", star: bool = False, shown_s: float = 6.0,
+             kind: str = "", deadline: float = 0.0) -> Banner:  # fmt: skip
+        """Un bandeau d'annonce (mission, succès, élevage) : il ne se regroupe avec aucun autre."""
         self.expire(now)
-        banner = Banner(item_id, 0, 0, now + shown_s, born=now, label=label, title=title, text=text, badge=badge, star=star, shown_s=shown_s)
+        banner = Banner(item_id, 0, 0, now + shown_s, born=now, label=label, title=title, text=text, badge=badge, star=star, shown_s=shown_s,
+                        kind=kind, deadline=deadline)  # fmt: skip
         self.banners.append(banner)
         del self.banners[: -self.limit]
         return banner
@@ -183,6 +188,47 @@ class Forge:
             if now - at <= SUCCESS_FRESH_S and mission in self.titles:
                 out.append((character or pseudo, *self.titles[mission]))
         return out
+
+
+BREEDING_SHOWN_S = 300.0  # un bandeau d'élevage reste 5 minutes : on peut être occupé quand il tombe
+BREEDING_AGAIN_S = 3600.0  # le même geste sur le même enclos n'est pas rappelé avant une heure
+
+
+class Breeding:
+    """Ce qu'il faut annoncer en élevage : le prochain geste de sérénité de chaque enclos, à son heure.
+
+    Le calcul est refait seulement quand la base a vu l'enclos ou un clic sur ses objets ; chaque geste
+    n'est annoncé qu'une fois. Un geste dont l'heure limite est passée n'est plus annoncé."""
+
+    def __init__(self, conn: sqlite3.Connection, tiers=breeding.TIERS) -> None:
+        self.conn, self.tiers = conn, tiers
+        self.key: tuple | None = None
+        self.advice: list[breeding.Advice] = []
+        self.fired: dict[tuple, float] = {}
+
+    def due(self, now: float) -> list[breeding.Advice]:
+        key = self.conn.execute(
+            "SELECT (SELECT MAX(seen_at) FROM paddocks), (SELECT COUNT(*) FROM paddock_toggles), (SELECT MAX(ts) FROM paddock_toggles)"
+        ).fetchone()
+        if key != self.key:
+            self.key = key
+            self.advice = [a for a in (breeding.advise(p, self.tiers) for p in breeding.load(self.conn)) if a is not None]
+        out = []
+        for advice in self.advice:
+            gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
+            if advice.at <= now <= max(advice.until, advice.at + 60) and now - self.fired.get(gesture, -1e18) >= BREEDING_AGAIN_S:
+                self.fired[gesture] = now
+                out.append(advice)
+        return out
+
+
+def breeding_text(advice: breeding.Advice) -> str:
+    """Le détail d'un bandeau d'élevage : la zone visée, et ce qu'il faut couper."""
+    low, high = (kamas(abs(v)) if v >= 0 else "−" + kamas(abs(v)) for v in advice.zone)
+    who = f"{advice.mounts} DD"
+    if advice.kind == "switch":
+        return f"{breeding.OBJECT_NAMES[advice.running].capitalize()} → {breeding.OBJECT_NAMES[advice.then]} · {who} vers {low} à {high}"
+    return f"{who} entre {low} et {high}"
 
 
 def _read(path) -> dict:

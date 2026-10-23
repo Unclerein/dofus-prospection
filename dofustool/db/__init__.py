@@ -208,6 +208,14 @@ CREATE TABLE IF NOT EXISTS mounts (
     sterile   INTEGER NOT NULL,
     seen_at   REAL NOT NULL
 ) WITHOUT ROWID;
+-- Le joueur lance (active 1) ou coupe (0) un objet de l'enclos : rejoué après la dernière vue de l'enclos.
+CREATE TABLE IF NOT EXISTS paddock_toggles (
+    paddock_id INTEGER NOT NULL,
+    ts         REAL NOT NULL,
+    object     INTEGER NOT NULL,
+    active     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS paddock_toggles_at ON paddock_toggles (paddock_id, ts);
 -- Un enclos à sa dernière vue : points de ses 6 objets d'élevage (JSON) et objets en marche.
 CREATE TABLE IF NOT EXISTS paddocks (
     paddock_id INTEGER PRIMARY KEY,
@@ -754,6 +762,13 @@ def save_paddock(conn: sqlite3.Connection, paddock_id: int, paddock, at: float) 
             (paddock_id, json.dumps(list(paddock.objects)), json.dumps(sorted(set(paddock.active))), at),
         )
         _save_mounts(conn, paddock.mounts, paddock_id, at)
+
+
+def save_toggle(conn: sqlite3.Connection, paddock_id: int, ts: float, index: int, active: bool) -> None:
+    """Le joueur lance ou coupe un objet de l'enclos ouvert. Les clics d'avant la dernière vue ne servent plus."""
+    with conn:
+        conn.execute("DELETE FROM paddock_toggles WHERE ts < ?", (ts - 7 * 86400,))
+        conn.execute("INSERT INTO paddock_toggles VALUES (?, ?, ?, ?)", (paddock_id, ts, index, int(active)))
 
 
 def save_hdv_listings(conn: sqlite3.Connection, hdv, captured_at: float) -> None:

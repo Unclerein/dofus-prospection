@@ -699,6 +699,20 @@ class Api:
         finally:
             conn.close()
 
+    # --- élevage ---------------------------------------------------------------
+
+    def breeding(self) -> dict:
+        """L'étable en chiffres et chaque enclos maintenant : objets, sérénité, jauges, prochain geste."""
+        from ..analysis import breeding
+
+        if not hasattr(self, "_paddock_tiers"):
+            self._paddock_tiers = breeding.load_tiers()
+        conn = self.connect()
+        try:
+            return breeding.summary(conn, time.time(), self._paddock_tiers)
+        finally:
+            conn.close()
+
     # --- métiers -------------------------------------------------------------
 
     def jobs(self) -> dict:

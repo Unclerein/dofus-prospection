@@ -289,6 +289,7 @@ const NAV = [
   ['stock', 'Mon stock', 'M2.5 6.5L9 3l6.5 3.5v6L9 16l-6.5-3.5zM2.5 6.5L9 10l6.5-3.5M9 10v6', 'Mon compte'],
   ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1', 'Mon compte'],
   ['workshop', 'Atelier', 'M3 4.500h12M3 9h12M3 13.500h7M13 12l1.500 1.500 3-3', 'Mon compte'],
+  ['breeding', 'Élevage', 'M3 13a6 6 0 0112 0M9 13l2.600-3.400M2.500 15.500h13', 'Mon compte'],
   ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500', 'Outils'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300', 'Outils'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5', 'pied'],
@@ -338,7 +339,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { today: pageToday, workshop: pageWorkshop, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
+  const pages = { today: pageToday, workshop: pageWorkshop, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, breeding: pageBreeding, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -1270,6 +1271,100 @@ const xpToLevel = (xp) => Math.max(1, Math.min(200, Math.floor((Math.sqrt(1 + 0.
 
 function loadJobState() {
   try { return JSON.parse(localStorage.getItem('dofustool.jobs') || '{}'); } catch (error) { return {}; }
+}
+
+// --- élevage ------------------------------------------------------------------
+
+const SERENITY_LIMIT = 5000;
+const GAUGE_MAX = 20000;
+const signedNumber = (n) => (n < 0 ? '−' + fmt(-n) : fmt(n));
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+/** Temps restant jusqu'à une heure, en clair ; tenu à jour chaque seconde par tickCountdowns. */
+function untilText(ts) {
+  const s = Math.max(0, Math.round(ts - Date.now() / 1000));
+  if (s >= 3600) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
+  if (s >= 60) return `${Math.floor(s / 60)} min`;
+  return `${s} s`;
+}
+const countdown = (ts) => h('span', { 'data-until': ts }, untilText(ts));
+function tickCountdowns() {
+  for (const node of document.querySelectorAll('[data-until]')) node.textContent = untilText(Number(node.dataset.until));
+}
+setInterval(tickCountdowns, 1000);
+
+/** Échelle de sérénité de −5 000 à 5 000 : la zone visée, et où sont les DD de l'enclos. */
+function serenityScale(p) {
+  const at = (v) => `${((v + SERENITY_LIMIT) / (2 * SERENITY_LIMIT)) * 100}%`;
+  const width = (a, b) => `${((b - a) / (2 * SERENITY_LIMIT)) * 100}%`;
+  const [low, high] = p.serenity;
+  const inZone = p.zone && low >= p.zone[0] && high <= p.zone[1];
+  return h('div', { class: 'serenity' },
+    h('div', { class: 'serenity-head' },
+      h('span', { class: 'muted small' }, 'Sérénité'),
+      h('strong', { class: inZone ? 'gain' : '' }, low === high ? signedNumber(low) : `${signedNumber(low)} à ${signedNumber(high)}`),
+      p.zone && h('span', { class: 'muted small' }, `zone visée ${signedNumber(p.zone[0])} à ${signedNumber(p.zone[1])}`)),
+    h('div', { class: 'serenity-track', role: 'img', 'aria-label': `Sérénité des DD de ${signedNumber(low)} à ${signedNumber(high)}` },
+      h('span', { class: 'serenity-mid' }),
+      p.zone && h('span', { class: 'serenity-zone', style: `left: ${at(p.zone[0])}; width: ${width(p.zone[0], p.zone[1])}` }),
+      h('span', { class: 'serenity-herd' + (inZone ? ' in' : ''), style: `left: ${at(low)}; width: max(10px, ${width(low, high)})` })),
+    h('div', { class: 'serenity-ticks muted' }, h('span', {}, '−5 000'), h('span', {}, '0'), h('span', {}, '5 000')));
+}
+
+function gaugeRow(name, range) {
+  const [low, high] = range;
+  const full = low >= GAUGE_MAX;
+  return h('div', { class: 'gauge-row' },
+    h('span', { class: 'gauge-name' }, name),
+    h('span', { class: 'gauge-bar' }, h('span', { class: 'gauge-fill' + (full ? ' full' : ''), style: `width: ${(low / GAUGE_MAX) * 100}%` }),
+      high > low && h('span', { class: 'gauge-spread', style: `left: ${(low / GAUGE_MAX) * 100}%; width: ${((high - low) / GAUGE_MAX) * 100}%` })),
+    h('span', { class: 'gauge-value' + (full ? ' gain' : '') }, full ? 'pleine' : low === high ? fmt(low) : `${fmt(low)} à ${fmt(high)}`));
+}
+
+function paddockCard(p, now) {
+  const a = p.advice;
+  const waiting = a && a.at > now;
+  const next = a
+    ? h('div', { class: 'breed-next' + (waiting ? '' : ' due') },
+      h('div', { class: 'breed-kicker' }, waiting ? 'Prochain geste' : 'À faire maintenant'),
+      h('div', { class: 'breed-title' }, a.title),
+      h('div', { class: 'breed-when' }, waiting
+        ? ['dans ', h('strong', {}, countdown(a.at)), ` · à ${clock(a.at)}`]
+        : ['encore ', h('strong', {}, countdown(a.until)), ` · avant ${clock(a.until)}`]),
+      a.kind === 'switch' && h('div', { class: 'muted small' }, `Coupe le ${a.running}, lance le ${a.then} : toutes les DD passeront dans la zone, avec au moins 5 minutes pour couper.`))
+    : h('div', { class: 'breed-next idle' }, h('div', { class: 'breed-kicker' }, 'Prochain geste'), h('div', { class: 'breed-title soft' }, p.hint));
+  const objects = h('div', { class: 'paddock-objects' }, p.objects.map((o) => h('div', { class: 'paddock-object' + (o.active ? ' on' : '') + (o.points ? '' : ' empty') },
+    h('div', { class: 'object-name' }, h('span', { class: 'dot' + (o.active ? ' on' : '') }), o.name),
+    h('div', { class: 'object-points' }, fmt(o.points)),
+    h('div', { class: 'muted small' }, o.active ? `${o.rate} par tick` : o.points ? 'à l’arrêt' : 'vide'))));
+  return h('section', { class: 'panel paddock', 'aria-label': `Enclos ${p.id}` },
+    h('div', { class: 'panel-head' }, h('h2', {}, `Enclos ${p.id}`),
+      h('span', { class: 'muted small' }, `${p.mounts} DD · vu ${ago(p.seen_at, now)}`)),
+    h('div', { class: 'paddock-body' },
+      next,
+      h('div', { class: 'paddock-state' },
+        p.mounts ? serenityScale(p) : null,
+        p.mounts ? h('div', { class: 'gauges' }, Object.entries(p.gauges).map(([name, range]) => gaugeRow(name, range))) : null)),
+    objects);
+}
+
+let breedingTimer = null;
+async function pageBreeding() {
+  const d = await api('/api/breeding');
+  clearTimeout(breedingTimer);
+  breedingTimer = setTimeout(() => { if (route().page === 'breeding') refresh(); }, 30000);  // l'enclos avance toutes les 10 s
+  const head = h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Élevage'), h('div', { class: 'lead' }, 'Tes enclos maintenant, et le prochain geste au bon moment')));
+  const st = d.stable;
+  const kpis = h('section', { class: 'kpis four', 'aria-label': 'Étable' },
+    kpi('Dragodindes', fmt(st.count), `${st.male} mâles · ${st.female} femelles`),
+    kpi('Fécondes', fmt(st.fecund), 'prêtes à s’accoupler', 'gain'),
+    kpi('Fertiles', fmt(st.fertile), 'jauges à remplir'),
+    kpi('Stériles', fmt(st.sterile), 'à cloner ou extraire'));
+  if (!d.paddocks.length) {
+    return [head, kpis, h('div', { class: 'panel empty' }, 'Ouvre l’interface d’élevage en jeu (touche D), capture lancée : tes enclos apparaîtront ici.')];
+  }
+  const note = h('div', { class: 'note small' }, 'Les valeurs sont prévues depuis ta dernière ouverture de l’enclos (un tick toutes les 10 s). Les objets que tu lances ou coupes en jeu sont pris en compte ; rouvre l’enclos de temps en temps pour recaler.');
+  return [head, kpis, ...d.paddocks.map((p) => paddockCard(p, d.now)), note];
 }
 
 async function pageJobs() {
@@ -2802,7 +2897,9 @@ async function pageConfig() {
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
         h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'),
-        h('label', { class: 'check' }, h('input', { id: 'c-fm', type: 'checkbox', checked: d.fm_banners !== false, onchange: (e) => { d.fm_banners = e.target.checked; sync(); } }), 'Forgemagie : rappeler la mission du moment en ouvrant l\u2019atelier, et annoncer les succès du groupe'))));
+        h('label', { class: 'check' }, h('input', { id: 'c-fm', type: 'checkbox', checked: d.fm_banners !== false, onchange: (e) => { d.fm_banners = e.target.checked; sync(); } }), 'Forgemagie : rappeler la mission du moment en ouvrant l\u2019atelier, et annoncer les succès du groupe'),
+        h('label', { class: 'check' }, h('input', { id: 'c-breed', type: 'checkbox', checked: d.breeding_banners !== false, onchange: (e) => { d.breeding_banners = e.target.checked; sync(); } }), 'Élevage : prévenir quand il faut basculer ou couper un objet d\u2019enclos'),
+        h('label', { class: 'check' }, h('input', { id: 'c-breed-sound', type: 'checkbox', checked: d.breeding_sound !== false, onchange: (e) => { d.breeding_sound = e.target.checked; sync(); } }), 'Élevage : avec un petit son'))));
 
   return [
     h('header', { class: 'head' }, h('div', {}, h('h1', {}, 'Config'), h('div', { class: 'lead' }, data.path)), h('div', { class: 'filters' }, cancel, save)),
@@ -2878,6 +2975,7 @@ const DESTINATIONS = [
   ['#/sales', 'Mes ventes', 'lots hdv vendre sous-encheri'],
   ['#/workshop', 'Atelier', 'liste de courses ingredients objectifs stuff almanax'],
   ['#/jobs', 'Métiers', 'xp niveau monter paysan'],
+  ['#/breeding', 'Élevage', 'dragodinde enclos serenite amour endurance maturite baffeur caresseur'],
   ['#/forge', 'Forgemagie › Par objet', 'fm exo over jets criteres annonces'],
   ['#/forge/ranking', 'Forgemagie › Classement général', 'fm exo over metier rentable'],
   ['#/forge/journal', 'Forgemagie › Mon journal', 'fm runes passages cout marge puits'],

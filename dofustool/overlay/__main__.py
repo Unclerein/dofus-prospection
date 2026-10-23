@@ -8,7 +8,7 @@ active : pendant qu'on regarde autre chose, les bandeaux attendent son retour. D
 que ce que Windows dit de sa fenêtre (titre, position, nom du programme), comme le fait le
 gestionnaire des tâches ; jamais sa mémoire.
 
-Usage : python -m dofustool.overlay [--demo] [--anywhere] [--probe]
+Usage : python -m dofustool.overlay [--demo] [--demo-breeding] [--anywhere] [--probe]
 """
 import argparse
 import ctypes
@@ -22,11 +22,14 @@ from pathlib import Path
 
 from .. import db
 from ..fight import live
-from . import Board, Feed, Forge, Sale, is_game, kamas, place
+from . import BREEDING_SHOWN_S, Board, Breeding, Feed, Forge, Sale, breeding_text, is_game, kamas, place
 from . import render as draw
+from . import sound
 
 POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
 FORGE_POLL_S = 3.0  # atelier de forgemagie et succès du groupe
+BREEDING_POLL_S = 5.0  # enclos : le prochain geste de sérénité
+SOUND_PATH = db.MARKET_PATH.parent / "sounds" / "chime.wav"
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
 STALE_FIGHT_S = 180.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
@@ -218,10 +221,14 @@ class Items:
 
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
-                 rune: bool = False, demo_rune: str | None = None, forge: Forge | None = None, me: str | None = None) -> None:  # fmt: skip
+                 rune: bool = False, demo_rune: str | None = None, forge: Forge | None = None, me: str | None = None,
+                 breeding: Breeding | None = None, chime: bool = False) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
         self.forge, self.me = forge, me  # forgemagie : mission du moment et succès du groupe
         self.forge_checked = 0.0
+        self.breeding, self.chime = breeding, chime  # élevage : le prochain geste de chaque enclos, et un petit son
+        self.breeding_checked = 0.0
+        self.breeding_shown = BREEDING_SHOWN_S
         self.rune_icon_item = items.rune_item() if forge else 0
         self.is_demo = demo is not None
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
@@ -259,6 +266,13 @@ class Window:
                     self.announce(now)
                 except sqlite3.Error:
                     pass  # base occupée : au prochain passage
+            if self.breeding is not None and now - self.breeding_checked >= BREEDING_POLL_S:
+                self.breeding_checked = now
+                try:
+                    for advice in self.breeding.due(now):
+                        self.breed(advice, now)
+                except sqlite3.Error:
+                    pass  # base occupée, ou d'avant l'élevage : au prochain passage
             if self.show_rune and not self.is_demo:
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
@@ -272,7 +286,7 @@ class Window:
         else:
             self.board.expire(now)
             self.paint(now)
-        if self.is_demo and not self.demo and not self.board.banners:
+        if self.is_demo and not self.demo and not self.board.banners and not getattr(self.breeding, "script", None):
             self.root.destroy()  # démonstration terminée
             return
         fast = bool(self.board.banners and self.area)
@@ -288,6 +302,15 @@ class Window:
         for who, title, bonus in self.forge.successes(now, self.me):
             self.board.note("SUCCÈS DÉBLOQUÉ", title, f"{who} · +{bonus} pts", now, star=True, shown_s=7.0)
 
+    def breed(self, advice, now: float) -> None:
+        """Bandeau d'élevage : il reste 5 minutes, sa pastille décompte le temps avant l'heure limite, et un petit son l'annonce."""
+        text = breeding_text(advice)
+        if advice.kind == "stop":
+            text += " · avant " + time.strftime("%H:%M", time.localtime(advice.until))
+        self.board.note(f"ÉLEVAGE · ENCLOS {advice.paddock_id}", advice.title, text, now, shown_s=self.breeding_shown, kind="élevage", deadline=advice.until)
+        if self.chime:
+            sound.play(SOUND_PATH)
+
     def paint(self, now: float) -> None:
         views = [
             draw.View(
@@ -297,7 +320,8 @@ class Window:
             ) if banner.label == "VENDU" else draw.View(
                 name=banner.title, quantity=0, gain=banner.text, icon=self.items.icon(banner.item_id) if banner.item_id else None,
                 age=now - banner.born, left=banner.until - now, total=banner.shown_s, bumped=99.0,
-                label=banner.label, badge=banner.badge, star=banner.star,
+                label=banner.label, badge=countdown(banner.deadline - now) if banner.deadline else banner.badge, star=banner.star,
+                **({"accent": draw.BREEDING, "glyph": "gauge"} if banner.kind == "élevage" else {}),
             )
             for banner in self.board.banners
         ]  # fmt: skip
@@ -311,6 +335,33 @@ class Window:
 
     def run(self) -> None:
         self.root.mainloop()
+
+
+def countdown(seconds: float) -> str:
+    """Temps restant avant l'heure limite, en clair : « 1 h 05 », « 12 min », « 45 s », « 0 s »."""
+    seconds = max(0, round(seconds))
+    if seconds >= 3600:
+        return f"{seconds // 3600} h {seconds % 3600 // 60:02d}"
+    if seconds >= 60:
+        return f"{seconds // 60} min"
+    return f"{seconds} s"
+
+
+class DemoBreeding:
+    """Deux gestes inventés pour voir les bandeaux d'élevage : une bascule, puis l'arrêt dans la zone."""
+
+    def __init__(self, now: float) -> None:
+        from ..analysis.breeding import PATTER, SLAPPER, Advice
+
+        self.script = [
+            Advice(1, "switch", now + 0.5, now + 300, (1, 2000), PATTER, SLAPPER, 10),
+            Advice(2, "stop", now + 3.5, now + 1980, (1, 2000), SLAPPER, None, 8),
+        ]
+
+    def due(self, now: float):
+        ready = [a for a in self.script if a.at <= now]
+        self.script = [a for a in self.script if a.at > now]
+        return ready
 
 
 def demo_sales(conn: sqlite3.Connection | None) -> tuple[list[tuple[float, Sale]], dict[int, str]]:
@@ -350,6 +401,7 @@ def main() -> int:
     parser.add_argument("--anywhere", action="store_true", help="dans l'angle de l'écran, même si le jeu n'est pas la fenêtre active")
     parser.add_argument("--rune", choices=sorted(draw.ELEMENT_COLOURS), help="avec --demo : montre aussi la pastille de dernière rune")
     parser.add_argument("--probe", action="store_true", help="dit pendant douze secondes si la fenêtre active est reconnue comme le jeu")
+    parser.add_argument("--demo-breeding", action="store_true", help="affiche deux bandeaux d'élevage inventés, avec le son ; rien n'est lu ni écrit")
     args = parser.parse_args()
     if sys.platform != "win32":
         print("Les notifications par-dessus le jeu n'existent que sous Windows.")
@@ -366,6 +418,11 @@ def main() -> int:
         return 0
     icon_dir = db.MARKET_PATH.parent / "icons"
     conn = sqlite3.connect(f"file:{db.MARKET_PATH.as_posix()}?mode=ro", uri=True, timeout=1.0) if db.MARKET_PATH.exists() else None
+    if args.demo_breeding:
+        window = Window(None, Items(conn, icon_dir), [], anywhere=args.anywhere, game=game, breeding=DemoBreeding(time.time()), chime=True)
+        window.is_demo, window.breeding_shown = True, 12.0
+        window.run()
+        return 0
     if args.demo:
         script, names = demo_sales(conn)
         items = Items(conn, icon_dir)
@@ -391,8 +448,13 @@ def main() -> int:
             forge = Forge(conn, FIGHT_PATH.with_name("forge.json"), FOCUS_PATH, titles, time.time(), density)
         except sqlite3.Error:
             forge = None  # base d'avant la collecte : la capture la mettra à jour
+    breeding = None
+    if cfg.breeding_banners:
+        from ..analysis.breeding import load_tiers
+
+        breeding = Breeding(conn, load_tiers())
     Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game,
-           rune=cfg.huppermage_rune, forge=forge, me=cfg.share_pseudo or None).run()  # fmt: skip
+           rune=cfg.huppermage_rune, forge=forge, me=cfg.share_pseudo or None, breeding=breeding, chime=cfg.breeding_sound).run()  # fmt: skip
     return 0
 
 

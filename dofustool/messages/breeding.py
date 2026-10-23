@@ -2,7 +2,8 @@
 
   - stable         : toutes les montures de l'étable ;
   - paddock        : un enclos à son ouverture (numéro, objets d'élevage, objets actifs, montures) ;
-  - paddock_update : le même enclos, renvoyé toutes les 10 s tant que l'interface reste ouverte.
+  - paddock_update : le même enclos, renvoyé toutes les 10 s tant que l'interface reste ouverte ;
+  - paddock_start / paddock_stop : le joueur lance ou coupe un objet de l'enclos ouvert (du client vers le serveur).
 
 Une monture : un identifiant (texte de 36 caractères, celui du jeu), son sexe, sa couleur (identifiant
 RidesData), les couleurs de ses parents, sa sérénité (−5 000 à 5 000), ses trois jauges (0 à 20 000),
@@ -108,6 +109,20 @@ def parse_mount(entry: bytes, stable: Mapping) -> Mount | None:
         uid, values.get(f["male"], 0) == 1, color, tuple(parents), serenity,
         gauges[MATURITY], gauges[LOVE], gauges[STAMINA], level, values.get(f["xp"], 0), values.get(f["sterile"], 0) == 1,
     )  # fmt: skip
+
+
+def parse_toggle(body: bytes, mapping: Mapping) -> int | None:
+    """Clic sur un objet de l'enclos (du client vers le serveur) : le numéro de l'objet lancé ou coupé.
+    Le numéro 0 (baffeur) ne s'écrit pas : le message est alors vide."""
+    try:
+        fields = list(iter_fields(body))
+    except WireError:
+        return None
+    if not fields:
+        return 0
+    if len(fields) != 1 or fields[0][0] != mapping.fields["index"] or fields[0][1] != VARINT or fields[0][2] >= OBJECTS:
+        return None
+    return fields[0][2]
 
 
 def parse_stable(body: bytes, mapping: Mapping) -> tuple[Mount, ...] | None:

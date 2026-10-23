@@ -266,10 +266,11 @@ def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -
     """L'étable et les enclos, dans l'ordre : la dernière vue de chaque monture et de chaque enclos l'emporte.
     Une mise à jour d'enclos ne dit pas lequel c'est : celui ouvert en dernier sur la même connexion."""
     stable, paddock, update = keymap.get("stable"), keymap.get("paddock"), keymap.get("paddock_update")
+    start, stop = keymap.get("paddock_start"), keymap.get("paddock_stop")
     if stable is None:
         return {}
     counts = {"étables lues": 0, "enclos lus": 0}
-    keys = [m.key for m in (stable, paddock, update) if m is not None]
+    keys = [m.key for m in (stable, paddock, update, start, stop) if m is not None]
     opened: dict[int, int] = {}
     rows = archive.execute(
         f"SELECT connection_id, ts, key, body FROM messages WHERE key IN ({','.join('?' * len(keys))}) ORDER BY ts", keys
@@ -285,6 +286,11 @@ def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -
         elif update is not None and key == update.key and connection_id in opened:
             if (seen := breeding.parse_paddock_update(body, update, stable)) is not None:
                 db.save_paddock(market, opened[connection_id], seen, ts)
+        elif connection_id in opened:
+            for mapping, on in ((start, True), (stop, False)):
+                if mapping is not None and key == mapping.key and (index := breeding.parse_toggle(body, mapping)) is not None:
+                    if not market.execute("SELECT 1 FROM paddock_toggles WHERE ts = ? AND object = ?", (ts, index)).fetchone():
+                        db.save_toggle(market, opened[connection_id], ts, index, on)
     return counts
 
 

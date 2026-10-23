@@ -16,6 +16,7 @@ RADIUS, ICON, WELL = 14, 44, 54
 
 SURFACE, RAISED, LINE = (21, 29, 33), (27, 37, 42), (44, 58, 66)
 GROUND, TEXT, MUTED, ACCENT = (14, 19, 21), (233, 238, 236), (154, 168, 166), (227, 179, 65)
+BREEDING = (92, 200, 168)  # le vert « gain » du tableau de bord : les bandeaux d'élevage se reconnaissent d'un coup d'œil
 
 APPEAR_S, LEAVE_S, BUMP_S = 0.22, 0.35, 0.45
 
@@ -35,6 +36,8 @@ class View:
     label: str = "VENDU"
     badge: str | None = None  # None : « ×quantité » ; "" : pas de pastille
     star: bool = False  # une étoile dorée à la place de l'image
+    accent: tuple[int, int, int] = ACCENT  # liseré, étiquette, ligne du bas et fil du temps
+    glyph: str | None = None  # « gauge » : un cadran de sérénité à la place de l'image
 
 
 @lru_cache(maxsize=32)
@@ -74,9 +77,9 @@ def visibility(view: View) -> float:
     return min(ease(view.age / APPEAR_S), ease(view.left / LEAVE_S))
 
 
-@lru_cache(maxsize=4)
-def card_base(scale: float) -> Image.Image:
-    """Fond d'un bandeau, ombre comprise : le même pour tous, dessiné une fois par échelle."""
+@lru_cache(maxsize=8)
+def card_base(scale: float, accent: tuple[int, int, int] = ACCENT) -> Image.Image:
+    """Fond d'un bandeau, ombre comprise : le même pour tous, dessiné une fois par échelle et par couleur."""
     s = lambda v: round(v * scale)  # noqa: E731
     size = (s(WIDTH + 2 * PAD), s(HEIGHT + 2 * PAD))
     box = (s(PAD), s(PAD), s(PAD + WIDTH) - 1, s(PAD + HEIGHT) - 1)
@@ -87,21 +90,37 @@ def card_base(scale: float) -> Image.Image:
     draw = ImageDraw.Draw(card)
     draw.rounded_rectangle(box, s(RADIUS), fill=(*SURFACE, 245), outline=(*LINE, 255), width=max(1, s(1)))
     # Liseré doré à gauche, et puits sombre pour l'image.
-    draw.rounded_rectangle((box[0] + s(1), box[1] + s(14), box[0] + s(4), box[3] - s(14)), s(2), fill=(*ACCENT, 255))
+    draw.rounded_rectangle((box[0] + s(1), box[1] + s(14), box[0] + s(4), box[3] - s(14)), s(2), fill=(*accent, 255))
     well = (box[0] + s(14), box[1] + s((HEIGHT - WELL) / 2))
     draw.rounded_rectangle((*well, well[0] + s(WELL), well[1] + s(WELL)), s(11), fill=(*GROUND, 255), outline=(*LINE, 255), width=max(1, s(1)))
     base.alpha_composite(card)
     return base
 
 
+def gauge_glyph(draw: ImageDraw.ImageDraw, centre: tuple[float, float], scale: float, accent: tuple[int, int, int]) -> None:
+    """Cadran de sérénité : un arc de −5 000 à 5 000, la zone visée allumée, et l'aiguille dedans."""
+    s = lambda v: round(v * scale)  # noqa: E731
+    radius, width = s(17), max(2, s(4))
+    box = (centre[0] - radius, centre[1] - radius + s(5), centre[0] + radius, centre[1] + radius + s(5))
+    draw.arc(box, 180, 360, fill=(*LINE, 255), width=width)
+    draw.arc(box, 268, 310, fill=(*accent, 255), width=width)  # la zone : un peu à droite du milieu
+    angle = math.radians(289)
+    pivot = (centre[0], centre[1] + s(5))
+    tip = (pivot[0] + (radius - s(6)) * math.cos(angle), pivot[1] + (radius - s(6)) * math.sin(angle))
+    draw.line((pivot, tip), fill=(*TEXT, 255), width=max(2, s(2)))
+    draw.ellipse((pivot[0] - s(3), pivot[1] - s(3), pivot[0] + s(3), pivot[1] + s(3)), fill=(*TEXT, 255))
+
+
 def card(view: View, scale: float) -> Image.Image:
     s = lambda v: round(v * scale)  # noqa: E731
-    image = card_base(scale).copy()
+    image = card_base(scale, view.accent).copy()
     draw = ImageDraw.Draw(image)
     left, top, right = s(PAD), s(PAD), s(PAD + WIDTH)
     well = (left + s(14), top + s((HEIGHT - WELL) / 2))
     picture = icon_image(view.icon, s(ICON)) if view.icon else None
-    if view.star:
+    if view.glyph == "gauge":
+        gauge_glyph(draw, (well[0] + s(WELL / 2), well[1] + s(WELL / 2)), scale, view.accent)
+    elif view.star:
         centre = (well[0] + s(WELL / 2), well[1] + s(WELL / 2))
         points = []
         for i in range(10):
@@ -123,24 +142,24 @@ def card(view: View, scale: float) -> Image.Image:
         badge_w = round(draw.textlength(badge, font=badge_face)) + s(16)
         badge_box = (right - s(14) - badge_w, top + s(13), right - s(14), top + s(13 + 24))
         glow = 1 - ease(view.bumped / BUMP_S)
-        fill = tuple(round(RAISED[i] + (ACCENT[i] - RAISED[i]) * glow) for i in range(3))
-        ink = GROUND if glow > 0.3 else ACCENT
+        fill = tuple(round(RAISED[i] + (view.accent[i] - RAISED[i]) * glow) for i in range(3))
+        ink = GROUND if glow > 0.3 else view.accent
         draw.rounded_rectangle(badge_box, s(12), fill=(*fill, 255))
         draw.text(((badge_box[0] + badge_box[2]) / 2, (badge_box[1] + badge_box[3]) / 2 - s(1)), badge, font=badge_face, fill=(*ink, 255), anchor="mm")
     else:
         badge_box = (right - s(4), 0, right, 0)
 
-    draw.text((text_x, top + s(12)), view.label, font=font(s(10), bold=True), fill=(*(ACCENT if view.star else MUTED), 255))
+    draw.text((text_x, top + s(12)), view.label, font=font(s(10), bold=True), fill=(*(view.accent if view.star or view.glyph else MUTED), 255))
     name_face = font(s(15), bold=True)
     draw.text((text_x, top + s(25)), fit(draw, view.name, name_face, badge_box[0] - s(10) - text_x), font=name_face, fill=(*TEXT, 255))
     gain_face = font(s(14), bold=True)
-    draw.text((text_x, top + s(47)), fit(draw, view.gain, gain_face, right - s(14) - text_x), font=gain_face, fill=(*ACCENT, 255))
+    draw.text((text_x, top + s(47)), fit(draw, view.gain, gain_face, right - s(14) - text_x), font=gain_face, fill=(*view.accent, 255))
 
     # Fil du temps restant, en bas.
     share = min(1.0, max(0.0, view.left / view.total)) if view.total else 0.0
     line_left, line_right, line_y = left + s(RADIUS), right - s(RADIUS), top + s(HEIGHT) - s(4)
     if share > 0:
-        draw.rounded_rectangle((line_left, line_y, line_left + max(s(2), round((line_right - line_left) * share)), line_y + max(1, s(2))), s(1), fill=(*ACCENT, 150))
+        draw.rounded_rectangle((line_left, line_y, line_left + max(s(2), round((line_right - line_left) * share)), line_y + max(1, s(2))), s(1), fill=(*view.accent, 150))
     return image
 
 

@@ -113,3 +113,80 @@ def test_breeding_messages_are_found_again_after_a_game_update():
     no_sterile = identify.match_stable(stable_body(HERD[:3] + HERD[4:]), ctx)
     assert no_sterile[1] and no_sterile[0]["sterile"] == 0
     assert identify.match_stable(paddock_body(), ctx) is None and identify.match_paddock(stable_body(), STABLE) is None
+
+
+# --- simulation de l'enclos ----------------------------------------------------
+
+from dofustool.analysis import breeding as sim  # noqa: E402
+from dofustool.overlay import Breeding, breeding_text  # noqa: E402
+
+
+def herd(*serenities, love=0, maturity=0, stamina=20000):
+    return [[s, love, maturity, stamina] for s in serenities]
+
+
+def test_a_tick_moves_every_mount_and_spends_only_what_is_used():
+    p = sim.Paddock(1, 0.0, [24470, 30000, 9210, 20000, 39980, 0], {sim.SLAPPER, sim.LOVER}, herd(4520, 4520, love=520))
+    for _ in range(452):
+        sim.step(p)
+    assert p.mounts[0][sim.SERENITY] == 4520 - 4520 and p.mounts[0][sim.LOVE] == 520 + 4520  # sérénité du début du tick
+    sim.step(p)  # sérénité à 0 : plus d'amour, et la dragofesse ne dépense plus rien
+    assert p.mounts[0][sim.LOVE] == 5040 and p.objects[sim.LOVER] == 39980 - 4520
+    assert p.objects[sim.SLAPPER] == 24470 - 4530
+    capped = sim.Paddock(1, 0.0, [0, 100, 0, 0, 0, 0], {sim.PATTER}, herd(4995))
+    sim.step(capped)
+    sim.step(capped)
+    assert capped.mounts[0][sim.SERENITY] == 5000 and capped.objects[sim.PATTER] == 90  # plafond : le second tick ne coûte rien
+    assert sim.rate(80_000) == 10 and sim.rate(80_001) == 20 and sim.rate(200_000) == 40 and sim.rate(0) == 0
+
+
+def test_target_zone_follows_the_gauges_left_to_fill():
+    assert sim.target_zone(herd(0, love=5000, maturity=0)) == (1, 2000)
+    assert sim.target_zone(herd(0, love=20000, maturity=0, stamina=0)) == (-2000, -1)
+    assert sim.target_zone(herd(0, love=20000, maturity=20000)) is None
+    assert sim.target_zone(herd(0, love=0, maturity=20000, stamina=0)) is None  # amour et endurance ne montent jamais ensemble
+
+
+def test_advice_waits_for_a_five_minute_window():
+    spread = sim.Paddock(1, 1000.0, [50_000, 50_000, 0, 0, 0, 0], {sim.PATTER}, herd(0, 2500, love=5000))
+    advice = sim.advise(spread)
+    # Caresseur : la plus haute bute à 5 000 ; on bascule dès que la plus basse laisse 5 minutes dans la zone (3 310).
+    assert advice.kind == "switch" and advice.then == sim.SLAPPER and advice.at == 1000.0 + 331 * sim.TICK_S
+    after = sim.project(spread, advice.at)
+    after.toggles = [(advice.at, sim.PATTER, False), (advice.at, sim.SLAPPER, True)]
+    stop = sim.advise(after)
+    assert stop.kind == "stop" and stop.title == "Coupe le baffeur"
+    assert stop.at == advice.at + 300 * sim.TICK_S and stop.until - stop.at >= sim.MARGIN_S
+    rising = sim.Paddock(1, 0.0, [0, 50_000, 0, 0, 0, 0], {sim.PATTER}, herd(-4940, -4940, love=5040))
+    direct = sim.advise(rising)
+    assert direct.kind == "stop" and direct.at == 495 * sim.TICK_S and direct.until == direct.at + 199 * sim.TICK_S
+    assert sim.advise(sim.Paddock(1, 0.0, [0] * 6, set(), herd(0, love=5000))) is None  # ni baffeur ni caresseur
+
+
+def test_clicks_after_the_last_view_are_replayed():
+    p = sim.Paddock(1, 0.0, [0, 50_000, 0, 0, 0, 0], set(), herd(-100, love=5000), toggles=[(100.0, sim.PATTER, True)])
+    advice = sim.advise(p)
+    assert advice.kind == "stop" and advice.at == 110.0 + 10 * sim.TICK_S
+
+
+def test_toggle_message_and_paddock_events_in_the_base():
+    assert breeding.parse_toggle(b"", KEYMAP["paddock_start"]) == 0 and breeding.parse_toggle(vi(1, 4), KEYMAP["paddock_start"]) == 4
+    assert breeding.parse_toggle(vi(2, 4), KEYMAP["paddock_start"]) is None and breeding.parse_toggle(vi(1, 9), KEYMAP["paddock_start"]) is None
+    c = db.connect(":memory:")
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(active=(1,), herd=[dict(serenity=-100, love=5000, stamina=20000)]), PADDOCK, STABLE), NOW)
+    db.save_toggle(c, 1, NOW + 5, sim.PATTER, False)
+    [p] = sim.load(c)
+    assert p.active == {1} and p.toggles == [(NOW + 5, sim.PATTER, False)] and p.mounts == [[-100, 5000, 0, 20000]]
+    summary = sim.summary(c, NOW + 60)
+    assert summary["stable"]["count"] == 1 and summary["paddocks"][0]["hint"] == "Lance le caresseur."
+
+
+def test_overlay_announces_each_gesture_once():
+    c = db.connect(":memory:")
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(active=(1,), herd=[dict(serenity=-4940, love=5040, stamina=20000)]), PADDOCK, STABLE), NOW)
+    board = Breeding(c)
+    assert board.due(NOW) == []
+    due = board.due(NOW + 495 * sim.TICK_S)
+    assert [a.title for a in due] == ["Coupe le caresseur"] and breeding_text(due[0]) == "1 DD entre 1 et 2 000"
+    assert board.due(NOW + 500 * sim.TICK_S) == []  # déjà annoncé
+    assert board.due(NOW + 900 * sim.TICK_S) == []  # trop tard : les DD sont sorties de la zone

@@ -290,5 +290,17 @@
       "object_index": 3,
       "mounts": 5
     }
+  },
+  "paddock_start": {
+    "key": "hoh",
+    "fields": {
+      "index": 1
+    }
+  },
+  "paddock_stop": {
+    "key": "hnv",
+    "fields": {
+      "index": 2
+    }
   }
 }

@@ -335,6 +335,14 @@ class Pipeline:
                 log.info("Enclos %d enregistré : %d montures.", paddock.paddock_id, len(paddock.mounts))
             return
 
+        for name, on in (("paddock_start", True), ("paddock_stop", False)):
+            mapping = self.keymap.get(name)
+            if mapping is not None and msg.key == mapping.key and msg.direction == C2S:
+                index = breeding.parse_toggle(msg.body, mapping)
+                if index is not None and watch.paddock is not None:
+                    db.save_toggle(self.market, watch.paddock, msg.ts, index, on)
+                return
+
         mapping = self.keymap.get("paddock_update")
         if mapping is not None and msg.key == mapping.key:
             paddock = breeding.parse_paddock_update(msg.body, mapping, stable)
