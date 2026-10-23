@@ -191,5 +191,11 @@ def test_item_fill_and_item_weight_are_judged_apart():
 
     full_fails = tries(400, 200, 700, 0.95) + tries(400, 50, 700, 0.5)
     assert collecte.judge_item_weight(collecte.Context(full_fails, [], []))[0] == "certain"
-    same = tries(400, 100, 700, 0.8) + tries(400, 100, 300, 0.8)  # même remplissage, poids max différent : rien ne change
+    for r in full_fails:
+        r.rune_tier, r.rune_weight = "simple", 3
+    same = tries(8000, 2000, 700, 0.8) + tries(8000, 2000, 300, 0.8)  # même remplissage, poids max différent : rien ne change
+    worse = tries(1000, 400, 700, 0.8) + tries(1000, 200, 300, 0.8)
+    for r in same + worse:
+        r.rune_tier, r.rune_weight = "simple", 3
     assert collecte.judge_heavy_item(collecte.Context(same, [], []))[0] == "refute"
+    assert collecte.judge_heavy_item(collecte.Context(worse, [], []))[0] == "probable"

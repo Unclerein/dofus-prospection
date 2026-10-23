@@ -639,22 +639,50 @@ def judge_item_weight(ctx):
     return status, text, a[1] + b[1], min(1.0, abs(z) / 4)
 
 
+def adjusted_gap(rows, group, a: str, b: str) -> tuple[float, float, int, int]:
+    """Écart de réussite entre les groupes a et b, à remplissage, portée de la rune, hauteur de la ligne et taille de rune
+    égaux (Mantel-Haenszel) : (écart, demi-largeur de l'intervalle à 95 %, passages de a, passages de b). Un écart brut
+    mélange tout : les objets lourds n'ont pas les mêmes lignes ni les mêmes runes que les autres."""
+    strata: dict = defaultdict(lambda: {a: [0, 0], b: [0, 0]})
+    for r in rows:
+        g = group(r)
+        if g in (a, b):
+            key = (round(r.item_weight_before / r.item_weight_max / 0.02), min(int(r.line_before / r.rune_value), 16) // 2,
+                   round(r.line_before / r.line_max / 0.1), r.rune_tier, r.rune_weight is not None and r.rune_weight >= 10)
+            cell = strata[key][g]
+            cell[0] += r.outcome != "ec"
+            cell[1] += 1
+    num = den = var = 0.0
+    na = nb = 0
+    for cell in strata.values():
+        (sa, ta), (sb, tb) = cell[a], cell[b]
+        if ta and tb:
+            pa, pb, w = sa / ta, sb / tb, ta * tb / (ta + tb)
+            num, den = num + w * (pa - pb), den + w
+            var += w * w * (max(pa * (1 - pa), 0.01) / ta + max(pb * (1 - pb), 0.01) / tb)
+            na, nb = na + ta, nb + tb
+    if not den:
+        return 0.0, math.inf, 0, 0
+    return num / den, 1.96 * math.sqrt(var) / den, na, nb
+
+
 def judge_heavy_item(ctx):
-    """À remplissage égal (76 à 90 %), un objet lourd (poids max 600 ou plus) passe-t-il mieux qu'un objet plus léger ?"""
-    clean = [r for r in ctx.rows if _clean_line(r) and 0.76 <= r.item_weight_before / r.item_weight_max < 0.9]
-    heavy = [r for r in clean if r.item_weight_max >= 600]
-    light = [r for r in clean if r.item_weight_max < 600]
-    a, b = (sum(r.outcome != "ec" for r in heavy), len(heavy)), (sum(r.outcome != "ec" for r in light), len(light))
-    text = (f"Passages réussis à remplissage égal (76 à 90 %) : objet de poids max 600 ou plus, {pct(a[0] / a[1]) if a[1] else '—'} ({a[1]}) ; "
-            f"moins de 600, {pct(b[0] / b[1]) if b[1] else '—'} ({b[1]}).")
-    if min(a[1], b[1]) < 300:
-        return "verifier", text + " Il en faut au moins 300 de chaque côté.", a[1] + b[1], 0.3
-    z = gap(a, b)
-    if z >= 2:
-        return "probable", text, a[1] + b[1], min(1.0, z / 4)
-    if z <= 0:
-        return "refute", text + " L'objet lourd ne passe pas mieux : c'est son remplissage qui compte, pas son poids.", a[1] + b[1], min(1.0, 0.5 + abs(z) / 8)
-    return "verifier", text, a[1] + b[1], 0.3
+    """Un objet de gros poids max passe-t-il moins bien qu'un objet plus léger, le reste égal ?"""
+    clean = [r for r in ctx.rows if _clean_line(r)]
+    d, half, na, nb = adjusted_gap(clean, lambda r: "lourd" if r.item_weight_max >= 600 else "léger", "lourd", "léger")
+    show = lambda x, h: f"{100 * x:+.1f} point{'s' if abs(100 * x) >= 2 else ''} (± {100 * h:.1f})".replace(".", ",").replace("-", "−")  # noqa: E731
+    text = (f"À remplissage, ligne et rune égaux, un objet de poids max 600 ou plus réussit {show(d, half)} par rapport à un objet "
+            f"plus léger ({na} et {nb} passages).")
+    if min(na, nb) < 300:
+        return "verifier", text + " Il en faut au moins 300 de chaque côté.", na + nb, 0.3
+    if d + half < 0 and d <= -0.02:
+        return "probable", text + " L'objet lourd passe moins bien.", na + nb, min(1.0, abs(d) / half / 4)
+    if abs(d) < 0.015 and half < 0.015:
+        return "refute", text + (" Le poids max ne joue presque pas : la gêne sur les gros objets vient de leur remplissage et de leurs grosses "
+                                 "lignes, où les petites runes passent mal (voir la portée de la rune)."), na + nb, 0.8
+    if d - half > 0:
+        return "refute", text + " L'objet lourd passe même un peu mieux.", na + nb, 0.6
+    return "verifier", text, na + nb, 0.3
 
 
 def judge_exo_first(ctx):
@@ -718,8 +746,8 @@ RULES = [
     Rule("poids-objet", "Plus l'objet est rempli, moins ça passe", "Le remplissage de l'objet (son poids actuel face à son poids max) fait monter les échecs. "
          "C'est pour ça qu'on retire le PA avant une exo lourde (% dommages aux sorts…) et qu'on le remet à la fin : sans lui, l'objet est moins rempli.",
          "Communauté, mesuré par le groupe", judge_item_weight, "mal-roule"),
-    Rule("objet-lourd", "Plus l'objet est lourd, plus ça passe", "À remplissage égal, un objet de gros poids max (niveau 200, beaucoup de lignes) laisserait "
-         "mieux passer les runes qu'un objet plus léger.", "Théorie à vérifier", judge_heavy_item, "juste-milieu"),
+    Rule("objet-lourd", "Sur un objet lourd, les runes passent moins bien", "À remplissage égal, un objet de gros poids max (niveau 200, beaucoup de "
+         "lignes) laisserait moins bien passer les runes qu'un objet plus léger.", "Impression du groupe, à vérifier", judge_heavy_item, "juste-milieu"),
     Rule("exo-avant-puits", "L'exo saute avant le puits", "Sur un succès neutre, un exo est retiré avant que le puits ne paie, même quand le puits suffirait.", "Théorie à vérifier", judge_exo_first),
     Rule("petit-max", "Over plus facile sur une ligne à petit max", "Un over passe plus facilement sur un objet à 4 % de critique max que sur un objet à 7 %.", "Théorie à vérifier", judge_small_max, "duel-crit"),
     Rule("niveau-metier", "Le niveau du métier ne joue plus", "Depuis la refonte, le niveau du forgemage ne change pas les chances.", "Communauté, validé par le groupe", judge_job_level),
