@@ -119,7 +119,7 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.breeding())
                 if path == "/api/breeding/genetics":
                     target = query.get("target", "")
-                    return self._json(api.genetics(int(target) if target.isdigit() else None))
+                    return self._json(api.genetics(int(target) if target.isdigit() else None, query.get("optimakina") == "1"))
                 if path == "/api/jobs/plan":
                     exclude = frozenset(int(x) for x in query.get("exclude", "").split(",") if x.isdigit())
                     try:

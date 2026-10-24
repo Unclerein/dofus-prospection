@@ -5,10 +5,22 @@ parentes. Pour une couleur visée, on remonte l'arbre jusqu'aux couleurs que l'o
 non stérile de cette couleur) ; chaque nœud qui manque devient une étape : accoupler un mâle d'une couleur
 parente et une femelle de l'autre.
 
-Les chances n'y sont pas encore : seule la génération cible a une règle connue, la répartition du reste
-est en cours d'étude (voir les aperçus d'accouplement). Le chemin ne compte qu'un accouplement par étape.
+Les chances d'un accouplement (formule retrouvée sur 40 aperçus du jeu, exacte à l'arrondi près) :
+
+  1. chaque parent forme un « côté » : sa couleur compte 5, chacun de ses deux parents 3, fois leur poids génétique
+     (90 ou 20) ; chaque côté pèse 1 au total (une monture capturée compte entièrement pour sa couleur) ;
+  2. chaque couple de couleurs (une de chaque côté) qui a un enfant dans l'arbre donne à cet enfant le produit
+     de leurs poids ;
+  3. score d'une couleur = son poids des deux côtés + ce que lui donnent les couples. La génération cible est la
+     plus haute génération des enfants ; ses couleurs se partagent 30 % + 0,15 % par niveau des deux parents
+     (+ 20 % avec une Optimakina, plafonné à 100 %), les autres le reste, au prorata du score.
+
+Le chemin compte, pour chaque couleur à produire, les réussites nécessaires et les essais moyens (réussites ÷
+chance). Un raté n'est pas compté comme perdu : son bébé a presque toujours la couleur d'un parent ou d'un
+grand-parent et resservira, et les deux parents devenus stériles se clonent en une monture fertile.
 """
 import json
+from collections import defaultdict
 import sqlite3
 import urllib.error
 import urllib.request
@@ -93,6 +105,11 @@ def names(conn: sqlite3.Connection, fetch: bool = True) -> dict[int, str]:
     return found
 
 
+TARGET_BASE, PER_LEVEL, OPTIMAKINA = 30.0, 0.15, 20.0
+PARENT, GRANDPARENT = 5, 3  # poids d'une couleur dans un côté : le parent, chacun de ses parents
+BABY_LEVEL = 1  # une monture à produire naît au niveau 1
+
+
 @dataclass(frozen=True)
 class Owned:
     uid: str
@@ -102,6 +119,7 @@ class Owned:
     sterile: bool
     gauges: tuple[int, int, int]  # amour, maturité, endurance
     place: int  # 0 : étable, sinon numéro de l'enclos
+    parents: tuple[int, ...] = ()  # couleurs de ses parents (vide : capturée)
 
     @property
     def fecund(self) -> bool:
@@ -111,67 +129,149 @@ class Owned:
 def owned(conn: sqlite3.Connection) -> dict[int, list[Owned]]:
     """Montures non stériles par couleur : celles qui peuvent encore servir à un accouplement."""
     out: dict[int, list[Owned]] = {}
-    for uid, color, male, level, sterile, love, maturity, stamina, place in conn.execute(
-        "SELECT uid, color, male, level, sterile, love, maturity, stamina, place FROM mounts WHERE sterile = 0"
+    for uid, color, male, level, sterile, love, maturity, stamina, place, parents in conn.execute(
+        "SELECT uid, color, male, level, sterile, love, maturity, stamina, place, parents FROM mounts WHERE sterile = 0"
     ):
-        out.setdefault(color, []).append(Owned(uid, color, bool(male), level, bool(sterile), (love, maturity, stamina), place))
+        out.setdefault(color, []).append(
+            Owned(uid, color, bool(male), level, bool(sterile), (love, maturity, stamina), place, tuple(json.loads(parents or "[]")))
+        )
     for mounts in out.values():
         mounts.sort(key=lambda m: (not m.fecund, -min(m.gauges), -m.level))
     return out
 
 
-def plan(tree: Tree, have: dict[int, list[Owned]], target: int) -> dict | None:
-    """Le chemin vers une couleur : les étapes à faire, de la plus basse génération à la cible.
-
-    Une couleur que l'on possède n'est pas à produire ; chaque monture ne sert qu'une fois dans le chemin
-    (une couleur demandée deux fois en demande deux). Une couleur sauvage que l'on n'a pas est à capturer."""
-    if target not in tree.colors:
-        return None
-    spare = {color: list(mounts) for color, mounts in have.items()}
-    steps: list[dict] = []
-    capture: list[int] = []
-
-    def need(color: int) -> dict:
-        """Une monture de cette couleur pour l'étape du dessus : prise dans l'étable, ou produite par une étape."""
-        if spare.get(color):
-            return {"color": color, "owned": True, "mount": spare[color].pop(0).uid}
-        parents = tree.colors[color].parents
-        if parents is None:
-            capture.append(color)
-            return {"color": color, "owned": False, "capture": True}
-        sides = [need(parents[0]), need(parents[1])]
-        steps.append({"id": len(steps), "child": color, "generation": tree.colors[color].generation, "parents": sides})
-        return {"color": color, "owned": False, "step": len(steps) - 1}
-
-    if spare.get(target):
-        return {"target": target, "owned": True, "steps": [], "capture": []}
-    root = need(target)
-    return {"target": target, "owned": False, "root": root, "steps": steps, "capture": sorted(set(capture))}
+Sheet = tuple[int, tuple[int, ...], int]  # (couleur, couleurs de ses parents, niveau)
 
 
-def candidates(have: dict[int, list[Owned]], color: int) -> list[dict]:
-    """Les montures que l'on peut choisir pour un côté d'une étape : sexe, niveau, état, ce qui manque."""
-    out = []
-    for m in have.get(color, []):
-        missing = {name: GAUGE_MAX - value for name, value in zip(("amour", "maturité", "endurance"), m.gauges) if value < GAUGE_MAX}
-        out.append({"uid": m.uid, "male": m.male, "level": m.level, "fecund": m.fecund, "missing": missing, "place": m.place})
+def side(tree: Tree, color: int, parents: tuple[int, ...]) -> dict[int, float]:
+    """Le côté d'un parent : sa couleur 5, ses parents 3 chacun, fois le poids génétique ; total 1."""
+    weights: dict[int, float] = defaultdict(float)
+    for c, position in [(color, PARENT)] + [(p, GRANDPARENT) for p in parents]:
+        weights[c] += position * (tree.colors[c].weight if c in tree.colors else 1)
+    total = sum(weights.values())
+    return {c: w / total for c, w in weights.items()}
+
+
+def chances(tree: Tree, a: Sheet, b: Sheet, optimakina: bool = False) -> dict[int, float]:
+    """Chances (en %) de chaque couleur pour le bébé de ces deux parents, comme l'aperçu du jeu."""
+    one, two = side(tree, a[0], a[1]), side(tree, b[0], b[1])
+    score: dict[int, float] = defaultdict(float)
+    children: dict[int, float] = defaultdict(float)
+    for x, px in one.items():
+        for y, py in two.items():
+            child = tree.child(x, y) if x != y else None
+            if child is not None:
+                children[child] += px * py
+    for weights in (one, two, children):
+        for c, w in weights.items():
+            score[c] += w
+
+    def gen(c: int) -> int:
+        return tree.colors[c].generation if c in tree.colors else 0
+
+    top = max((gen(c) for c in children), default=None)
+    target = min(100.0, TARGET_BASE + PER_LEVEL * (a[2] + b[2]) + (OPTIMAKINA if optimakina else 0.0)) if top is not None else 0.0
+    high = {c: w for c, w in score.items() if top is not None and gen(c) >= top}
+    low = {c: w for c, w in score.items() if top is None or gen(c) < top}
+    out = {c: target * w / sum(high.values()) for c, w in high.items()} if high else {}
+    rest = 100.0 - (target if high else 0.0)
+    for c, w in low.items():
+        out[c] = rest * w / sum(low.values())
     return out
 
 
-def overview(conn: sqlite3.Connection, tree: Tree, target: int | None, fetch_names: bool = True) -> dict:
-    """Ce que montre l'onglet Génétique : toutes les couleurs (avec ce qu'on en possède) et, pour la cible, le chemin."""
-    label = names(conn, fetch_names)
-    have = owned(conn)
-    colors = [{
-        "id": c.id, "name": label.get(c.id, f"Couleur {c.id}"), "generation": c.generation, "parents": list(c.parents) if c.parents else None,
-        "tint": list(c.tint), "weight": c.weight,
-        "owned": len(have.get(c.id, [])), "fecund": sum(m.fecund for m in have.get(c.id, [])),
-        "male": sum(m.male for m in have.get(c.id, [])), "female": sum(not m.male for m in have.get(c.id, [])),
-    } for c in sorted(tree.colors.values(), key=lambda c: (c.generation, c.id))]  # fmt: skip
-    route = plan(tree, have, target) if target is not None else None
-    if route is not None:
-        route.update(summarize(route, have))
-    return {"colors": colors, "plan": route}
+def produced(tree: Tree, color: int) -> Sheet:
+    """Une monture de cette couleur que le chemin fera naître : au niveau 1, issue du couple qui la donne."""
+    parents = tree.colors[color].parents
+    return (color, tuple(parents) if parents else (), BABY_LEVEL)
+
+
+def best_pair(tree: Tree, have: dict[int, list[Owned]], child: int, optimakina: bool = False, limit: int = 40) -> dict:
+    """Le meilleur couple de l'étable pour obtenir cette couleur : un mâle et une femelle des deux couleurs parentes,
+    la plus forte chance (puis féconds, puis plus hauts niveaux). Une couleur parente que l'on n'a pas est prise
+    comme une monture à produire (niveau 1)."""
+    a_color, b_color = tree.colors[child].parents
+    side_a = have.get(a_color, [])[:limit]
+    side_b = have.get(b_color, [])[:limit]
+    best = None
+    for x in side_a or [None]:
+        for y in side_b or [None]:
+            if x is not None and y is not None and (x.male == y.male or x.uid == y.uid):
+                continue
+            sa = (x.color, x.parents, x.level) if x else produced(tree, a_color)
+            sb = (y.color, y.parents, y.level) if y else produced(tree, b_color)
+            chance = chances(tree, sa, sb, optimakina).get(child, 0.0)
+            key = (round(chance, 6), bool(x and x.fecund) + bool(y and y.fecund), (x.level if x else 0) + (y.level if y else 0))
+            if best is None or key > best[0]:
+                best = (key, chance, x, y)
+    if best is None:  # les deux couleurs sont là, mais toutes du même sexe : on compte des montures à produire
+        chance = chances(tree, produced(tree, a_color), produced(tree, b_color), optimakina).get(child, 0.0)
+        return {"chance": chance, "a": None, "b": None}
+    _, chance, x, y = best
+    return {"chance": chance, "a": x.uid if x else None, "b": y.uid if y else None}
+
+
+def route(tree: Tree, have: dict[int, list[Owned]], target: int, optimakina: bool = False) -> dict | None:
+    """Le chemin vers une couleur : pour chaque couleur à produire, les réussites nécessaires et les essais moyens
+    (réussites ÷ chance avec le meilleur couple). Chaque réussite demande un parent de chaque couleur parente, pris dans
+    l'étable tant qu'il en reste (chaque monture ne sert qu'une fois), sinon à produire à son tour, ou à capturer pour une
+    couleur sauvage. Les ratés sont supposés recyclés (bébé réutilisé, parents clonés) : voir le haut du module."""
+    if target not in tree.colors:
+        return None
+    left = {c: len(ms) for c, ms in have.items()}
+    if left.get(target):
+        return {"target": target, "owned": True, "rows": [], "nodes": [], "edges": [], "capture_counts": {}, "matings": 0, "ready": 0}
+    need: dict[int, float] = defaultdict(float)
+    need[target] = 1.0
+    pending = {target}
+    use: dict[int, float] = defaultdict(float)
+    capture: dict[int, float] = defaultdict(float)
+    rows, edges = [], set()
+    while pending:
+        color = max(pending, key=lambda c: tree.colors[c].generation)  # tout ce qui la demande est déjà compté
+        pending.discard(color)
+        take = min(need[color], left.get(color, 0))
+        left[color] = left.get(color, 0) - take
+        use[color] += take
+        missing = need[color] - take
+        if missing <= 1e-9:
+            continue
+        parents = tree.colors[color].parents
+        if parents is None:
+            capture[color] += missing
+            continue
+        pair = best_pair(tree, have, color, optimakina)
+        tries = missing / (max(pair["chance"], 0.01) / 100)
+        rows.append({"child": color, "generation": tree.colors[color].generation, "parents": list(parents), "needed": missing,
+                     "tries": tries, "chance": pair["chance"], "best": [pair["a"], pair["b"]]})  # fmt: skip
+        for p in parents:
+            need[p] += missing
+            pending.add(p)
+            edges.add((p, color))
+    nodes = {c: {"color": c, "make": 0.0, "use": use.get(c, 0.0), "capture": capture.get(c, 0.0)} for c in set(use) | set(capture)}
+    for row in rows:
+        nodes.setdefault(row["child"], {"color": row["child"], "make": 0.0, "use": 0.0, "capture": 0.0})["make"] = row["tries"]
+    rows.sort(key=lambda r: (r["generation"], -r["tries"]))
+    for row in rows:
+        sides = [candidates(have, c) for c in row["parents"]]
+        row["candidates"] = sides
+        row["status"] = pair_state(*sides)
+    return {
+        "target": target, "owned": False, "rows": rows, "edges": sorted(edges),
+        "nodes": [n for n in nodes.values() if n["make"] or n["use"] or n["capture"]],
+        "capture_counts": {c: n for c, n in capture.items() if n > 1e-9},
+        "matings": sum(r["tries"] for r in rows), "ready": sum(r["status"] == "ready" for r in rows),
+    }  # fmt: skip
+
+
+def candidates(have: dict[int, list[Owned]], color: int) -> list[dict]:
+    """Les montures que l'on peut choisir pour un côté d'une étape : sexe, niveau, état, ce qui manque, ses parents."""
+    out = []
+    for m in have.get(color, []):
+        missing = {name: GAUGE_MAX - value for name, value in zip(("amour", "maturité", "endurance"), m.gauges) if value < GAUGE_MAX}
+        out.append({"uid": m.uid, "male": m.male, "level": m.level, "fecund": m.fecund, "missing": missing, "place": m.place,
+                    "parents": list(m.parents)})  # fmt: skip
+    return out
 
 
 def pair_state(a: list[dict], b: list[dict]) -> str:
@@ -185,34 +285,14 @@ def pair_state(a: list[dict], b: list[dict]) -> str:
     return "ready" if any(x["fecund"] and y["fecund"] for x, y in pairs) else "prepare"
 
 
-def summarize(route: dict, have: dict[int, list[Owned]]) -> dict:
-    """Le chemin regroupé par couleur à produire (une ligne par couleur, avec son nombre d'accouplements), et le schéma :
-    chaque couleur du chemin avec ce qu'il faut en produire, en prendre dans l'étable, en capturer."""
-    rows: dict[int, dict] = {}
-    nodes: dict[int, dict] = {}
-    edges: set[tuple[int, int]] = set()
-
-    def node(color: int) -> dict:
-        return nodes.setdefault(color, {"color": color, "make": 0, "use": 0, "capture": 0})
-
-    for step in route["steps"]:
-        child = step["child"]
-        a, b = step["parents"]
-        row = rows.setdefault(child, {"child": child, "generation": step["generation"], "parents": [a["color"], b["color"]], "count": 0, "from_owned": 0})
-        row["count"] += 1
-        row["from_owned"] += a["owned"] and b["owned"]
-        node(child)["make"] += 1
-        for side in (a, b):
-            edges.add((side["color"], child))
-            if side["owned"]:
-                node(side["color"])["use"] += 1
-            elif side.get("capture"):
-                node(side["color"])["capture"] += 1
-    for row in rows.values():
-        sides = [candidates(have, color) for color in row["parents"]]
-        row["candidates"] = sides
-        row["status"] = pair_state(*sides) if row["from_owned"] else "waiting"
-    ordered = sorted(rows.values(), key=lambda r: (r["generation"], -r["count"]))
-    capture = {color: n["capture"] for color, n in nodes.items() if n["capture"]}
-    return {"matings": len(route["steps"]), "rows": ordered, "nodes": list(nodes.values()), "edges": sorted(edges), "capture_counts": capture,
-            "ready": sum(r["from_owned"] for r in ordered if r["status"] == "ready")}
+def overview(conn: sqlite3.Connection, tree: Tree, target: int | None, fetch_names: bool = True, optimakina: bool = False) -> dict:
+    """Ce que montre l'onglet Génétique : toutes les couleurs (avec ce qu'on en possède) et, pour la cible, le chemin."""
+    label = names(conn, fetch_names)
+    have = owned(conn)
+    colors = [{
+        "id": c.id, "name": label.get(c.id, f"Couleur {c.id}"), "generation": c.generation, "parents": list(c.parents) if c.parents else None,
+        "tint": list(c.tint), "weight": c.weight,
+        "owned": len(have.get(c.id, [])), "fecund": sum(m.fecund for m in have.get(c.id, [])),
+        "male": sum(m.male for m in have.get(c.id, [])), "female": sum(not m.male for m in have.get(c.id, [])),
+    } for c in sorted(tree.colors.values(), key=lambda c: (c.generation, c.id))]  # fmt: skip
+    return {"colors": colors, "plan": route(tree, have, target, optimakina) if target is not None else None, "optimakina": optimakina}

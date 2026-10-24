@@ -1395,17 +1395,53 @@ function geneticsState() {
   if (!S.ui.genetics) {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(GENETICS_KEY) || '{}'); } catch (error) { /* stockage indisponible */ }
-    S.ui.genetics = { target: saved.target ?? 17, done: saved.done || {}, picks: saved.picks || {}, open: null, query: '' };
+    S.ui.genetics = { target: saved.target ?? 17, done: saved.done || {}, picks: saved.picks || {}, open: null, query: '', optimakina: !!saved.optimakina };
   }
   return S.ui.genetics;
 }
 function saveGenetics() {
   const g = S.ui.genetics;
-  try { localStorage.setItem(GENETICS_KEY, JSON.stringify({ target: g.target, done: g.done, picks: g.picks })); } catch (error) { /* stockage indisponible */ }
+  try { localStorage.setItem(GENETICS_KEY, JSON.stringify({ target: g.target, done: g.done, picks: g.picks, optimakina: g.optimakina })); } catch (error) { /* stockage indisponible */ }
 }
 
 /** Pastille de robe : les deux teintes du jeu, en diagonale. */
 const swatch = (tint, size = 14) => h('span', { class: 'swatch', 'aria-hidden': 'true', style: `width: ${size}px; height: ${size}px; background: linear-gradient(135deg, ${tint[0]} 0 50%, ${tint[1]} 50% 100%)` });
+
+/** Chances (en %) de chaque couleur pour le bébé de deux parents : la formule du serveur (analysis/genetics.py),
+ * retrouvée sur les aperçus d'accouplement du jeu. a, b : { color, parents: [couleurs], level }. */
+function babyChances(byId, children, a, b, optimakina) {
+  const side = (color, parents) => {
+    const w = {};
+    for (const [c, position] of [[color, 5], ...parents.map((parent) => [parent, 3])]) w[c] = (w[c] || 0) + position * ((byId[c] && byId[c].weight) || 1);
+    const total = Object.values(w).reduce((sum, v) => sum + v, 0);
+    return Object.fromEntries(Object.entries(w).map(([c, v]) => [c, v / total]));
+  };
+  const one = side(a.color, a.parents), two = side(b.color, b.parents);
+  const score = {}, kids = {};
+  for (const [x, px] of Object.entries(one)) {
+    for (const [y, py] of Object.entries(two)) {
+      if (x === y) continue;
+      const child = children[[Number(x), Number(y)].sort((p, q) => p - q).join('-')];
+      if (child) kids[child] = (kids[child] || 0) + px * py;
+    }
+  }
+  for (const part of [one, two, kids]) for (const [c, v] of Object.entries(part)) score[c] = (score[c] || 0) + v;
+  const gen = (c) => (byId[c] ? byId[c].generation : 0);
+  const kidIds = Object.keys(kids);
+  const top = kidIds.length ? Math.max(...kidIds.map(gen)) : null;
+  const target = top === null ? 0 : Math.min(100, 30 + 0.15 * (a.level + b.level) + (optimakina ? 20 : 0));
+  const high = Object.entries(score).filter(([c]) => top !== null && gen(c) >= top);
+  const low = Object.entries(score).filter(([c]) => top === null || gen(c) < top);
+  const total = (list) => list.reduce((sum, [, v]) => sum + v, 0);
+  const out = {};
+  for (const [c, v] of high) out[c] = (target * v) / total(high);
+  const rest = 100 - (high.length ? target : 0);
+  for (const [c, v] of low) out[c] = (rest * v) / total(low);
+  return out;
+}
+
+const chanceText = (n) => `${n >= 10 ? Math.round(n) : n.toFixed(1).replace('.', ',')} %`;
+const roundUp = (n) => Math.ceil(n - 1e-9);
 
 const STATUS = {
   ready: ['good', 'Prête'],
@@ -1478,72 +1514,99 @@ function pathDiagram(plan, byId) {
     const label = c.name.length > 20 ? c.name.slice(0, 19) + '…' : c.name;
     const name = svg('text', { x: 31, y: 16, class: 'gene-node-name' }); name.textContent = label;
     const what = svg('text', { x: 31, y: 30, class: 'gene-node-what' });
-    what.textContent = [n.make && `${n.make} à produire`, n.use && `${n.use} de l’étable`, n.capture && `${n.capture} à capturer`].filter(Boolean).join(' · ');
+    const made = plan.rows.find((r) => r.child === n.color);
+    what.textContent = [made && `${roundUp(made.needed)} à obtenir · ≈ ${Math.round(made.tries)} essais`, n.use && `${roundUp(n.use)} de l’étable`,
+      n.capture && `${roundUp(n.capture)} à capturer`].filter(Boolean).join(' · ');
     g.append(name, what);
     svgEl.append(g);
   }
   return h('div', { class: 'gene-diagram-wrap' }, svgEl);
 }
 
-function mountChoice(m, picked, onPick, disabled) {
+function mountChoice(m, picked, byId, onPick, disabled) {
   const where = m.place ? `Enclos ${m.place}` : 'Étable';
   const state = m.fecund ? h('span', { class: 'tag good' }, 'Féconde')
-    : h('span', { class: 'tag' }, Object.entries(m.missing).map(([gauge, n]) => `${gauge} −${fmt(n)}`).join(' · '));
+    : h('span', { class: 'tag', title: Object.entries(m.missing).map(([gauge, n]) => `${gauge} : il manque ${fmt(n)}`).join(' · ') },
+      Object.keys(m.missing).length === 1 ? `${Object.keys(m.missing)[0]} à remplir` : `${Object.keys(m.missing).length} jauges à remplir`);
   return h('button', { class: 'mount-choice' + (picked ? ' on' : ''), disabled, 'aria-pressed': String(picked), onclick: onPick },
     h('span', { class: 'mount-sex ' + (m.male ? 'm' : 'f') }, m.male ? '♂' : '♀'),
     h('span', { class: 'mount-level' }, `niv. ${m.level}`),
     state,
-    h('span', { class: 'muted small' }, where));
+    h('span', { class: 'muted small mount-where', title: m.parents.length ? 'Ses parents' : 'Capturée' },
+      m.parents.length ? m.parents.map((c) => swatch(byId[c].tint, 9)) : null, ` ${where}`));
 }
 
-function stepRow(row, byId, g, refresh) {
+function stepRow(row, byId, children, g, refresh) {
   const key = `${g.target}:${row.child}`;
-  const done = Math.min(row.count, g.done[key] || 0);
+  const needed = roundUp(row.needed);
+  const done = Math.min(needed, g.done[key] || 0);
   const open = g.open === row.child;
-  const [cls, label] = done >= row.count ? ['good', 'Faite'] : STATUS[row.status];
+  const [cls, label] = done >= needed ? ['good', 'Faite'] : STATUS[row.status];
   const [a, b] = row.parents;
-  const setDone = (n) => { g.done[key] = Math.max(0, Math.min(row.count, n)); saveGenetics(); refresh(); };
+  const setDone = (n) => { g.done[key] = Math.max(0, Math.min(needed, n)); saveGenetics(); refresh(); };
   const head = h('div', { class: 'gstep-head' },
     h('button', { class: 'gstep-toggle', 'aria-expanded': String(open), onclick: () => { g.open = open ? null : row.child; refresh(); } },
       swatch(byId[row.child].tint, 22),
       h('span', { class: 'gstep-title' }, h('strong', {}, byId[row.child].name), h('span', { class: 'muted small' },
         swatch(byId[a].tint, 10), ` ${byId[a].name}  ×  `, swatch(byId[b].tint, 10), ` ${byId[b].name}`))),
-    h('span', { class: 'gstep-count' }, `×${row.count}`),
+    h('span', { class: 'gstep-count', title: 'Réussites à obtenir' }, `×${needed}`),
+    h('span', { class: 'gstep-chance', title: 'Chance du meilleur couple, et essais moyens pour toutes les réussites' },
+      h('strong', {}, chanceText(row.chance)), h('span', { class: 'muted small' }, ` · ≈ ${Math.round(row.tries)} essai${Math.round(row.tries) > 1 ? 's' : ''}`)),
     h('span', { class: 'tag ' + cls }, label),
     h('span', { class: 'gstep-done' },
-      h('button', { class: 'btn quiet small', 'aria-label': 'Un accouplement de moins', onclick: () => setDone(done - 1) }, '−'),
-      h('span', { class: 'small' }, `${done} / ${row.count}`),
-      h('button', { class: 'btn quiet small', 'aria-label': 'Un accouplement de fait', onclick: () => setDone(done + 1) }, '+')));
-  if (!open) return h('li', { class: 'gstep' + (done >= row.count ? ' finished' : '') }, head);
+      h('button', { class: 'btn quiet small', 'aria-label': 'Une réussite de moins', onclick: () => setDone(done - 1) }, '−'),
+      h('span', { class: 'small' }, `${done} / ${needed}`),
+      h('button', { class: 'btn quiet small', 'aria-label': 'Une réussite de plus', onclick: () => setDone(done + 1) }, '+')));
+  if (!open) return h('li', { class: 'gstep' + (done >= needed ? ' finished' : '') }, head);
 
-  const pick = g.picks[key] || {};
+  // Couple : celui que tu as choisi, sinon le meilleur de ton étable.
+  const pick = { ...(g.picks[key] || {}) };
+  const suggested = !g.picks[key] || (pick[0] === undefined && pick[1] === undefined);
+  if (suggested) [pick[0], pick[1]] = row.best;
   const choose = (side, uid) => { g.picks[key] = { ...pick, [side]: pick[side] === uid ? undefined : uid }; saveGenetics(); refresh(); };
-  const chosen = (side) => row.candidates[side].find((m) => m.uid === pick[side]);
+  const chosen = (side) => { const m = row.candidates[side].find((x) => x.uid === pick[side]); return m && { ...m, color: row.parents[side] }; };
   const other = (side) => chosen(1 - side);
   const column = (side) => {
     const color = byId[row.parents[side]];
     const list = row.candidates[side];
+    const shown = list.slice(0, 12);
+    const current = list.find((m) => m.uid === pick[side]);
+    if (current && !shown.includes(current)) shown.unshift(current);
     return h('div', { class: 'gstep-side' },
       h('div', { class: 'gstep-side-head' }, swatch(color.tint, 14), h('strong', {}, color.name), h('span', { class: 'muted small' }, `${list.length} non stériles`)),
       list.length
-        ? h('div', { class: 'mount-list' }, list.slice(0, 12).map((m) => mountChoice(m, pick[side] === m.uid, () => choose(side, m.uid),
+        ? h('div', { class: 'mount-list' }, shown.map((m) => mountChoice(m, pick[side] === m.uid, byId, () => choose(side, m.uid),
           other(side) ? other(side).male === m.male : false)))
         : h('div', { class: 'muted small' }, 'Aucune pour l’instant : elle sortira d’une étape plus bas.'));
   };
   const both = chosen(0) && chosen(1);
-  return h('li', { class: 'gstep open' + (done >= row.count ? ' finished' : '') }, head,
+  let outcome;
+  if (both) {
+    const odds = babyChances(byId, children, chosen(0), chosen(1), g.optimakina);
+    const atTop = babyChances(byId, children, { ...chosen(0), level: 200 }, { ...chosen(1), level: 200 }, g.optimakina)[row.child] || 0;
+    const sorted = Object.entries(odds).sort((p, q) => q[1] - p[1]);
+    outcome = h('div', { class: 'odds' },
+      h('div', { class: 'odds-head' },
+        h('span', {}, suggested ? 'Meilleur couple de ton étable : ' : 'Couple choisi : ',
+          h('strong', {}, `${chosen(0).male ? '♂' : '♀'} niv. ${chosen(0).level}`), ' × ', h('strong', {}, `${chosen(1).male ? '♂' : '♀'} niv. ${chosen(1).level}`)),
+        atTop > (odds[row.child] || 0) + 0.5 ? h('span', { class: 'muted small' }, `aux niveaux 200 : ${chanceText(atTop)} de ${byId[row.child].name}`) : null),
+      h('ul', { class: 'odds-list' }, sorted.map(([c, v]) => h('li', { class: Number(c) === row.child ? 'wanted' : '' },
+        swatch(byId[c].tint, 12), h('span', { class: 'odds-name' }, byId[c].name),
+        h('span', { class: 'odds-bar' }, h('span', { style: `width: ${v}%` })), h('span', { class: 'odds-value' }, chanceText(v))))));
+  } else {
+    outcome = h('div', { class: 'muted' }, 'Choisis une monture de chaque couleur, de sexes opposés, pour voir les chances du bébé.');
+  }
+  return h('li', { class: 'gstep open' + (done >= needed ? ' finished' : '') }, head,
     h('div', { class: 'gstep-body' },
       h('div', { class: 'gstep-sides' }, column(0), h('div', { class: 'gstep-cross', 'aria-hidden': 'true' }, '×'), column(1)),
-      h('div', { class: 'gstep-foot' },
-        both ? h('span', {}, 'Couple choisi : ', h('strong', {}, `${chosen(0).male ? '♂' : '♀'} niv. ${chosen(0).level}`), ' × ', h('strong', {}, `${chosen(1).male ? '♂' : '♀'} niv. ${chosen(1).level}`))
-          : h('span', { class: 'muted' }, 'Choisis une monture de chaque couleur, de sexes opposés.'),
-        h('span', { class: 'muted small' }, 'Chances de chaque couleur : bientôt, la formule est en cours d’étude.'))));
+      outcome));
 }
 
 async function pageGenetics() {
   const g = geneticsState();
-  const d = await api(`/api/breeding/genetics?target=${g.target}`);
+  const d = await api(`/api/breeding/genetics?target=${g.target}${g.optimakina ? '&optimakina=1' : ''}`);
   const byId = Object.fromEntries(d.colors.map((c) => [c.id, c]));
+  const children = Object.fromEntries(d.colors.filter((c) => c.parents).map((c) => [[...c.parents].sort((p, q) => p - q).join('-'), c.id]));
   const head = breedingHead(true);
   const refresh = () => render();
   const picker = colorPicker(d.colors, g, refresh);
@@ -1557,23 +1620,26 @@ async function pageGenetics() {
     main = h('section', { class: 'panel pad gene-main' }, h('div', { class: 'gene-target' }, swatch(target.tint, 40),
       h('div', {}, h('h2', {}, target.name), h('div', { class: 'muted' }, `Génération ${target.generation} · tu en as ${target.owned} non stériles (${target.male} ♂, ${target.female} ♀).`))));
   } else {
-    const capture = Object.entries(plan.capture_counts).map(([id, n]) => `${byId[id].name} ×${n}`).join(', ');
+    const capture = Object.entries(plan.capture_counts).map(([id, n]) => `${byId[id].name} ×${roundUp(n)}`).join(', ');
     const rows = plan.rows;
-    const finished = rows.reduce((sum, row) => sum + Math.min(row.count, g.done[`${g.target}:${row.child}`] || 0), 0);
+    const successes = rows.reduce((sum, row) => sum + roundUp(row.needed), 0);
+    const finished = rows.reduce((sum, row) => sum + Math.min(roundUp(row.needed), g.done[`${g.target}:${row.child}`] || 0), 0);
     main = h('section', { class: 'gene-main' },
       h('div', { class: 'panel pad gene-target-panel' },
         h('div', { class: 'gene-target' }, swatch(target.tint, 40),
-          h('div', {}, h('h2', {}, target.name), h('div', { class: 'muted' }, `Génération ${target.generation} · issue de ${byId[target.parents[0]].name} × ${byId[target.parents[1]].name}`))),
+          h('div', { class: 'gene-target-name' }, h('h2', {}, target.name), h('div', { class: 'muted' }, `Génération ${target.generation} · issue de ${byId[target.parents[0]].name} × ${byId[target.parents[1]].name}`)),
+          h('label', { class: 'check gene-optimakina' }, h('input', { id: 'gene-optimakina', type: 'checkbox', checked: g.optimakina,
+            onchange: (e) => { g.optimakina = e.target.checked; saveGenetics(); refresh(); } }), 'Optimakina (+20 % sur la génération visée)')),
         h('div', { class: 'kpis four gene-kpis' },
-          kpi('Accouplements', fmt(plan.matings), finished ? `${finished} faits` : 'un par étape, sans les ratés'),
-          kpi('Faisables maintenant', fmt(plan.ready), 'avec tes DD fécondes', plan.ready ? 'gain' : ''),
-          kpi('Couleurs à produire', fmt(rows.length), `jusqu’à la génération ${target.generation}`),
+          kpi('Essais moyens', `≈ ${fmt(plan.matings)}`, 'ratés recyclés : bébé réutilisé, parents clonés'),
+          kpi('Réussites à obtenir', fmt(successes), finished ? `${finished} faites` : `${rows.length} couleurs à produire`),
+          kpi('Étapes prêtes', fmt(plan.ready), 'un mâle et une femelle féconds', plan.ready ? 'gain' : ''),
           kpi('À capturer', capture || 'Rien', capture ? 'sauvages, en plus de ton étable' : 'ton étable suffit', capture ? 'warn' : ''))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Le chemin'), h('span', { class: 'muted small' }, 'de la génération 1 à la cible')),
         pathDiagram(plan, byId)),
       h('div', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Les étapes'), h('span', { class: 'muted small' }, 'clique une étape pour choisir le couple')),
-        h('ol', { class: 'gsteps' }, rows.map((row) => stepRow(row, byId, g, refresh)))),
-      h('div', { class: 'note small' }, 'Le chemin compte un accouplement par couleur à produire : la couleur visée ne sort pas à chaque fois, il en faudra plus. Les chances s’afficheront ici quand la formule des couleurs sera confirmée.'));
+        h('ol', { class: 'gsteps' }, rows.map((row) => stepRow(row, byId, children, g, refresh)))),
+      h('div', { class: 'note small' }, 'Chances calculées avec la formule du jeu, retrouvée sur tes aperçus d’accouplement. Les montures à produire sont comptées au niveau 1 : monter leur niveau avant de les accoupler augmente les chances (jusqu’à 90 % avec deux parents niveau 200). Les essais moyens supposent que tu réutilises les bébés ratés et clones les parents stériles.'));
   }
   return [head, h('div', { class: 'gene-layout' }, picker, main)];
 }

@@ -738,7 +738,7 @@ table.mage-steps td.act { width: 88px; }
 .gstep { border-top: 1px solid var(--line); }
 .gstep:first-child { border-top: 0; }
 .gstep.finished .gstep-title strong { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
-.gstep-head { display: grid; grid-template-columns: minmax(0, 1fr) 52px 200px 118px; align-items: center; gap: 14px; padding: 10px 16px; }
+.gstep-head { display: grid; grid-template-columns: minmax(0, 1fr) 52px 150px 200px 118px; align-items: center; gap: 14px; padding: 10px 16px; }
 .gstep-head > .tag { justify-self: start; }
 .gstep-toggle { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 4px 0; border: 0; background: transparent; text-align: left; color: inherit; }
 .gstep-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -764,3 +764,18 @@ table.mage-steps td.act { width: 88px; }
 .mount-sex.m { color: #A8D2FA; }
 .mount-sex.f { color: #F3C6E8; }
 .gstep-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+.gstep-chance { white-space: nowrap; }
+.gene-target { flex-wrap: wrap; }
+.gene-target-name { flex: 1; min-width: 220px; }
+.gene-optimakina { font-size: 13px; color: var(--soft); }
+.mount-where { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.odds { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.odds-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+.odds-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.odds-list li { display: grid; grid-template-columns: 14px minmax(110px, 180px) minmax(80px, 1fr) 56px; align-items: center; gap: 10px; font-size: 13px; color: var(--soft); }
+.odds-list li.wanted { color: var(--text); font-weight: 600; }
+.odds-bar { height: 6px; border-radius: 3px; background: var(--row); overflow: hidden; }
+.odds-bar span { display: block; height: 100%; background: var(--line-strong); border-radius: 3px; }
+.odds-list li.wanted .odds-bar span { background: var(--gain); }
+.odds-value { text-align: right; }
+@media (max-width: 760px) { .gstep-head { grid-template-columns: minmax(0, 1fr) auto; } }

@@ -713,7 +713,7 @@ class Api:
         finally:
             conn.close()
 
-    def genetics(self, target: int | None) -> dict:
+    def genetics(self, target: int | None, optimakina: bool = False) -> dict:
         """Les couleurs de dragodindes avec ce qu'on en possède, et le chemin vers la couleur visée."""
         from ..analysis import genetics
 
@@ -721,7 +721,7 @@ class Api:
             self._ride_tree = genetics.load_tree()
         conn = self.connect()
         try:
-            return genetics.overview(conn, self._ride_tree, target)
+            return genetics.overview(conn, self._ride_tree, target, optimakina=optimakina)
         finally:
             conn.close()
 
