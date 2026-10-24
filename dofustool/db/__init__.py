@@ -801,6 +801,8 @@ def _sheet_of(mount) -> dict:
 
 def save_mating_preview(conn: sqlite3.Connection, ts: float, pair: tuple[str, str], preview) -> bool:
     """Un aperçu d'accouplement ; False si l'un des parents est inconnu (étable jamais ouverte depuis la capture)."""
+    if conn.execute("SELECT 1 FROM mating_previews WHERE ts = ?", (ts,)).fetchone():
+        return True  # déjà gardé, avec la fiche des parents d'avant l'accouplement : un rattrapage ne le remplace pas
     sheets = [mount_sheet(conn, uid) for uid in pair]
     if any(s is None for s in sheets):
         return False
