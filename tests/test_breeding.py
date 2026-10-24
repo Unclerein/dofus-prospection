@@ -144,7 +144,10 @@ def test_target_zone_follows_the_gauges_left_to_fill():
     assert sim.target_zone(herd(0, love=5000, maturity=0)) == (1, 2000)
     assert sim.target_zone(herd(0, love=20000, maturity=0, stamina=0)) == (-2000, -1)
     assert sim.target_zone(herd(0, love=20000, maturity=20000)) is None
-    assert sim.target_zone(herd(0, love=0, maturity=20000, stamina=0)) is None  # amour et endurance ne montent jamais ensemble
+    # Amour et endurance ne montent jamais ensemble : l'enclos suit le côté où sont ses DD.
+    assert sim.target_zone(herd(-3000, -1600, -5000, love=0, maturity=0, stamina=1300)) == (-2000, -1)
+    assert sim.target_zone(herd(800, 4000, love=0, maturity=0, stamina=0)) == (1, 2000)
+    assert sim.target_zone(herd(-200, love=0, maturity=20000, stamina=0)) == (-5000, -1)
 
 
 def test_advice_waits_for_a_five_minute_window():
@@ -266,3 +269,12 @@ def test_mating_preview_and_birth_are_recorded():
     assert c.execute("SELECT color, parents FROM mounts WHERE uid = ?", (uid(9).decode(),)).fetchone() == (10, "[18, 10]")
     text = mating_export.lines(c)
     assert len(text) == 2 and "46 (cible) 38.10 %" in text[0] and "bébé couleur 10 mâle" in text[1] and uid(1).decode() not in "".join(text)
+
+
+def test_a_negative_herd_of_babies_is_brought_to_minus_2000():
+    # Bébés : tout à remplir, sérénité négative, baffeur et foudroyeur en marche (l'enclos du 24/10).
+    p = sim.Paddock(1, 0.0, [75600, 79980, 78730, 60000, 65040, 80000], {sim.SLAPPER, sim.BLASTER},
+                    herd(-5000, -4615, -2582, -1648, love=0, maturity=0, stamina=1300))
+    first = sim.gestures(p)[0]
+    # Le baffeur regroupe les DD contre −5 000, puis le caresseur les remonte toutes entre −2 000 et −1.
+    assert first.kind == "switch" and first.title == "Passe au caresseur" and first.zone == (-2000, -1)

@@ -108,10 +108,17 @@ def step(p: Paddock, tiers=TIERS) -> None:
 
 
 def target_zone(mounts: list[list[int]]) -> tuple[int, int] | None:
-    """Zone de sérénité où montent toutes les jauges encore incomplètes de l'enclos ; None si aucune ou si elles s'excluent."""
+    """Zone de sérénité où montent ensemble les jauges encore incomplètes de l'enclos ; None si toutes sont pleines.
+
+    L'amour (sérénité positive) et l'endurance (négative) ne montent jamais ensemble : quand les deux manquent, l'enclos
+    suit le côté où sont déjà ses DD (sérénité médiane), et l'autre jauge viendra ensuite. Un enclos négatif vise donc
+    −2 000 à −1 (endurance et maturité), un positif 1 à 2 000 (amour et maturité)."""
     missing = {g for m in mounts for g in GAUGE_NAMES if m[g] < GAUGE_MAX}
     if not missing:
         return None
+    if LOVE in missing and STAMINA in missing:
+        serenities = sorted(m[SERENITY] for m in mounts)
+        missing.discard(LOVE if serenities[len(serenities) // 2] < 0 else STAMINA)
     low = max(ZONES[g][0] for g in missing)
     high = min(ZONES[g][1] for g in missing)
     return (low, high) if low <= high else None
