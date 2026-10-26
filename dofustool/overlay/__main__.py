@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import traceback
 from ctypes import wintypes
 from pathlib import Path
 
@@ -30,6 +31,7 @@ POLL_MS = 400  # au repos : nouvelles ventes, fenêtre active
 FORGE_POLL_S = 3.0  # atelier de forgemagie et succès du groupe
 BREEDING_POLL_S = 5.0  # enclos : le prochain geste de sérénité
 SOUND_PATH = db.MARKET_PATH.parent / "sounds" / "chime.wav"
+LOG_PATH = db.MARKET_PATH.parent / "overlay.log"
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
 STALE_FIGHT_S = 180.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
@@ -229,6 +231,7 @@ class Window:
         self.breeding, self.chime = breeding, chime  # élevage : le prochain geste de chaque enclos, et un petit son
         self.breeding_checked = 0.0
         self.breeding_shown = BREEDING_SHOWN_S
+        self.reported: set[str] = set()  # erreurs déjà notées dans le journal
         self.rune_icon_item = items.rune_item() if forge else 0
         self.is_demo = demo is not None
         self.anywhere, self.game = anywhere, game  # anywhere : angle de l'écran, que le jeu soit là ou non
@@ -247,6 +250,29 @@ class Window:
         self.root.after(POLL_MS, self.tick)
 
     def tick(self) -> None:
+        """Un passage, puis le suivant. Une erreur imprévue est notée dans data/overlay.log au lieu d'arrêter la fenêtre :
+        sans cela, la boucle s'arrêterait en silence et plus aucun bandeau ne s'afficherait."""
+        try:
+            delay = self._tick()
+        except Exception as exc:  # noqa: BLE001
+            self.report(exc)
+            delay = POLL_MS
+        if delay is not None:
+            self.root.after(delay, self.tick)
+
+    def report(self, exc: Exception) -> None:
+        message = f"{type(exc).__name__}: {exc}"
+        if message in self.reported:
+            return
+        self.reported.add(message)
+        try:
+            with LOG_PATH.open("a", encoding="utf-8") as log:
+                log.write(time.strftime("%Y-%m-%d %H:%M:%S ") + "".join(traceback.format_exception(exc)) + chr(10))
+        except OSError:
+            pass
+
+    def _tick(self) -> int | None:
+        """Délai avant le prochain passage (ms), ou None quand la démonstration est finie."""
         now = time.time()
         if now - self.checked >= POLL_MS / 1000:
             if self.area is not None and self.checked:
@@ -290,10 +316,10 @@ class Window:
             self.paint(now)
         if self.is_demo and not self.demo and not self.board.banners and not getattr(self.breeding, "script", None):
             self.root.destroy()  # démonstration terminée
-            return
+            return None
         fast = bool(self.board.banners and self.area)
         fast = fast or (self.show_rune and self.rune and now - self.rune_changed < draw.BUMP_S + 0.2)
-        self.root.after(FRAME_MS if fast else POLL_MS, self.tick)
+        return FRAME_MS if fast else POLL_MS
 
     def announce(self, now: float) -> None:
         mission = self.forge.mission(now)
