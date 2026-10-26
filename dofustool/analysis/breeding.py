@@ -257,10 +257,15 @@ def gestures(p: Paddock, tiers=TIERS) -> list[Advice]:
         out.append(serenity)
     empty, full = forecast(p, tiers)
     mounts = len(p.mounts)
+    # Un objet coupé depuis (clic après l'événement) n'a plus rien à annoncer : sinon il reviendrait sitôt réglé.
+    active = set(p.active)
+    for _, index, on in sorted(p.toggles):
+        (active.add if on else active.discard)(index)
     for index, at in full.items():
-        out.append(Advice(p.paddock_id, "full", at, at + EVENT_KEEP_S, None, index, None, mounts))
+        if index in active:
+            out.append(Advice(p.paddock_id, "full", at, at + EVENT_KEEP_S, None, index, None, mounts))
     for index, at in empty.items():
-        if index not in full or at < full[index]:
+        if index in active and (index not in full or at < full[index]):
             out.append(Advice(p.paddock_id, "empty", at, at + EVENT_KEEP_S, None, index, None, mounts))
     return sorted(out, key=lambda a: a.at)
 

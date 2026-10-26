@@ -235,6 +235,9 @@ def test_overlay_announces_a_full_gauge_once_until_it_is_dealt_with():
     assert watch.due(NOW + 3 * 3600) == []  # une seule fois tant qu'on n'y a pas touché
     db.save_toggle(c, 1, NOW + 3 * 3600 + 1, sim.LOVER, False)
     assert watch.done(NOW + 3 * 3600 + 5) == [(1, "full", sim.LOVER, None)]
+    assert watch.due(NOW + 3 * 3600 + 6) == []  # coupée : le bandeau ne revient pas
+    db.save_toggle(c, 1, NOW + 3 * 3600 + 60, sim.LOVER, True)  # relancée alors que l'amour est plein : on prévient encore
+    assert [a.kind for a in watch.due(NOW + 3 * 3600 + 70)] == ["full"]
 
 
 def test_mating_preview_and_birth_are_recorded():
@@ -278,3 +281,15 @@ def test_a_negative_herd_of_babies_is_brought_to_minus_2000():
     first = sim.gestures(p)[0]
     # Le baffeur regroupe les DD contre −5 000, puis le caresseur les remonte toutes entre −2 000 et −1.
     assert first.kind == "switch" and first.title == "Passe au caresseur" and first.zone == (-2000, -1)
+
+
+def test_an_empty_object_cut_is_not_announced_again():
+    c = db.connect(":memory:")
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(active=(3,), objects=(0, 0, 0, 50, 0, 0),
+                                                              herd=[dict(serenity=1000, maturity=0, stamina=20000)]), PADDOCK, STABLE), NOW)  # fmt: skip
+    watch = Breeding(c)
+    [empty] = watch.due(NOW + 10 * sim.TICK_S)
+    assert empty.kind == "empty" and empty.running == sim.TROUGH
+    db.save_toggle(c, 1, NOW + 200, sim.TROUGH, False)
+    assert watch.done(NOW + 205) == [(1, "empty", sim.TROUGH, None)]
+    assert watch.due(NOW + 206) == []
