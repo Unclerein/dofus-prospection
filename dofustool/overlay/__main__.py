@@ -312,7 +312,7 @@ class Window:
         deadline = advice.until if advice.kind in ("stop", "switch") else 0.0  # objet vide, jauges pleines : pas d'heure limite
         gesture = (advice.paddock_id, advice.kind, advice.running, advice.then)
         self.board.note(f"ÉLEVAGE · ENCLOS {advice.paddock_id}", advice.title, text, now, shown_s=self.breeding_shown, kind="élevage",
-                        deadline=deadline, gesture=gesture)  # fmt: skip
+                        deadline=deadline, gesture=gesture, glyph=advice.gauge if advice.kind in ("full", "empty") and advice.gauge else "")  # fmt: skip
         if self.chime:
             sound.play(SOUND_PATH)
 
@@ -326,7 +326,7 @@ class Window:
                 name=banner.title, quantity=0, gain=banner.text, icon=self.items.icon(banner.item_id) if banner.item_id else None,
                 age=now - banner.born, left=banner.until - now, total=banner.shown_s, bumped=99.0,
                 label=banner.label, badge=countdown(banner.deadline - now) if banner.deadline else banner.badge, star=banner.star,
-                **({"accent": draw.BREEDING, "glyph": "gauge"} if banner.kind == "élevage" else {}),
+                **({"accent": draw.GAUGE_COLORS.get(banner.glyph, draw.BREEDING), "glyph": banner.glyph or "gauge"} if banner.kind == "élevage" else {}),
             )
             for banner in self.board.banners
         ]  # fmt: skip

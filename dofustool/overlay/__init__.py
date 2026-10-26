@@ -46,6 +46,7 @@ class Banner:
     kind: str = ""  # « élevage » : couleur et cadran à part
     deadline: float = 0.0  # heure limite : la pastille décompte le temps qu'il reste
     gesture: tuple | None = None  # élevage : le geste demandé ; le bandeau s'efface quand il est fait
+    glyph: str = ""  # élevage : la jauge en cause (« amour »…), pour sa couleur et son symbole ; sinon le cadran de sérénité
     dismissed: bool = False  # effacé avant son terme : il ne revient pas au retour du jeu
 
 
@@ -90,11 +91,11 @@ class Board:
         return banner
 
     def note(self, label: str, title: str, text: str, now: float, item_id: int = 0, badge: str = "", star: bool = False, shown_s: float = 6.0,
-             kind: str = "", deadline: float = 0.0, gesture: tuple | None = None) -> Banner:  # fmt: skip
+             kind: str = "", deadline: float = 0.0, gesture: tuple | None = None, glyph: str = "") -> Banner:  # fmt: skip
         """Un bandeau d'annonce (mission, succès, élevage) : il ne se regroupe avec aucun autre."""
         self.expire(now)
         banner = Banner(item_id, 0, 0, now + shown_s, born=now, label=label, title=title, text=text, badge=badge, star=star, shown_s=shown_s,
-                        kind=kind, deadline=deadline, gesture=gesture)  # fmt: skip
+                        kind=kind, deadline=deadline, gesture=gesture, glyph=glyph)  # fmt: skip
         self.banners.append(banner)
         del self.banners[: -self.limit]
         return banner

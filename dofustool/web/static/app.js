@@ -1281,6 +1281,19 @@ const signedNumber = (n) => (n < 0 ? '−' + fmt(-n) : fmt(n));
 const fullWord = (gauge) => (gauge === 'amour' ? 'plein' : 'pleine');  // l'amour est masculin
 const clock = (ts) => new Date(ts * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
+/** Les trois jauges : leur couleur (classe g-…), leur symbole, et l'objet qui les remplit. Coeur rouge pour l'amour
+ * (dragofesse), éclair jaune pour l'endurance (foudroyeur), goutte bleu clair pour la maturité (abreuvoir). */
+const GAUGES = {
+  amour: { cls: 'g-love', path: 'M12 20.5C6 16.3 2.5 13 2.5 9 2.5 6.2 4.6 4 7.3 4c1.9 0 3.5 1 4.7 2.6C13.2 5 14.8 4 16.7 4c2.7 0 4.8 2.2 4.8 5 0 4-3.5 7.3-9.5 11.5z' },
+  endurance: { cls: 'g-stamina', path: 'M13.5 2 4.5 13.5h6L9.5 22l9-11.5h-6z' },
+  'maturité': { cls: 'g-maturity', path: 'M12 2.5C8.5 7.2 5.5 10.9 5.5 14.6a6.5 6.5 0 0 0 13 0C18.5 10.9 15.5 7.2 12 2.5z' },
+};
+const GAUGE_OF_OBJECT = { foudroyeur: 'endurance', abreuvoir: 'maturité', dragofesse: 'amour' };
+const gaugeClass = (name) => (GAUGES[name] ? GAUGES[name].cls : '');
+const gaugeIcon = (name, size = 14) => (GAUGES[name]
+  ? svg('svg', { class: 'gauge-icon ' + GAUGES[name].cls, width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': 'true' }, svg('path', { d: GAUGES[name].path }))
+  : null);
+
 /** Temps restant jusqu'à une heure, en clair ; tenu à jour chaque seconde par tickCountdowns. */
 function untilText(ts) {
   const s = Math.max(0, Math.round(ts - Date.now() / 1000));
@@ -1309,6 +1322,9 @@ function serenityScale(p) {
       h('span', { class: 'serenity-mid' }),
       p.zone && h('span', { class: 'serenity-zone', style: `left: ${at(p.zone[0])}; width: ${width(p.zone[0], p.zone[1])}` }),
       h('span', { class: 'serenity-herd' + (inZone ? ' in' : ''), style: `left: ${at(low)}; width: max(10px, ${width(low, high)})` })),
+    h('div', { class: 'serenity-bands', 'aria-hidden': 'true' },
+      [['endurance', -5000, -1], ['maturité', -2000, 2000], ['amour', 1, 5000]].map(([name, a, b]) =>
+        h('span', { class: 'serenity-band ' + gaugeClass(name), style: `left: ${at(a)}; width: ${width(a, b)}`, title: `${name} : ${signedNumber(a)} à ${signedNumber(b)}` }, gaugeIcon(name, 11)))),
     h('div', { class: 'serenity-ticks muted' }, h('span', {}, '−5 000'), h('span', {}, '0'), h('span', {}, '5 000')));
 }
 
@@ -1316,8 +1332,8 @@ function gaugeRow(name, gauge, now) {
   const [low, high] = gauge.range;
   const full = low >= GAUGE_MAX;
   const eta = !full && gauge.full_at && gauge.full_at > now ? h('span', { class: 'gauge-eta' }, `${fullWord(name)} dans `, countdown(gauge.full_at)) : null;
-  return h('div', { class: 'gauge-row' },
-    h('span', { class: 'gauge-name' }, name),
+  return h('div', { class: 'gauge-row ' + gaugeClass(name) },
+    h('span', { class: 'gauge-name' }, gaugeIcon(name), name),
     h('span', { class: 'gauge-bar' }, h('span', { class: 'gauge-fill' + (full ? ' full' : ''), style: `width: ${(low / GAUGE_MAX) * 100}%` }),
       high > low && h('span', { class: 'gauge-spread', style: `left: ${(low / GAUGE_MAX) * 100}%; width: ${((high - low) / GAUGE_MAX) * 100}%` })),
     h('span', { class: 'gauge-value' + (full ? ' gain' : '') }, full ? fullWord(name) : low === high ? fmt(low) : `${fmt(low)} à ${fmt(high)}`, eta));
@@ -1325,17 +1341,20 @@ function gaugeRow(name, gauge, now) {
 
 /** Une ligne de geste à venir, sous le prochain : quoi, et dans combien de temps. */
 function gestureLine(g, now) {
-  return h('li', {}, h('span', {}, g.title, g.kind === 'full' ? h('span', { class: 'muted' }, ` · ${g.gauge} ${fullWord(g.gauge)}`) : null),
+  const gauge = (g.kind === 'full' || g.kind === 'empty') && GAUGE_OF_OBJECT[g.running];
+  return h('li', {}, h('span', { class: 'breed-line ' + gaugeClass(gauge) }, gaugeIcon(gauge, 12), g.title,
+    g.kind === 'full' ? h('span', { class: 'muted' }, ` · ${g.gauge} ${fullWord(g.gauge)}`) : null),
     h('span', { class: 'muted' }, g.at > now ? ['dans ', countdown(g.at)] : 'maintenant'));
 }
 
 function paddockCard(p, now) {
   const [a, ...later] = p.gestures;
   const waiting = a && a.at > now;
+  const gauge = a && (a.kind === 'full' || a.kind === 'empty') && GAUGE_OF_OBJECT[a.running];
   const next = a
-    ? h('div', { class: 'breed-next' + (waiting ? '' : ' due') },
+    ? h('div', { class: 'breed-next' + (waiting ? '' : ' due') + (gauge ? ' ' + gaugeClass(gauge) : '') },
       h('div', { class: 'breed-kicker' }, waiting ? 'Prochain geste' : 'À faire maintenant'),
-      h('div', { class: 'breed-title' }, a.title),
+      h('div', { class: 'breed-title' }, gaugeIcon(gauge, 20), a.title),
       h('div', { class: 'breed-when' }, waiting
         ? ['dans ', h('strong', {}, countdown(a.at)), ` · à ${clock(a.at)}`]
         : a.kind === 'stop' || a.kind === 'switch' ? ['encore ', h('strong', {}, countdown(a.until)), ` · avant ${clock(a.until)}`] : 'depuis ' + clock(a.at)),
@@ -1343,8 +1362,8 @@ function paddockCard(p, now) {
       a.kind === 'full' && h('div', { class: 'muted small' }, `${a.gauge[0].toUpperCase()}${a.gauge.slice(1)} ${fullWord(a.gauge)} pour toutes les DD de l’enclos.`),
       later.length ? h('ul', { class: 'breed-later' }, later.slice(0, 4).map((g) => gestureLine(g, now))) : null)
     : h('div', { class: 'breed-next idle' }, h('div', { class: 'breed-kicker' }, 'Prochain geste'), h('div', { class: 'breed-title soft' }, p.hint));
-  const objects = h('div', { class: 'paddock-objects' }, p.objects.map((o) => h('div', { class: 'paddock-object' + (o.active ? ' on' : '') + (o.points ? '' : ' empty') },
-    h('div', { class: 'object-name' }, h('span', { class: 'dot' + (o.active ? ' on' : '') }), o.name),
+  const objects = h('div', { class: 'paddock-objects' }, p.objects.map((o) => h('div', { class: 'paddock-object' + (o.active ? ' on' : '') + (o.points ? '' : ' empty') + (GAUGE_OF_OBJECT[o.name] ? ' ' + gaugeClass(GAUGE_OF_OBJECT[o.name]) : '') },
+    h('div', { class: 'object-name' }, h('span', { class: 'dot' + (o.active ? ' on' : '') }), o.name, gaugeIcon(GAUGE_OF_OBJECT[o.name], 12)),
     h('div', { class: 'object-points' }, fmt(o.points)),
     h('div', { class: 'muted small' }, o.active ? (o.points ? `${o.rate} par tick` : 'vide') : o.points ? 'à l’arrêt' : 'vide'),
     o.active && o.empty_at && o.empty_at > now ? h('div', { class: 'small object-eta' }, 'vide dans ', countdown(o.empty_at)) : null)));
@@ -1526,7 +1545,8 @@ function pathDiagram(plan, byId) {
 function mountChoice(m, picked, byId, onPick, disabled) {
   const where = m.place ? `Enclos ${m.place}` : 'Étable';
   const state = m.fecund ? h('span', { class: 'tag good' }, 'Féconde')
-    : h('span', { class: 'tag', title: Object.entries(m.missing).map(([gauge, n]) => `${gauge} : il manque ${fmt(n)}`).join(' · ') },
+    : h('span', { class: 'tag gauge-tag', title: Object.entries(m.missing).map(([gauge, n]) => `${gauge} : il manque ${fmt(n)}`).join(' · ') },
+      Object.keys(m.missing).map((gauge) => gaugeIcon(gauge, 12)),
       Object.keys(m.missing).length === 1 ? `${Object.keys(m.missing)[0]} à remplir` : `${Object.keys(m.missing).length} jauges à remplir`);
   return h('button', { class: 'mount-choice' + (picked ? ' on' : ''), disabled, 'aria-pressed': String(picked), onclick: onPick },
     h('span', { class: 'mount-sex ' + (m.male ? 'm' : 'f') }, m.male ? '♂' : '♀'),
@@ -3331,6 +3351,12 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 24, date: '26 octobre 2026', title: 'Élevage : chaque jauge a sa couleur et son symbole', hash: '#/breeding', go: 'Ouvrir l’élevage', points: [
+    ['Couleurs :', 'amour en rouge (cœur), endurance en jaune (éclair), maturité en bleu clair (goutte). Sur les jauges, les objets d’enclos, les gestes à venir et la Génétique.'],
+    ['Sérénité :', 'sous l’échelle, la zone de chaque jauge : endurance de −5 000 à −1, maturité de −2 000 à 2 000, amour de 1 à 5 000.'],
+    ['Bandeaux en jeu :', 'jauge pleine ou objet vide s’affichent avec la couleur et le symbole de la jauge.'],
+    ['Corrigé :', 'après avoir coupé un objet vide ou une dragofesse dont la jauge est pleine, le bandeau ne revient plus aussitôt.'],
+  ] },
   { id: 23, date: '23 octobre 2026', title: 'Élevage : tes enclos suivis, et prévenu au bon moment', hash: '#/breeding', go: 'Ouvrir l’élevage', points: [
     ['Page Élevage :', 'ton étable en chiffres (fécondes, fertiles, stériles) et chaque enclos maintenant : sérénité de tes DD face à la zone visée, jauges, objets d’élevage et le temps avant qu’ils soient vides.'],
     ['Sérénité intelligente :', 'la zone à viser se déduit des jauges qui restent à remplir (amour et maturité : 1 à 2 000). L’app te dit quand passer du caresseur au baffeur, au moment qui laisse au moins 5 minutes pour couper, puis quand couper.'],

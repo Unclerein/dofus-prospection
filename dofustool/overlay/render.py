@@ -17,6 +17,8 @@ RADIUS, ICON, WELL = 14, 44, 54
 SURFACE, RAISED, LINE = (21, 29, 33), (27, 37, 42), (44, 58, 66)
 GROUND, TEXT, MUTED, ACCENT = (14, 19, 21), (233, 238, 236), (154, 168, 166), (227, 179, 65)
 BREEDING = (92, 200, 168)  # le vert « gain » du tableau de bord : les bandeaux d'élevage se reconnaissent d'un coup d'œil
+# Jauges d'élevage, aux couleurs du tableau de bord : amour rouge, endurance jaune, maturité bleu clair.
+GAUGE_COLORS = {"amour": (242, 114, 122), "endurance": (245, 212, 83), "maturité": (127, 207, 245)}
 
 APPEAR_S, LEAVE_S, BUMP_S = 0.22, 0.35, 0.45
 
@@ -37,7 +39,7 @@ class View:
     badge: str | None = None  # None : « ×quantité » ; "" : pas de pastille
     star: bool = False  # une étoile dorée à la place de l'image
     accent: tuple[int, int, int] = ACCENT  # liseré, étiquette, ligne du bas et fil du temps
-    glyph: str | None = None  # « gauge » : un cadran de sérénité à la place de l'image
+    glyph: str | None = None  # « gauge » : un cadran de sérénité ; « amour », « endurance », « maturité » : le symbole de la jauge
 
 
 @lru_cache(maxsize=32)
@@ -111,6 +113,24 @@ def gauge_glyph(draw: ImageDraw.ImageDraw, centre: tuple[float, float], scale: f
     draw.ellipse((pivot[0] - s(3), pivot[1] - s(3), pivot[0] + s(3), pivot[1] + s(3)), fill=(*TEXT, 255))
 
 
+def gauge_symbol(draw: ImageDraw.ImageDraw, centre: tuple[float, float], scale: float, gauge: str) -> None:
+    """Symbole d'une jauge, comme dans le tableau de bord : coeur (amour), éclair (endurance), goutte (maturité).
+    Dessiné sur une grille de 24, centrée sur le puits."""
+    unit = 34 * scale / 24
+    at = lambda x, y: (centre[0] + (x - 12) * unit, centre[1] + (y - 12) * unit)  # noqa: E731
+    disc = lambda x, y, r: (*at(x - r, y - r), *at(x + r, y + r))  # noqa: E731
+    fill = (*GAUGE_COLORS[gauge], 255)
+    if gauge == "amour":
+        draw.ellipse(disc(7.4, 9, 4.9), fill=fill)
+        draw.ellipse(disc(16.6, 9, 4.9), fill=fill)
+        draw.polygon([at(2.7, 10.6), at(12, 7.5), at(21.3, 10.6), at(12, 20.5)], fill=fill)
+    elif gauge == "endurance":
+        draw.polygon([at(13.5, 2), at(4.5, 13.5), at(10.5, 13.5), at(9.5, 22), at(18.5, 10.5), at(12.5, 10.5)], fill=fill)
+    else:
+        draw.ellipse(disc(12, 14.6, 6.5), fill=fill)
+        draw.polygon([at(12, 2.5), at(5.8, 12.6), at(18.2, 12.6)], fill=fill)
+
+
 def card(view: View, scale: float) -> Image.Image:
     s = lambda v: round(v * scale)  # noqa: E731
     image = card_base(scale, view.accent).copy()
@@ -120,6 +140,8 @@ def card(view: View, scale: float) -> Image.Image:
     picture = icon_image(view.icon, s(ICON)) if view.icon else None
     if view.glyph == "gauge":
         gauge_glyph(draw, (well[0] + s(WELL / 2), well[1] + s(WELL / 2)), scale, view.accent)
+    elif view.glyph in GAUGE_COLORS:
+        gauge_symbol(draw, (well[0] + s(WELL / 2), well[1] + s(WELL / 2)), scale, view.glyph)
     elif view.star:
         centre = (well[0] + s(WELL / 2), well[1] + s(WELL / 2))
         points = []
