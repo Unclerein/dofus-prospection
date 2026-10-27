@@ -1,8 +1,13 @@
 # Rédiger les notes de donjon
 
-Les notes (`notes/<id>-<nom>.toml`) complètent la fiche calculée depuis les données du jeu : l'essentiel du donjon,
+Les notes (`data/bestiary/notes/donjon-<id>.toml`, `avis-<monstre>.toml`) complètent la fiche calculée depuis les données du jeu : l'essentiel du donjon,
 l'ordre de focus, et pour chaque monstre sa portée, ses déplacements, son spécial et ses sorts. L'overlay les montre
 quand on appuie sur la touche des fiches en survolant un monstre.
+
+**Les notes ne vont jamais dans le dépôt** : le guide interdit la reproduction de ses textes et le dépôt est public. Elles
+restent dans `data/` et passent d'un joueur à l'autre par le hub de partage. L'envoi est automatique : l'interface
+(`python -m dofustool.web`) synchronise toutes les minutes, et une note écrite ou modifiée part à la synchro suivante.
+Pour une même note, la plus récente l'emporte : c'est ainsi qu'un ami améliore une fiche.
 
 ## La règle d'or
 
@@ -29,25 +34,24 @@ prêtées au mauvais monstre. Depuis, les notes suivent les règles ci-dessous, 
 
    Chercher les passages avec grep, ne pas lire le guide en entier. Corriger soi-même ce qui est faux ou supprimer la
    ligne. Lire le rapport de l'agent : il signale les contradictions et les trous du guide.
-5. **Tests puis commit sur `essai`** :
-   - `.venv/Scripts/python -m pytest -q tests/test_bestiary.py` (toutes les notes se lisent, et leurs monstres
-     appartiennent à leur donjon), puis toute la suite ;
-   - un commit par lot, qui nomme les donjons.
-
-   Jamais de push sur `main` sans le feu vert explicite du joueur.
+5. **Tests, puis partage** :
+   - `.venv/Scripts/python -m pytest -q tests/test_bestiary.py` : toutes les notes de ce PC se lisent, et leurs monstres
+     appartiennent à leur donjon ;
+   - les notes ne sont PAS commitées. Elles partent au hub toutes seules si l'interface tourne. Un commit sur `essai`
+     ne sert que si le code a changé, et jamais de push sur `main` sans le feu vert explicite du joueur.
 
 ## Avis de recherche
 
 Même procédure, avec trois différences :
 - **Préparation** : `--avis-queue` / `--avis-batch N` au lieu de `--queue` / `--batch`. Les fichiers s'appellent
   `data/bestiary/avis-<monstre>-guide.txt` et `avis-<monstre>-jeu.txt`.
-- **Fichier de la note** : `notes/avis/<monstre>-<nom>.toml`, avec `avis = <id du monstre recherché>` à la place de
-  `donjon = …`.
+- **Fichier de la note** : `data/bestiary/notes/avis-<monstre>.toml`, avec `avis = <id du monstre recherché>` à la
+  place de `donjon = …`.
 - **Contenu** : `focus` seulement si le guide en donne un, l'essentiel du combat, puis une section `[monstres.<id>]`
   pour le recherché et pour chaque monstre qui l'accompagne selon le guide.
 
 Pour la consigne de l'agent, reprendre celle des donjons en remplaçant « note de donjon » par « note d'avis de
-recherche », `donjon = {ID}` par `avis = {ID}`, le chemin de sortie par `notes\avis\{FICHIER}`, et les chemins des
+recherche », `donjon = {ID}` par `avis = {ID}`, le fichier de sortie par `avis-{ID}.toml`, et les chemins des
 fichiers par `avis-{ID}-guide.txt` et `avis-{ID}-jeu.txt`.
 
 ## Cas particuliers déjà tranchés
@@ -78,7 +82,7 @@ fausse.
   - m_flags & 4 = ligne de vue ; m_flags & 1 = en ligne
   - noms : table translations (id passé en texte, lang='fr') ; MonsterData.spells (JSON)
 - Exemple de note validée par le joueur, pour le ton et le format :
-  C:\dofus-test\dofustool\bestiary\notes\98-temple-koutoulou.toml. Ne la modifie pas.
+  C:\dofus-test\data\bestiary\notes\donjon-98.toml. Ne la modifie pas.
 
 ## Règles strictes
 1. Rien d'inventé, rien de déduit.
@@ -99,7 +103,7 @@ fausse.
 6. Passe de vérification : relis le guide, retrouve pour chaque ligne le passage qui la justifie, et supprime ce que tu
    ne peux pas justifier.
 
-## Format : écris C:\dofus-test\dofustool\bestiary\notes\{FICHIER}
+## Format : écris C:\dofus-test\data\bestiary\notes\{FICHIER}
 donjon = {ID}
 nom = "{NOM}"
 source = "Dofus pour les Noobs — {URL}"
@@ -136,5 +140,5 @@ fichier du dépôt. Ni commit, ni push.
 Pas de recopie de la note.
 ```
 
-`{FICHIER}` : `<id>-<nom en minuscules, sans accents, mots séparés par des tirets>.toml`, par exemple
-`67-transporteur-sylargh.toml`.
+`{FICHIER}` : `donjon-{ID}.toml` pour un donjon, par exemple `donjon-67.toml` ; `avis-{ID}.toml` pour un avis de
+recherche.

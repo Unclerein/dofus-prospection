@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import config, db
-from . import FM_SHARE_VERSION, apply, collect, collect_fm, fm_key, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
+from . import FM_SHARE_VERSION, apply, collect, collect_fm, collect_notes, fm_key, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
 
 log = logging.getLogger("dofustool.share")
 
@@ -102,6 +102,9 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     for i in range(0, len(passes), CHUNK):
         part = passes[i : i + CHUNK]
         chunks.append(([record for record, _ in part], [mark for _, mark in part]))
+    written = collect_notes(float(state.get("notes_mark", 0)))
+    if written:
+        chunks.append((written, [("notes", started)]))
     score = score_record(conn, state, cfg)
     if score is not None:
         chunks.append(([score[0]], [("score", score[1])]))
@@ -122,6 +125,9 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         if marks and marks[0][0] == "score":
             if int(reply.get("rejected", 0)) == 0:
                 set_state(conn, fm_score_sig=marks[0][1])
+        elif marks and marks[0][0] == "notes":
+            if int(reply.get("rejected", 0)) == 0:  # hub d'avant les notes : elles repartiront après sa mise à jour
+                set_state(conn, notes_mark=marks[0][1])
         elif marks:
             if int(reply.get("rejected", 0)) == 0:
                 mark_fm_sent(conn, marks)

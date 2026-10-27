@@ -156,6 +156,16 @@ def test_a_shared_keymap_only_fills_what_is_missing_on_the_same_build(tmp_path):
 # --- bout en bout, par le réseau local ------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def no_local_notes(tmp_path, monkeypatch):
+    """Les notes de donjon de ce PC (data/) ne doivent pas se mêler aux tests."""
+    from dofustool.bestiary import notes
+
+    empty = tmp_path / "notes-vides"
+    empty.mkdir()
+    monkeypatch.setattr(notes, "NOTES_DIR", empty)
+
+
 @pytest.fixture
 def hub_url(tmp_path):
     path = tmp_path / "hub.toml"
@@ -437,3 +447,28 @@ def test_the_forge_history_is_sent_again_once_with_its_new_details():
     client.sync_once(conn, cfg, post=hub)
     client.sync_once(conn, cfg, post=hub)
     assert sum(sent[:1]) == 4 and sum(sent) == 8  # tout repart une fois, pas deux
+
+
+def test_dungeon_notes_travel_through_the_hub_and_the_newest_wins(hub_url, tmp_path, monkeypatch):
+    import os
+
+    from dofustool.bestiary import notes
+
+    note = 'donjon = 98\nnom = "Temple de Koutoulou"\nsource = "x"\ndate_source = "2026-10-05"\nstatut = "à confirmer"\nfocus = []\n'
+    mine, theirs = tmp_path / "alice", tmp_path / "bob"
+    mine.mkdir()
+    (mine / "donjon-98.toml").write_text(note, encoding="utf-8")
+    os.utime(mine / "donjon-98.toml", (NOW - 60, NOW - 60))
+    record = share.collect_notes(0, mine)[0]
+    assert record["key"] == "donjon-98" and share.validate(record)
+    assert not share.validate({**record, "key": "donjon-99"})  # le nom doit être celui du contenu
+    assert not share.validate({**record, "data": {"toml": "pas du toml ["}})
+    alice, bob = db.connect(":memory:"), db.connect(":memory:")
+    monkeypatch.setattr(notes, "NOTES_DIR", mine)
+    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 1
+    assert client.sync_once(alice, member(hub_url, "jeton-alice-0123456789"))["sent"] == 0  # déjà prise
+    monkeypatch.setattr(notes, "NOTES_DIR", theirs)
+    assert client.sync_once(bob, member(hub_url, "jeton-bob-0123456789xx"))["received"] == 1
+    assert notes.load(theirs)[98].name == "Temple de Koutoulou"
+    # Une note reçue plus ancienne que la sienne ne l'écrase pas.
+    assert not share.save_note({**record, "at": NOW - 3600}, theirs)

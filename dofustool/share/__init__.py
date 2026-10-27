@@ -24,16 +24,19 @@ fusion que la capture : le relevé le plus récent gagne.
 """
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import time
 from pathlib import Path
 
 from .. import db, identify
+from ..bestiary import notes as bestiary_notes
 from ..db import GRAIN_DAY, GRAIN_HOUR
 from ..messages.hdv_listings import HdvListings, Listing
 
-KINDS = ("hdv", "market", "prices", "keymap", "fm", "fm_refusal", "fm_score")
+KINDS = ("hdv", "market", "prices", "keymap", "fm", "fm_refusal", "fm_score", "note")
+MAX_NOTE = 64 * 1024  # une note de donjon fait quelques Ko
 FM_KINDS = ("fm", "fm_refusal", "fm_score")
 SCORE_FIELDS = {"character", "points", "passes", "kamas", "missions"}
 CHARACTER = re.compile(r"^[^\W\d_][\w'-]{1,29}$")  # noms de personnage : lettres, tiret, apostrophe
@@ -98,7 +101,7 @@ def validate(record, now: float | None = None) -> bool:
         return False
     key, at, data = record.get("key"), record.get("at"), record.get("data")
     kind = record["kind"]
-    max_age = FM_MAX_AGE_S if kind in FM_KINDS else MAX_AGE_S
+    max_age = FM_MAX_AGE_S if kind in FM_KINDS or kind == "note" else MAX_AGE_S
     if not isinstance(key, str) or not 0 < len(key) <= 200 or not _is_time(at, now, max_age) or not isinstance(data, dict):
         return False
     try:
@@ -114,6 +117,12 @@ def validate(record, now: float | None = None) -> bool:
                 and _is_flag(data["pool_change"], (0, 1, 2))
                 and _is_effects(data["before"]) and _is_effects(data["after"])
             )  # fmt: skip
+        if kind == "note":
+            text = data.get("toml")
+            if set(data) != {"toml"} or not isinstance(text, str) or len(text) > MAX_NOTE:
+                return False
+            note = bestiary_notes.read(text)
+            return note is not None and bestiary_notes.key_of(note) == key
         if kind == "fm_score":
             missions = data["missions"]
             return (
@@ -321,11 +330,41 @@ def forget_fm_sent(conn: sqlite3.Connection) -> None:
 # --- ce que ce PC reçoit -------------------------------------------------------
 
 
+def collect_notes(since: float, directory: Path | None = None) -> list[dict]:
+    """Les notes de donjon écrites ou modifiées sur ce PC depuis `since` (date du fichier)."""
+    directory = directory or bestiary_notes.NOTES_DIR
+    records = []
+    for path in sorted(directory.glob("*.toml")) if directory.exists() else []:
+        try:
+            at, text = path.stat().st_mtime, path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        note = bestiary_notes.read(text)
+        key = bestiary_notes.key_of(note) if note else None
+        if at > since and key and len(text) <= MAX_NOTE:
+            records.append({"kind": "note", "key": key, "at": at, "data": {"toml": text}})
+    return records
+
+
+def save_note(record: dict, directory: Path | None = None) -> bool:
+    """Garde une note reçue si elle est plus récente que la nôtre ; le fichier prend sa date, pour ne pas la renvoyer."""
+    directory = directory or bestiary_notes.NOTES_DIR
+    path = directory / f"{record['key']}.toml"
+    if path.exists() and path.stat().st_mtime >= record["at"]:
+        return False
+    directory.mkdir(parents=True, exist_ok=True)
+    path.write_text(record["data"]["toml"], encoding="utf-8")
+    os.utime(path, (record["at"], record["at"]))
+    return True
+
+
 def apply(conn: sqlite3.Connection, record: dict, keymap_path: Path | None = None) -> bool:
     """Fusionne un enregistrement reçu dans la base locale. Renvoie False s'il est refusé."""
     if not validate(record):
         return False
     kind, at, data = record["kind"], record["at"], record["data"]
+    if kind == "note":
+        return save_note(record)
     # Passages et scores : pas d'écriture disque à chaque fois, la synchro valide tout un paquet d'un coup.
     if kind == "fm_score":
         conn.execute(

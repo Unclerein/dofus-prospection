@@ -30,7 +30,7 @@ PULL_BYTES = 3 * 1024 * 1024
 # Au-delà, un enregistrement n'est plus distribué : chaque joueur garde son propre historique.
 # Les passages de forgemagie n'y sont pas : ils restent tous, un nouveau venu les reçoit aussi.
 KEEP_S = {"hdv": 3 * 86400.0, "prices": 3 * 86400.0, "market": 60 * 86400.0, "keymap": 60 * 86400.0}
-OWN_KINDS = ("fm", "fm_refusal", "fm_score")  # ce qu'un PC réinstallé peut redemander de ce qu'il a lui-même envoyé
+OWN_KINDS = ("fm", "fm_refusal", "fm_score", "note")  # ce qu'un PC réinstallé peut redemander de ce qu'il a lui-même envoyé
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS records (

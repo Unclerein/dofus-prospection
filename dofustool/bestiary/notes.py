@@ -1,14 +1,14 @@
-"""Notes écrites des donjons (notes/<donjon>-<nom>.toml) et des avis de recherche (notes/avis/<monstre>-<nom>.toml) :
-l'essentiel, l'ordre de focus, et ce qu'il faut savoir de chaque monstre.
+"""Notes écrites des donjons (donjon-<id>.toml) et des avis de recherche (avis-<monstre>.toml) : l'essentiel, l'ordre
+de focus, et ce qu'il faut savoir de chaque monstre.
 
-Rédigées d'après Dofus pour les Noobs, en nos propres mots ; chaque note dit sa source, sa date et si elle a été vérifiée en jeu.
+Rédigées d'après Dofus pour les Noobs, en nos propres mots ; chaque note dit sa source, sa date et si elle a été vérifiée
+en jeu. Elles restent hors du dépôt (data/bestiary/notes) et passent d'un joueur à l'autre par le hub de partage.
 """
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-NOTES_DIR = Path(__file__).resolve().parent / "notes"
-WANTED_DIR = NOTES_DIR / "avis"
+NOTES_DIR = Path(__file__).resolve().parents[2] / "data" / "bestiary" / "notes"
 
 
 @dataclass(frozen=True)
@@ -52,26 +52,38 @@ def parse(raw: dict) -> Note:
                 tuple(int(m) for m in raw.get("focus", [])), essentials, monsters, wanted)  # fmt: skip
 
 
+def key_of(note: Note) -> str | None:
+    """Nom d'une note, partout le même (fichier, hub) : « donjon-98 », « avis-460 »."""
+    if note.wanted:
+        return f"avis-{note.wanted}"
+    return f"donjon-{note.dungeon}" if note.dungeon > 0 else None
+
+
+def read(text: str) -> Note | None:
+    try:
+        return parse(tomllib.loads(text))
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _all(directory: Path) -> list[Note]:
+    """Toutes les notes lisibles du dossier. Une note illisible est ignorée : elle ne doit pas empêcher les autres de servir."""
+    out = []
+    for path in sorted(directory.glob("*.toml")):
+        try:
+            note = read(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if note is not None:
+            out.append(note)
+    return out
+
+
 def load(directory: Path = NOTES_DIR) -> dict[int, Note]:
-    """Toutes les notes, par donjon. Une note illisible est ignorée : elle ne doit pas empêcher les autres de servir."""
-    notes = {}
-    for path in sorted(directory.glob("*.toml")):
-        try:
-            note = parse(tomllib.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        notes[note.dungeon] = note
-    return notes
+    """Les notes de donjon, par donjon."""
+    return {note.dungeon: note for note in _all(directory) if not note.wanted and note.dungeon > 0}
 
 
-def load_wanted(directory: Path = WANTED_DIR) -> dict[int, Note]:
+def load_wanted(directory: Path = NOTES_DIR) -> dict[int, Note]:
     """Les notes d'avis de recherche, par monstre recherché."""
-    notes = {}
-    for path in sorted(directory.glob("*.toml")):
-        try:
-            note = parse(tomllib.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        if note.wanted:
-            notes[note.wanted] = note
-    return notes
+    return {note.wanted: note for note in _all(directory) if note.wanted}
