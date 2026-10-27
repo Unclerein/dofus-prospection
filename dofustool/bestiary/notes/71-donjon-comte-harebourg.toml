@@ -1,0 +1,187 @@
+donjon = 71
+nom = "Donjon du Comte Harebourg"
+source = "Dofus pour les Noobs — https://www.dofuspourlesnoobs.com/donjon-du-comte-harebourg.html"
+date_source = "2026-03-02"
+statut = "à confirmer"
+bandeau = "Comte · Invulnérable : fais-le échanger sa place avec une entité"
+focus = [3412]
+
+[[essentiel]]
+type = "ok"
+titre = "Ordre de focus du guide"
+texte = "Cycloïde d'abord (Sinistrofu à 6 joueurs ou plus). 1re fois : Comte en dernier."
+
+[[essentiel]]
+type = "danger"
+titre = "Confusion à chaque début de tour"
+texte = "Sort dévié de 90°, 180° ou 270° selon ta vitalité. Case inexistante ou hors vue : échec critique."
+
+[[essentiel]]
+type = "ok"
+titre = "Rendre le Comte vulnérable"
+texte = "Tours pairs seulement : fais-lui échanger sa place avec une entité quand ton coup le déplace."
+
+[[essentiel]]
+type = "danger"
+titre = "Glyphe de Mi-temps"
+texte = "Croix de 3 autour de lui, centre compris : un allié qui y commence son tour meurt."
+
+[[essentiel]]
+type = "danger"
+titre = "Rotation impossible = défaite"
+texte = "Si la case d'arrivée de la rotation est impossible, le combat se termine et tous meurent."
+
+[monstres.3384]
+nom = "Klime"
+
+[monstres.3391]
+nom = "Missiz Frizz"
+
+[monstres.3397]
+nom = "Nileza"
+
+[monstres.3409]
+nom = "Sylargh"
+
+[monstres.3410]
+nom = "Granduk"
+portee = "Hibougie : 3 à 10 cases, ligne de vue requise"
+deplacement = "Hiboumerang : échange sa place avec qui le frappe à distance"
+mecanique = "Hiboumerang : frappe autour de l'attaquant après l'échange, alliés compris"
+
+[[monstres.3410.sorts]]
+nom = "Hibouffonnerie"
+portee = "1 à 1 PO (corps à corps), ligne de vue non"
+effet = "Feu, en ligne de 4 ; vole de l'intelligence à la cible 2 tours ; se lance sans cible"
+
+[[monstres.3410.sorts]]
+nom = "Hibougie"
+portee = "3 à 10 PO, ligne de vue oui"
+effet = "Neutre, proportionnel à ses PV manquants"
+limite = "Ne tire qu'après avoir perdu de la vitalité"
+
+[[monstres.3410.sorts]]
+nom = "Hiboumerang"
+portee = "Sur lui-même (0 PO)"
+effet = "État Hiboum, lui et ses alliés au càc : coup reçu à distance = échange avec l'attaquant puis frappe autour"
+limite = "Dès son 1er tour, puis tous les 3 tours ; état 2 tours"
+
+[monstres.3411]
+nom = "Strigide"
+portee = "Strictus : 2 de base (modifiable), le plus souvent 8 avec Stridicule"
+deplacement = "Strictus : échange sa place avec sa cible"
+mecanique = "Strident : coup reçu à distance, PV retirés aux cibles à plus de 4 PO"
+
+[[monstres.3411.sorts]]
+nom = "Stricannement"
+portee = "0 à 0 PO (ennemis à son corps à corps)"
+effet = "Eau : touche les ennemis à son càc et réduit leur fuite 1 tour"
+
+[[monstres.3411.sorts]]
+nom = "Strictus"
+portee = "1 à 2 PO, ligne de vue oui, modifiable (le plus souvent à 8 PO)"
+effet = "Terre : échange sa place avec la cible"
+limite = "Délai de relance initial de 1"
+
+[[monstres.3411.sorts]]
+nom = "Stridicule"
+portee = "Sur lui-même (0 PO)"
+effet = "Gagne 6 PO (8 en critique) ; état Strident 2 tours : coup reçu à distance, PV retirés à qui est à plus de 4 PO"
+limite = "Dès le tour 1, 3 tours de relance"
+
+[monstres.3412]
+nom = "Cycloïde"
+portee = "Cyclore : 7 cases, en ligne, ligne de vue requise"
+deplacement = "Cyclore t'attire de 6 cases ; Cyclochette échange sa place avec toi"
+mecanique = "Cyclaustrophobe : un coup reçu au càc téléporte la cible à sa case de début de tour"
+
+[[monstres.3412.sorts]]
+nom = "Cyclore"
+portee = "1 à 7 PO, ligne de vue oui, en ligne"
+effet = "Neutre : retire des PM esquivables et attire la cible de 6 cases, donc à son corps à corps si possible"
+
+[[monstres.3412.sorts]]
+nom = "Cyclochette"
+portee = "1 à 1 PO (corps à corps), ligne de vue non"
+effet = "Air : échange sa place avec la cible ; il devient indéplaçable 1 tour"
+
+[[monstres.3412.sorts]]
+nom = "Cyclaustrophobe"
+portee = "Sur lui-même, zone de 6 cases autour de lui (0 PO)"
+effet = "Alliés et ennemis touchés : un coup reçu au càc les téléporte à leur case de début de tour, bonus de dommages"
+limite = "Au tour 1, puis tous les 3 tours ; effet 1 tour"
+
+[monstres.3414]
+nom = "Sinistrofu"
+portee = "Diligence : 6 cases, en ligne, sans ligne de vue requise"
+deplacement = "Diligence te vole 4 PM esquivables (6 en critique)"
+mecanique = "Brumidité : s'il est frappé, rend invisibles les cibles à 3 PO et leur rejoue les dégâts"
+
+[[monstres.3414.sorts]]
+nom = "Sinistérie"
+portee = "1 à 1 PO (corps à corps), ligne de vue non"
+effet = "Eau, en ligne de 4 ; retire 4 PO ; se lance sans cible"
+
+[[monstres.3414.sorts]]
+nom = "Diligence"
+portee = "1 à 6 PO, ligne de vue non, en ligne"
+effet = "Air : vole 4 PM esquivables à la cible"
+
+[[monstres.3414.sorts]]
+nom = "Brumidité"
+portee = "Sur lui-même (0 PO), zone de 3 PO autour de lui"
+effet = "État Brouillardent : s'il est frappé, rend invisibles les cibles de la zone et leur rejoue les dégâts reçus"
+limite = "État 1 tour, 2 tours de relance"
+
+[monstres.3415]
+nom = "Nocturlabe"
+portee = "Tonnerre mécanique : 5 cases, en ligne, ligne de vue requise"
+deplacement = "Tonnerre mécanique : il s'attire de 4 cases vers sa cible (pas en critique)"
+mecanique = "Tic Tac : un coup reçu au càc est renvoyé dans 6 cases autour de lui"
+
+[[monstres.3415.sorts]]
+nom = "Surchauffense"
+portee = "1 à 1 PO (corps à corps), ligne de vue non"
+effet = "Terre, en croix de 1, vol de vie ; état affaibli et malus de fuite 1 tour"
+limite = "Depuis l'une de ses cases au corps à corps"
+
+[[monstres.3415.sorts]]
+nom = "Tonnerre mécanique"
+portee = "1 à 5 PO, ligne de vue oui, en ligne"
+effet = "Feu : il s'attire de 4 cases vers sa cible (pas en critique) ; état insoignable 1 tour"
+
+[[monstres.3415.sorts]]
+nom = "Tactique du Tic Tac"
+portee = "Sur lui-même (0 PO)"
+effet = "État Éclaconique : coup reçu au càc renvoyé dans 6 cases autour de lui, ennemis touchés à moitié seulement"
+limite = "Posé dès le début du combat, avant son tour"
+
+[monstres.3416]
+nom = "Comte Harebourg"
+portee = "Contretemps : 14 cases, en ligne, sans ligne de vue requise"
+deplacement = "Tour impair : tu pivotes à 180° de lui ; tour pair : c'est lui qui pivote"
+mecanique = "Frapper au càc décale ta confusion de 90° antihoraire par ligne (plus après 10 coups)"
+
+[[monstres.3416.sorts]]
+nom = "Mi-temps"
+portee = "Autour de lui, croix de taille 3 (0 PO)"
+effet = "Glyphe d'1 tour, centre compris : un allié qui y commence son tour meurt"
+limite = "À chaque début de tour du Comte"
+
+[[monstres.3416.sorts]]
+nom = "Contretemps"
+portee = "1 à 14 PO, ligne de vue non, en ligne"
+effet = "Terre, plus une ligne eau ; vulnérable : téléporte la cible à sa case de début de tour"
+limite = "Téléportation : le tour après la perte d'invulnérabilité"
+
+[[monstres.3416.sorts]]
+nom = "Jaquemart"
+portee = "1 à 4 PO, ligne de vue non"
+effet = "Eau, vol de vie ; retire 3 PA esquivables (4 en critique) pour 1 tour"
+limite = "Seulement tant qu'il est invulnérable"
+
+[[monstres.3416.sorts]]
+nom = "Multicomte"
+portee = "1 à 6 PO, ligne de vue oui, en ligne et en diagonale"
+effet = "Feu, cercle de rayon 3 à 5 ; crée des illusions"
+limite = "Seulement vulnérable, dès le tour après la perte d'invuln."

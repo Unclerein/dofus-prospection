@@ -1,0 +1,179 @@
+donjon = 75
+nom = "Grotte de Kanigroula"
+source = "Dofus pour les Noobs — https://www.dofuspourlesnoobs.com/grotte-de-kanigroula.html"
+date_source = "2022-09-25"
+statut = "à confirmer"
+bandeau = "Kanigroula · Tue les monstres d'abord, le boss fuit : en dernier"
+focus = [3561, 3562, 3557, 3556]
+
+[[essentiel]]
+type = "ok"
+titre = "Monstres d'abord, boss en dernier"
+texte = "Le boss est fuyard : laisse-le s'éloigner tant qu'il reste des monstres vivants."
+
+[[essentiel]]
+type = "danger"
+titre = "Chaque mort de monstre te pénalise"
+texte = "Tu perds 10 % de résistances et 50 de puissance pour le combat, cumulable."
+
+[[essentiel]]
+type = "danger"
+titre = "Boss mort = monstres boostés"
+texte = "Les monstres vivants gagnent 2 PM, 200 puissance et 10 % de résistances pour le combat."
+
+[[essentiel]]
+type = "danger"
+titre = "Près des monstres, ils se boostent"
+texte = "Début et fin de tour d'un personnage : ennemis à 2 cases de lui +10 % critique, +100 puissance, cumulable."
+
+[[essentiel]]
+type = "danger"
+titre = "Tour 2 : Motivation captivante"
+texte = "Le boss donne +3 PA à tous ses alliés et des bonus à leurs sorts, 1 tour (relance 2 tours)."
+
+[monstres.3556]
+nom = "Kanigroula"
+portee = "Cinglante : 8 cases, ligne de vue. Dominante : 8 cases, tue une invocation"
+deplacement = "IA fuyarde. Rugissement : -2 PM pour toi, +2 PM à ses alliés (rayon 3, 2 tours)"
+mecanique = "Odorat Bestial : révèle tes invisibles à chaque tour. Pas d'invulnérabilité."
+
+[[monstres.3556.sorts]]
+nom = "Chachyène cinglante"
+portee = "PO 0 à 8, avec ligne de vue"
+effet = "Dégâts eau en croix de taille 1 ; retire 20 % de résistance eau, 2 tours"
+limite = "1 fois par tour"
+
+[[monstres.3556.sorts]]
+nom = "Rugissement matriarcal"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Dégâts neutre en cercle de rayon 3 ; ennemis -2 PM et -20 fuite, alliés +2 PM et +20 tacle (2 tours)"
+limite = "Relance de 3 tours"
+
+[[monstres.3556.sorts]]
+nom = "Chachyène dominante"
+portee = "PO 1 à 8, avec ligne de vue"
+effet = "Tue l'invocation ciblée"
+limite = "Dès le tour 3, relance de 2 tours"
+
+[[monstres.3556.sorts]]
+nom = "Motivation captivante"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "+3 PA à tous ses alliés et bonus à leurs sorts pour 1 tour (détail aux fiches des monstres)"
+limite = "Dès le tour 2, relance de 2 tours"
+
+[monstres.3557]
+nom = "Kanihilan"
+portee = "6 cases en ligne, avec ligne de vue"
+deplacement = "Rush sur sa cible jusqu'à 6 cases. Un sort de mêlée retire des PM"
+mecanique = "Renvoie les sorts à distance 1 tour (relance 3) ; sans effet si frappé en mêlée"
+
+[[monstres.3557.sorts]]
+nom = "Coup d'épaule"
+portee = "PO 1 à 6, en ligne, avec ligne de vue"
+effet = "Se précipite sur sa cible (avance de 5 cases) et inflige des dégâts air en zone"
+limite = "2 fois par tour, 1 fois par cible"
+
+[[monstres.3557.sorts]]
+nom = "Casse-caillou"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Dégâts neutre en croix de taille 1, en mêlée ; retire 2 PM pour 1 tour"
+limite = "1 fois par tour"
+
+[[monstres.3557.sorts]]
+nom = "Grrr"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Renvoie les sorts à distance reçus pendant 1 tour (sans effet si frappé en mêlée)"
+limite = "Relance de 3 tours"
+
+[monstres.3559]
+nom = "Félygiène"
+portee = "Jusqu'à 12 cases, avec ligne de vue"
+mecanique = "Vole 50 d'agilité ; malus de résistance et de portée sur sa cible"
+
+[[monstres.3559.sorts]]
+nom = "Griffhanger"
+portee = "PO 3 à 12, avec ligne de vue"
+effet = "Dégâts air ; vole 50 d'agilité à sa cible"
+limite = "1 fois par tour"
+
+[[monstres.3559.sorts]]
+nom = "Griffes aveuglantes"
+portee = "PO 1 à 12, en ligne, avec ligne de vue"
+effet = "Dégâts air ; malus de 4 de portée sur sa cible pour 1 tour"
+limite = "3 fois par tour, 1 fois par cible"
+
+[[monstres.3559.sorts]]
+nom = "Hygiène douteuse"
+portee = "PO 1 à 12, en ligne, avec ligne de vue"
+effet = "Malus de résistance et de tacle en zone pour 2 tours"
+limite = "Relance de 3 tours"
+
+[monstres.3560]
+nom = "Panthègros"
+portee = "Frappe en mêlée ; Choc électrique (aléatoire minimisé) : 12 cases, vue"
+mecanique = "Tue toute invocation dans un rayon de 2 ; minimise tes effets aléatoires 1 tour"
+
+[[monstres.3560.sorts]]
+nom = "Gros boulet"
+portee = "PO 1 à 1, sans ligne de vue"
+effet = "Dégâts eau en mêlée ; vole 100 de chance"
+limite = "1 fois par cible"
+
+[[monstres.3560.sorts]]
+nom = "Boulet sauteur"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Dégâts eau ; tue toutes les invocations dans un rayon de 2 autour de lui"
+limite = "Relance de 2 tours"
+
+[[monstres.3560.sorts]]
+nom = "Choc électrique"
+portee = "PO 1 à 12, avec ligne de vue"
+effet = "Minimise les effets aléatoires de la cible pendant 1 tour"
+limite = "1 fois par tour"
+
+[monstres.3561]
+nom = "Kaniblou"
+portee = "Griffes enflammées : 12 cases, vue. Lance enflammée : 10 en ligne. Soin : 6"
+deplacement = "IA fuyarde"
+mecanique = "Griffes enflammées : tu passes ton tour si tu es poussé ou subis des dégâts de poussée"
+
+[[monstres.3561.sorts]]
+nom = "Lance enflammée"
+portee = "PO 1 à 10, en ligne, avec ligne de vue"
+effet = "Dégâts feu ; vole 50 d'intelligence"
+limite = "1 fois par tour"
+
+[[monstres.3561.sorts]]
+nom = "Griffes enflammées"
+portee = "PO 1 à 12, avec ligne de vue"
+effet = "Dégâts feu selon ses PV restants ; tu passes ton tour si tu es poussé ou subis des dégâts de poussée après"
+limite = "1 fois par tour"
+
+[[monstres.3561.sorts]]
+nom = "Kaniblouse"
+portee = "PO 0 à 6, avec ligne de vue"
+effet = "Soigne un allié (feu)"
+limite = "1 fois par cible"
+
+[monstres.3562]
+nom = "Orfélin"
+portee = "Surtout en mêlée"
+mecanique = "Boubou : dégâts subis en mêlée réduits 2 tours, tous les 3 tours : frappe-le à distance"
+
+[[monstres.3562.sorts]]
+nom = "Toupie"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Dégâts terre en zone ; vole 50 de force aux ennemis"
+limite = "1 fois par tour"
+
+[[monstres.3562.sorts]]
+nom = "Tranchlame"
+portee = "PO 1 à 1, sans ligne de vue"
+effet = "Dégâts terre en mêlée ; malus de 20 % d'érosion pour 2 tours"
+limite = "2 fois par tour, 1 fois par cible"
+
+[[monstres.3562.sorts]]
+nom = "Boubou"
+portee = "PO 0 à 0, sans ligne de vue"
+effet = "Réduit les dégâts qu'il subit en mêlée pendant 2 tours"
+limite = "Relance de 3 tours"
