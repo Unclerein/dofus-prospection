@@ -805,3 +805,46 @@ table.mage-steps td.act { width: 88px; }
 .odds-list li.wanted .odds-bar span { background: var(--gain); }
 .odds-value { text-align: right; }
 @media (max-width: 760px) { .gstep-head { grid-template-columns: minmax(0, 1fr) auto; } }
+
+/* Donjons : liste à gauche, fiche du donjon à droite */
+.dj { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+.dj-list { flex: 1 1 300px; max-width: 360px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.dj-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.dj-tabs button { min-height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: transparent; color: var(--soft); font-size: 13px; }
+.dj-tabs button[aria-pressed="true"] { border-color: var(--accent); background: #2A2414; color: var(--accent); font-weight: 600; }
+.dj-rows { max-height: 70vh; overflow-y: auto; scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+.dj-row { display: flex; gap: 12px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--raised); color: var(--text); text-decoration: none; }
+.dj-row:hover { background: var(--raised); }
+.dj-row[aria-current="page"] { background: var(--row); box-shadow: inset 3px 0 0 var(--accent); }
+.dj-row .name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dj-well { flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 10px; background: var(--ground); border: 1px solid var(--line-strong); }
+.dj-well img { object-fit: contain; }
+.dj-well.boss { border: 2px solid var(--accent); }
+.dj-tag { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.dj-tag.note { color: var(--accent); background: #2A2414; }
+.dj-tag.calc { color: var(--muted); background: var(--raised); }
+.dj-tag.ok { color: var(--gain); background: #14261F; }
+.dj-tag.gold { color: var(--surface); background: var(--accent); }
+.dj-tag.boss { color: var(--accent); background: #2A2414; border: 1px solid #5A4A1E; }
+.dj-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.dj-head { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 18px 22px; }
+.dj-head h2 { font-family: var(--title); font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.dj-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--accent); }
+.dj-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; align-items: start; }
+.dj-points { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; line-height: 1.4; }
+.dj-point { display: flex; gap: 10px; align-items: flex-start; }
+.dj-sign { width: 18px; height: 18px; flex: none; margin-top: 2px; border-radius: 9px; color: var(--surface); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.dj-focus { padding: 18px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.dj-focus figure { margin: 0; width: 84px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 13px; text-align: center; }
+.dj-focus .rank { position: absolute; top: -7px; left: -7px; width: 22px; height: 22px; border-radius: 11px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.dj-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; align-items: start; }
+.dj-card { border-radius: 14px; background: var(--surface); border: 1px solid var(--line); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.dj-card.boss { border-color: #5A4A1E; }
+.dj-lines { display: grid; grid-template-columns: 74px minmax(0, 1fr); row-gap: 7px; column-gap: 10px; font-size: 14px; line-height: 1.4; }
+.dj-lines dt { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted); padding-top: 3px; }
+.dj-lines dd { margin: 0; }
+.dj-lines dd.special { color: #F09646; }
+.dj-card details { border-top: 1px solid var(--line); padding-top: 10px; }
+.dj-card summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--accent); }
+.dj-spells { display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+.dj-spells .name { font-weight: 600; font-size: 14px; }

@@ -22,6 +22,7 @@ log = logging.getLogger("dofustool.web")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ICON_DIR = db.MARKET_PATH.parent / "icons"
 ICON_URL = "https://api.dofusdb.fr/img/items/{icon_id}.png"
+MONSTER_IMAGE_URL = "https://api.dofusdb.fr/img/monsters/{gfx}.png"  # image d'un monstre, par son numéro graphique
 EFFECT_ICON_URL = "https://dofusdb.fr/icons/characteristics/{asset}.png"
 # Images que DofusDB range sous un autre nom que celui des données du jeu (vérifié le 05/10/2026).
 EFFECT_ICON_ALIASES = {
@@ -117,6 +118,14 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     return self._json(api.jobs())
                 if path == "/api/breeding":
                     return self._json(api.breeding())
+                if path == "/api/dungeons":
+                    return self._json(api.dungeons())
+                if match := re.fullmatch(r"/api/dungeons/(\d{1,7})", path):
+                    page = api.dungeon(int(match[1]))
+                    return self._json(page) if page else self._not_found()
+                if match := re.fullmatch(r"/api/wanted/(\d{1,7})", path):
+                    page = api.wanted(int(match[1]))
+                    return self._json(page) if page else self._not_found()
                 if path == "/api/breeding/genetics":
                     target = query.get("target", "")
                     return self._json(api.genetics(int(target) if target.isdigit() else None, query.get("optimakina") == "1"))
@@ -195,6 +204,11 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if content is None:
                         return self._not_found()
                     return self._send(HTTPStatus.OK, content, "image/png", "max-age=604800")
+                if match := re.fullmatch(r"/icons/monsters/(\d{1,7})\.png", path):
+                    content = fetch_icon(int(match[1]), icon_dir / "monsters", url=MONSTER_IMAGE_URL.format(gfx=int(match[1])))
+                    if content is None:
+                        return self._not_found()
+                    return self._send(HTTPStatus.OK, content, "image/png", "max-age=604800")
                 if match := re.fullmatch(r"/icons/(\d+)\.png", path):
                     content = fetch_icon(int(match[1]), icon_dir)
                     if content is None:
@@ -229,6 +243,12 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if not isinstance(payload, dict) or not isinstance(payload.get("mode"), str):
                         raise ValueError("mode attendu")
                     return self._json(api.set_equipment_price(payload["mode"]))
+                if path == "/api/dungeons/verify":
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict) or not isinstance(payload.get("key"), str):
+                        raise ValueError("note attendue")
+                    return self._json(api.verify_note(payload["key"], bool(payload.get("verified", True))))
                 if path == "/api/config":
                     length = min(int(self.headers.get("Content-Length") or 0), 65536)
                     payload = json.loads(self.rfile.read(length) or b"{}")

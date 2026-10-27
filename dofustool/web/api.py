@@ -713,6 +713,54 @@ class Api:
         finally:
             conn.close()
 
+    # --- Donjons : fiches de monstres ---------------------------------------------------------------
+
+    VISITS_S = 600.0  # donjons joués (archive) : recomptés au plus toutes les 10 minutes
+
+    def _bestiary(self):
+        """Données du jeu des fiches, chargées une fois ; à n'utiliser que sous `self._bestiary_lock`."""
+        from ..bestiary.monster import Game
+
+        if not hasattr(self, "_game"):
+            self._bestiary_lock = getattr(self, "_bestiary_lock", threading.Lock())
+            self._game = Game(sqlite3.connect(f"file:{Path(self.static_path).as_posix()}?mode=ro", uri=True, check_same_thread=False))
+            self._visits = (0.0, None)
+        return self._game
+
+    def dungeons(self) -> dict:
+        """La liste des donjons et des avis de recherche, les plus joués d'abord."""
+        from ..bestiary import notes, pages, prepare
+
+        self._bestiary_lock = getattr(self, "_bestiary_lock", threading.Lock())
+        with self._bestiary_lock:
+            game = self._bestiary()
+            at, visits = self._visits
+            if visits is None or time.time() - at > self.VISITS_S:
+                visits = prepare.played(game)
+                self._visits = (time.time(), visits)
+            return pages.index(game, notes.load(), notes.load_wanted(), visits)
+
+    def dungeon(self, dungeon: int) -> dict | None:
+        from ..bestiary import notes, pages
+
+        self._bestiary_lock = getattr(self, "_bestiary_lock", threading.Lock())
+        with self._bestiary_lock:
+            return pages.dungeon_page(self._bestiary(), notes.load(), dungeon)
+
+    def wanted(self, monster: int) -> dict | None:
+        from ..bestiary import notes, pages
+
+        self._bestiary_lock = getattr(self, "_bestiary_lock", threading.Lock())
+        with self._bestiary_lock:
+            return pages.wanted_page(self._bestiary(), notes.load(), notes.load_wanted(), monster)
+
+    def verify_note(self, key: str, verified: bool) -> dict:
+        from ..bestiary import pages
+
+        if not pages.set_verified(key, verified):
+            raise ValueError("note inconnue")
+        return {"ok": True}
+
     def genetics(self, target: int | None, optimakina: bool = False) -> dict:
         """Les couleurs de dragodindes avec ce qu'on en possède, et le chemin vers la couleur visée."""
         from ..analysis import genetics

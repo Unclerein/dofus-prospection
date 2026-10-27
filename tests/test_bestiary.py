@@ -168,3 +168,21 @@ def test_a_wanted_poster_note_makes_its_monster_the_star_of_the_card(game, tmp_p
     sheet = card.build(game, notes.load(), 460, None, wanted)
     assert sheet.boss and sheet.label == "AVIS DE RECHERCHE" and sheet.subtitle.startswith("Avis de recherche")
     assert ("SPÉCIAL", "Se soigne") in sheet.rows and sheet.essentials == (("danger", "Seule", "Elle frappe fort."),)
+
+
+def test_the_dungeons_page_lists_and_shows_a_dungeon_and_marks_a_note_verified(game, sample, tmp_path):
+    from collections import Counter
+
+    from dofustool.bestiary import notes, pages
+
+    listing = pages.index(game, sample, {}, Counter({98: 12}))
+    assert listing["dungeons"][0]["id"] == 98 and listing["dungeons"][0]["status"] == "note"  # le plus joué d'abord
+    assert "Klûtiste" in listing["dungeons"][0]["monsters"] and len(listing["wanted"]) > 50
+    page = pages.dungeon_page(game, sample, 98)
+    assert [m["name"] for m in page["monsters"]][:2] == ["Larve de Koutoulou", "Klûtiste"]  # le boss, puis l'ordre de focus
+    assert page["note_key"] == "donjon-98" and page["source"] == "https://exemple" and len(page["essentials"]) == 5
+    assert pages.dungeon_page(game, sample, 140)["status"] == "calculé" and pages.dungeon_page(game, sample, 999999) is None
+    assert pages.set_verified("donjon-98", True, tmp_path)
+    assert notes.load(tmp_path)[98].status == pages.VERIFIED
+    assert pages.set_verified("donjon-98", False, tmp_path) and notes.load(tmp_path)[98].status == pages.PENDING
+    assert not pages.set_verified("../config", True, tmp_path) and not pages.set_verified("donjon-1", True, tmp_path)
