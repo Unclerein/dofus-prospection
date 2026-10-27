@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import config, db
-from . import FM_SHARE_VERSION, apply, collect, collect_fm, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
+from . import FM_SHARE_VERSION, apply, collect, collect_fm, fm_key, forget_fm_sent, get_state, mark_fm_sent, set_state, validate
 
 log = logging.getLogger("dofustool.share")
 
@@ -73,7 +73,7 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     identity = cfg.share_hub_url + "#" + hashlib.sha256(cfg.share_token.encode()).hexdigest()[:12]
     if state.get("hub") != identity:
         state = {}
-        set_state(conn, hub=identity, cursor=0, push_mark=0)
+        set_state(conn, hub=identity, cursor=0, push_mark=0, own_restored=0)
         forget_fm_sent(conn)
     if state.get("pull_version") != str(PULL_VERSION):
         # Version qui sait lire des enregistrements de plus : ceux que l'ancienne a reçus sans les comprendre
@@ -85,6 +85,11 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         # le hub remplace l'ancien exemplaire de chacun au lieu de le doubler.
         forget_fm_sent(conn)
         set_state(conn, fm_share_version=FM_SHARE_VERSION)
+    # Une fois par PC (et après une réinstallation, qui repart de zéro) : tout est relu depuis le début, avec sa
+    # propre forgemagie, que le hub ne rend sinon jamais à son auteur ; ce PC en reprend ce qu'il n'a plus.
+    restore = state.get("own_restored") != "1"
+    if restore:
+        state["cursor"] = "0"
     cursor = int(state.get("cursor", 0))
     started = time.time()
     records = collect(conn, float(state.get("push_mark", 0)), keymap_path)
@@ -103,10 +108,16 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
     chunks = chunks or [([], [])]
     sent = received = 0
     members: list = []
+    own: list | None = None  # ma forgemagie rendue par le hub ; None : hub d'avant cette reprise
     more = True
     while chunks or more:
         chunk, marks = chunks.pop(0) if chunks else ([], [])
-        reply = post(cfg.share_hub_url, cfg.share_token, {"server": cfg.server_name, "cursor": cursor, "records": chunk})
+        request = {"server": cfg.server_name, "cursor": cursor, "records": chunk}
+        if restore:
+            request["mine"] = True
+        reply = post(cfg.share_hub_url, cfg.share_token, request)
+        if restore and isinstance(reply.get("mine"), list):
+            own = (own or []) + reply["mine"]
         sent += int(reply.get("accepted", 0))
         if marks and marks[0][0] == "score":
             if int(reply.get("rejected", 0)) == 0:
@@ -123,6 +134,9 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         members = reply.get("members", members)
         more = bool(reply.get("more"))
         set_state(conn, cursor=cursor)
+    if own is not None:
+        received += restore_own(conn, own)
+        set_state(conn, own_restored=1)
     set_state(
         conn,
         push_mark=started,
@@ -133,6 +147,31 @@ def sync_once(conn: sqlite3.Connection, cfg: config.Config, keymap_path: Path | 
         received=int(state.get("received", 0)) + received,
     )
     return {"sent": sent, "received": received}
+
+
+def restore_own(conn: sqlite3.Connection, records: list) -> int:
+    """Reprend, de ma forgemagie gardée par le hub, ce que ce PC n'a plus (réinstallé) ; renvoie le nombre repris.
+
+    Les passages repris rejoignent ceux des autres : ils comptent pour la collecte et les formules. Mon score
+    d'avant, lui, est gardé à part et s'ajoute à celui des passages de ce PC, pour ne pas l'écraser au prochain envoi."""
+    local = {fm_key("fm", uid, ts, rune) for uid, ts, rune in conn.execute("SELECT uid, ts, rune_id FROM fm_passes")}
+    local |= {fm_key("refus", uid, ts, rune) for uid, ts, rune in conn.execute("SELECT uid, ts, rune_id FROM fm_refusals")}
+    restored, score = 0, None
+    for record in records:
+        if not isinstance(record, dict) or not validate(record):
+            continue
+        if record["kind"] == "fm_score":
+            score = record if score is None or record["at"] > score["at"] else score
+        elif record["key"] not in local and apply(conn, record):
+            restored += 1
+    first = conn.execute("SELECT MIN(ts) FROM fm_passes").fetchone()[0]
+    # Score envoyé avant le premier passage de ce PC : il ne compte que les passages perdus, on peut l'ajouter.
+    if restored and score is not None and (first is None or score["at"] <= first):
+        data = score["data"]
+        carry = {"points": data["points"], "passes": data["passes"], "kamas": data["kamas"], "missions": data["missions"]}
+        set_state(conn, fm_score_carry=json.dumps(carry))
+    conn.commit()
+    return restored
 
 
 def score_record(conn: sqlite3.Connection, state: dict, cfg: config.Config) -> tuple[dict, str] | None:

@@ -1028,12 +1028,25 @@ def rules(conn: sqlite3.Connection, state: State, now: float | None = None) -> l
     return out
 
 
+def carried(conn: sqlite3.Connection) -> dict:
+    """Mon score d'avant la réinstallation de ce PC, repris du hub : il s'ajoute à celui des passages d'ici."""
+    try:
+        row = conn.execute("SELECT value FROM share_state WHERE key = 'fm_score_carry'").fetchone()
+    except sqlite3.Error:
+        row = None  # jamais synchronisé
+    carry = json.loads(row[0]) if row else {}
+    return {"points": carry.get("points", 0.0), "passes": carry.get("passes", 0), "kamas": carry.get("kamas", 0),
+            "missions": {mission: at for mission, at in carry.get("missions", [])}}  # fmt: skip
+
+
 def score(conn: sqlite3.Connection, state: State) -> dict:
     """Ce que le hub reçoit pour le classement : points, passages, kamas investis, missions, et le personnage qui forge."""
     name = main_character(conn)
-    missions = [[mission, round(at, 1)] for mission, (at, _) in sorted(state.done.items(), key=lambda kv: kv[1][0])]
-    return {"character": name if name and CHARACTER.match(name) else None, "points": state.points, "passes": state.passes,
-            "kamas": kamas_spent(conn), "missions": missions}  # fmt: skip
+    carry = carried(conn)
+    done = carry["missions"] | {mission: at for mission, (at, _) in state.done.items()}
+    missions = [[mission, round(at, 1)] for mission, at in sorted(done.items(), key=lambda kv: kv[1])]
+    return {"character": name if name and CHARACTER.match(name) else None, "points": round(state.points + carry["points"], 1),
+            "passes": state.passes + carry["passes"], "kamas": kamas_spent(conn) + carry["kamas"], "missions": missions}  # fmt: skip
 
 
 def overview(state: State) -> dict:

@@ -30,6 +30,7 @@ PULL_BYTES = 3 * 1024 * 1024
 # Au-delà, un enregistrement n'est plus distribué : chaque joueur garde son propre historique.
 # Les passages de forgemagie n'y sont pas : ils restent tous, un nouveau venu les reçoit aussi.
 KEEP_S = {"hdv": 3 * 86400.0, "prices": 3 * 86400.0, "market": 60 * 86400.0, "keymap": 60 * 86400.0}
+OWN_KINDS = ("fm", "fm_refusal", "fm_score")  # ce qu'un PC réinstallé peut redemander de ce qu'il a lui-même envoyé
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS records (
@@ -60,8 +61,10 @@ class Hub:
     def close(self) -> None:
         self._db.close()
 
-    def sync(self, pseudo: str, cursor: int, records: list, now: float | None = None) -> dict:
-        """Enregistre ce qu'un joueur envoie, puis lui rend ce que les autres ont envoyé depuis `cursor`."""
+    def sync(self, pseudo: str, cursor: int, records: list, now: float | None = None, mine: bool = False) -> dict:
+        """Enregistre ce qu'un joueur envoie, puis lui rend ce que les autres ont envoyé depuis `cursor`.
+
+        mine : rend aussi, à part, sa propre forgemagie (passages, refus, score), pour un PC qui l'a perdue."""
         now = time.time() if now is None else now
         accepted = rejected = 0
         with self._lock, self._db:
@@ -79,10 +82,10 @@ class Hub:
             for kind, keep in KEEP_S.items():
                 self._db.execute("DELETE FROM records WHERE kind = ? AND at < ?", (kind, now - keep))
 
-            out, size, last = [], 0, cursor
+            out, own, size, last = [], [], 0, cursor
             more = False
-            for seq, author, payload in self._db.execute(
-                "SELECT seq, author, payload FROM records WHERE seq > ? ORDER BY seq", (cursor,)
+            for seq, kind, author, payload in self._db.execute(
+                "SELECT seq, kind, author, payload FROM records WHERE seq > ? ORDER BY seq", (cursor,)
             ):
                 if size > PULL_BYTES:
                     more = True
@@ -91,11 +94,17 @@ class Hub:
                 if author != pseudo:
                     out.append(json.loads(payload))
                     size += len(payload)
+                elif mine and kind in OWN_KINDS:
+                    own.append(json.loads(payload))
+                    size += len(payload)
             members = [
                 {"pseudo": name, "last_seen": seen, "pushed": pushed}
                 for name, seen, pushed in self._db.execute("SELECT pseudo, last_seen, pushed FROM members ORDER BY pseudo")
             ]
-        return {"cursor": last, "records": out, "more": more, "accepted": accepted, "rejected": rejected, "members": members}
+        reply = {"cursor": last, "records": out, "more": more, "accepted": accepted, "rejected": rejected, "members": members}
+        if mine:
+            reply["mine"] = own
+        return reply
 
     def _store(self, pseudo: str, record: dict) -> bool:
         """Garde l'enregistrement s'il est plus récent que celui déjà connu pour cet objet."""
@@ -197,7 +206,7 @@ def make_handler(hub: Hub, config_path: Path = config.CONFIG_PATH) -> type[BaseH
                 cursor, records = request.get("cursor", 0), request.get("records", [])
                 if not isinstance(cursor, int) or not isinstance(records, list):
                     return self._reply(HTTPStatus.BAD_REQUEST, {"error": "requête invalide"})
-                reply = hub.sync(pseudo, cursor, records)
+                reply = hub.sync(pseudo, cursor, records, mine=request.get("mine") is True)
                 if reply["accepted"] or reply["records"]:
                     log.info("%s : %d relevés reçus, %d envoyés.", pseudo, reply["accepted"], len(reply["records"]))
                 self._reply(HTTPStatus.OK, reply)

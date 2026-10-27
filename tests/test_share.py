@@ -321,6 +321,30 @@ def test_forge_passes_reach_the_others_once_and_enter_their_dataset(hub_url):
     assert [r.source for r in fmdata.build(alice, {118: 1.0})] == ["moi"] * 3
 
 
+
+def test_a_reinstalled_pc_gets_its_own_forge_back_once_and_keeps_its_score(hub_url):
+    from dofustool.analysis import collecte
+
+    alice = forge_db()
+    token = "jeton-alice-0123456789"
+    assert client.sync_once(alice, member(hub_url, token))["sent"] == 5
+    client.sync_once(alice, member(hub_url, token))
+    # Le PC d'origine a déjà tout : rien ne lui revient en double.
+    assert alice.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 0
+    assert collecte.carried(alice)["points"] == 0.0
+    sent_score = json.loads(client.get_state(alice).get("fm_score_carry") or "null")
+    assert sent_score is None
+    # Réinstallé : base vide, même jeton. Ses passages et son refus reviennent, son score d'avant est gardé à part.
+    fresh = db.connect(":memory:")
+    assert client.sync_once(fresh, member(hub_url, token))["received"] == 4
+    assert fresh.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
+    assert fresh.execute("SELECT COUNT(*) FROM shared_fm_refusals").fetchone()[0] == 1
+    carry = collecte.carried(fresh)
+    assert carry["passes"] == 3 and carry["points"] > 0  # trois passages ; le refus ne compte pas
+    # Une seule fois : la synchro suivante ne redemande rien.
+    assert client.sync_once(fresh, member(hub_url, token))["received"] == 0
+    assert fresh.execute("SELECT COUNT(*) FROM shared_fm_passes").fetchone()[0] == 3
+
 def test_a_hub_that_does_not_know_forge_passes_gets_them_after_its_update():
     conn, seen = forge_db(), []
 

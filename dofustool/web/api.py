@@ -1900,7 +1900,8 @@ class Api:
             # Qui a réussi chaque mission, dans l'ordre : soi, et les autres d'après leur score reçu par le hub.
             mine = cfg.share_pseudo or "moi"
             winners: dict[str, list[dict]] = {}
-            for mission_id, (at, _) in state.done.items():
+            carry = collecte.carried(conn)  # PC réinstallé : mon score d'avant, repris du hub
+            for mission_id, at in (carry["missions"] | {m: at for m, (at, _) in state.done.items()}).items():
                 winners.setdefault(mission_id, []).append({"pseudo": mine, "character": collecte.main_character(conn), "at": at, "me": True})
             for pseudo, character, raw in conn.execute("SELECT pseudo, character, missions FROM shared_fm_scores"):
                 for mission_id, at in json.loads(raw):
@@ -1909,7 +1910,7 @@ class Api:
             for entry in state.missions:
                 mission = entry["mission"]
                 fitting = sorted((it for it in catalogue if mission.items(it)), key=lambda it: it.order())
-                done = state.done.get(mission.id)
+                done = state.done.get(mission.id) or ((carry["missions"][mission.id], None) if mission.id in carry["missions"] else None)
                 missions.append({
                     "id": mission.id, "title": mission.title, "text": mission.text, "target": mission.target, "bonus": mission.bonus,
                     "parts": entry["parts"], "worth": entry["worth"], "hint": mission.hint, "rule": mission.rule,
@@ -1918,8 +1919,9 @@ class Api:
                     "priority": collecte.MISSIONS.index(mission) < collecte.PRIORITY,
                 })  # fmt: skip
             me = {
-                "pseudo": cfg.share_pseudo or "moi", "character": collecte.main_character(conn), "points": state.points,
-                "passes": state.passes, "kamas": collecte.kamas_spent(conn), "missions": len(state.done), "me": True,
+                "pseudo": cfg.share_pseudo or "moi", "character": collecte.main_character(conn), "points": round(state.points + carry["points"], 1),
+                "passes": state.passes + carry["passes"], "kamas": collecte.kamas_spent(conn) + carry["kamas"],
+                "missions": len(carry["missions"].keys() | state.done.keys()), "me": True,
             }  # fmt: skip
             board = [me] + [
                 {"pseudo": pseudo, "character": character, "points": points, "passes": passes, "kamas": kamas, "missions": len(json.loads(done)), "me": False}
