@@ -103,3 +103,19 @@ def test_guide_pages_are_found_by_dungeon_or_boss_name(game):
     assert prepare.guide_url(game, 98, links) == "https://x/kout.html" and prepare.guide_url(game, 28, links) is None
     text = prepare.to_text("<p>Folie&nbsp;2 :<br>reste à 3 PO</p><script>x()</script><div>fin</div>")
     assert text == "Folie 2 :\nreste à 3 PO\nfin"
+
+
+def test_a_wanted_poster_note_makes_its_monster_the_star_of_the_card(game, tmp_path):
+    from dofustool.bestiary import card, notes
+
+    (tmp_path / "460-frakacia.toml").write_text(
+        'avis = 460\nnom = "Frakacia Leukocytine"\nsource = "Dofus pour les Noobs — https://x"\ndate_source = "2021-06-15"\n'
+        'statut = "à confirmer"\nfocus = []\n\n[[essentiel]]\ntype = "danger"\ntitre = "Seule"\ntexte = "Elle frappe fort."\n\n'
+        '[monstres.460]\nnom = "Frakacia Leukocytine"\nmecanique = "Se soigne"\n',
+        encoding="utf-8",
+    )
+    wanted = notes.load_wanted(tmp_path)
+    assert set(wanted) == {460} and wanted[460].dungeon == 0
+    sheet = card.build(game, notes.load(), 460, None, wanted)
+    assert sheet.boss and sheet.label == "AVIS DE RECHERCHE" and sheet.subtitle.startswith("Avis de recherche")
+    assert ("SPÉCIAL", "Se soigne") in sheet.rows and sheet.essentials == (("danger", "Seule", "Elle frappe fort."),)

@@ -4,6 +4,7 @@ Usage :
   python -m dofustool.bestiary.prepare --queue [N]   la file : donjons joués d'abord (d'après l'archive locale), sans note
   python -m dofustool.bestiary.prepare --batch N     prépare les N prochains de la file
   python -m dofustool.bestiary.prepare <id> [...]    prépare ces donjons-là
+  python -m dofustool.bestiary.prepare --avis-queue [N] / --avis-batch N   de même pour les avis de recherche
 
 Pour chaque donjon : data/bestiary/<id>-guide.txt (texte brut de la page Dofus pour les Noobs) et <id>-jeu.txt (fiche
 calculée, avec les ids des monstres), plus data/bestiary/lot.json qui résume le lot. Tout reste local (data/ n'est
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from .. import db
 from .monster import Game
-from .notes import load
+from .notes import load, load_wanted
 
 GUIDE_SITE = "https://www.dofuspourlesnoobs.com"
 WORK_DIR = db.MARKET_PATH.parent / "bestiary"
@@ -104,6 +105,62 @@ def queue(game: Game) -> list[tuple[int, str, int]]:
     return [(dungeon, game.dungeon(dungeon)[0], visits[dungeon]) for dungeon, _ in todo]
 
 
+def wanted_links() -> dict[str, str]:
+    """Nom du recherché → adresse de sa page « On recherche », depuis la page des avis de recherche du guide."""
+    page = fetch(f"{GUIDE_SITE}/avis-de-recherche.html")
+    links = {}
+    for href in set(re.findall(r'href="(/on-recherche-[^"#?]+\.html)"', page)):
+        links[plain(href.removeprefix("/on-recherche-").removesuffix(".html").replace("-", " "))] = GUIDE_SITE + href
+    return links
+
+
+def wanted_url(game: Game, monster: int, links: dict[str, str]) -> str | None:
+    key = plain(game.monster_name(monster))
+    if key in links:
+        return links[key]
+    close = difflib.get_close_matches(key, list(links), n=1, cutoff=MATCH)
+    return links[close[0]] if close else None
+
+
+def wanted_queue(game: Game) -> list[tuple[int, str, int]]:
+    """(monstre, nom, niveau) des avis de recherche sans note, du plus haut niveau au plus bas."""
+    done = set(load_wanted())
+    rows = []
+    for monster, grades in game.conn.execute("SELECT id, grades FROM MonsterData WHERE isBounty = 1"):
+        if monster not in done:
+            rows.append((monster, game.monster_name(monster), json.loads(grades)[-1]["level"]))
+    return sorted(rows, key=lambda row: -row[2])
+
+
+def describe_monster(game: Game, monster: int) -> str:
+    sheet = game.sheet(monster)
+    lines = [f"== Avis de recherche : {sheet.name} ({monster}) · niv. {sheet.level} · {sheet.life} PV · {sheet.ap} PA {sheet.mp} PM · faible {sheet.weakest}"]
+    for label, value in (("portée", sheet.reach), ("déplacement", " · ".join(sheet.moves)), ("spécial", " · ".join(sheet.mechanics))):
+        if value:
+            lines.append(f"      {label} : {value}")
+    return "\n".join(lines) + "\n"
+
+
+def prepare_wanted(game: Game, monsters: list[int], links: dict[str, str]) -> list[dict]:
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for monster in monsters:
+        entry = {"avis": monster, "nom": game.monster_name(monster), "guide": wanted_url(game, monster, links)}
+        (WORK_DIR / f"avis-{monster}-jeu.txt").write_text(describe_monster(game, monster), encoding="utf-8")
+        entry["jeu"] = str(WORK_DIR / f"avis-{monster}-jeu.txt")
+        if entry["guide"]:
+            try:
+                (WORK_DIR / f"avis-{monster}-guide.txt").write_text(to_text(fetch(entry["guide"])), encoding="utf-8")
+                entry["texte"] = str(WORK_DIR / f"avis-{monster}-guide.txt")
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                entry["erreur"] = f"guide injoignable : {error}"
+        else:
+            entry["erreur"] = "page « On recherche » introuvable"
+        out.append(entry)
+    (WORK_DIR / "lot.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    return out
+
+
 def prepare(game: Game, dungeons: list[int], links: dict[str, str]) -> list[dict]:
     from .__main__ import describe
 
@@ -132,9 +189,21 @@ def main() -> int:
     parser.add_argument("dungeons", nargs="*", type=int)
     parser.add_argument("--queue", nargs="?", const=30, type=int, help="affiche la file (30 premiers par défaut)")
     parser.add_argument("--batch", type=int, help="prépare les N prochains donjons de la file")
+    parser.add_argument("--avis-queue", nargs="?", const=30, type=int, help="la file des avis de recherche")
+    parser.add_argument("--avis-batch", type=int, help="prépare les N prochains avis de recherche")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     game = Game()
+    if args.avis_queue:
+        for monster, name, level in wanted_queue(game)[: args.avis_queue]:
+            print(f"{monster:5}  {name}  (niv. {level})")
+        return 0
+    if args.avis_batch:
+        monsters = [monster for monster, _, _ in wanted_queue(game)[: args.avis_batch]]
+        for entry in prepare_wanted(game, monsters, wanted_links()):
+            print(f"{entry['avis']:5}  {entry['nom']}  →  {entry.get('erreur') or entry['guide']}")
+        print(f"Lot écrit : {WORK_DIR / 'lot.json'}")
+        return 0
     if args.queue:
         for dungeon, name, visits in queue(game)[: args.queue]:
             print(f"{dungeon:4}  {name}  ({visits} passages)" if visits else f"{dungeon:4}  {name}")

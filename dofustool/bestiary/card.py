@@ -12,7 +12,7 @@ class Card:
     monster: int
     name: str
     gfx: int  # image du monstre (DofusDB)
-    boss: bool
+    boss: bool  # boss de donjon, ou monstre d'un avis de recherche : sa fiche porte l'essentiel du combat
     subtitle: str  # « Temple de Koutoulou · niv. 212 »
     stats: str  # « 6 600 PV · 12 PA · 5 PM »
     weakest: str
@@ -22,6 +22,7 @@ class Card:
     focus: list[tuple[int, str, int]] = field(default_factory=list)  # (monstre, nom, image)
     spells: tuple[Spell, ...] = ()
     footer: str = ""
+    label: str = ""  # « BOSS », « AVIS DE RECHERCHE »
 
 
 def thousands(n: int) -> str:
@@ -36,12 +37,14 @@ def pick_note(notes: dict[int, Note], monster: int, dungeon: int | None, bosses:
     return next((note for note in talking if monster in bosses.get(note.dungeon, [])), talking[0] if talking else None)
 
 
-def build(game: Game, notes: dict[int, Note], monster: int, dungeon: int | None = None) -> Card:
+def build(game: Game, notes: dict[int, Note], monster: int, dungeon: int | None = None, wanted: dict[int, Note] | None = None) -> Card:
     sheet = game.sheet(monster)
     bosses = {d: game.dungeon(d)[1] for d in notes}
-    note = pick_note(notes, monster, dungeon, bosses)
+    note = (wanted or {}).get(monster) or pick_note(notes, monster, dungeon, bosses)
+    if note is not None and note.wanted:
+        bosses = {note.dungeon: [note.wanted]}  # avis de recherche : le recherché tient le rôle du boss
     written = note.monsters.get(monster) if note else None
-    where = note.name if note else (game.dungeon(dungeon)[0] if dungeon else "")
+    where = ("Avis de recherche" if note.wanted else note.name) if note else (game.dungeon(dungeon)[0] if dungeon else "")
     computed = (sheet.reach or "", " · ".join(sheet.moves), " · ".join(sheet.mechanics[:MECHANICS_SHOWN]))
     mine = (written.reach, written.moves, written.mechanic) if written else ("", "", "")
     # Ce que la note dit l'emporte ; là où elle ne dit rien, la fiche calculée.
@@ -55,6 +58,8 @@ def build(game: Game, notes: dict[int, Note], monster: int, dungeon: int | None 
     )  # fmt: skip
     if written:
         card.spells = written.spells
+    if boss:
+        card.label = "AVIS DE RECHERCHE" if note.wanted else "BOSS"
     if note:
         if boss:
             card.essentials = note.essentials

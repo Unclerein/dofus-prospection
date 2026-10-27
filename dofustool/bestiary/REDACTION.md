@@ -36,6 +36,20 @@ prêtées au mauvais monstre. Depuis, les notes suivent les règles ci-dessous, 
 
    Jamais de push sur `main` sans le feu vert explicite du joueur.
 
+## Avis de recherche
+
+Même procédure, avec trois différences :
+- **Préparation** : `--avis-queue` / `--avis-batch N` au lieu de `--queue` / `--batch`. Les fichiers s'appellent
+  `data/bestiary/avis-<monstre>-guide.txt` et `avis-<monstre>-jeu.txt`.
+- **Fichier de la note** : `notes/avis/<monstre>-<nom>.toml`, avec `avis = <id du monstre recherché>` à la place de
+  `donjon = …`.
+- **Contenu** : `focus` seulement si le guide en donne un, l'essentiel du combat, puis une section `[monstres.<id>]`
+  pour le recherché et pour chaque monstre qui l'accompagne selon le guide.
+
+Pour la consigne de l'agent, reprendre celle des donjons en remplaçant « note de donjon » par « note d'avis de
+recherche », `donjon = {ID}` par `avis = {ID}`, le chemin de sortie par `notesvis\{FICHIER}`, et les chemins des
+fichiers par `avis-{ID}-guide.txt` et `avis-{ID}-jeu.txt`.
+
 ## Cas particuliers déjà tranchés
 
 - **Comte Harebourg** : Klime, Missiz Frizz, Nileza et Sylargh n'ont pas de section, car le combat à deux boss est un
