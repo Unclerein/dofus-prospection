@@ -504,7 +504,9 @@ class Window:
             for banner in self.board.banners
         ]  # fmt: skip
         rune = self.rune if self.show_rune else None
-        image = draw.render(views, self.scale, rune, self.items.effect_icon(draw.ELEMENT_ICONS.get(rune)), now - self.rune_changed)
+        comte = self.aim is not None and self.fight.get("active") and self.fight.get("map") == aim.COMTE_MAP
+        confusion = self.fight.get("confusion") if comte else None
+        image = draw.render(views, self.scale, rune, self.items.effect_icon(draw.ELEMENT_ICONS.get(rune)), now - self.rune_changed, confusion)
         if image is None:
             self.layer.hide()
             return

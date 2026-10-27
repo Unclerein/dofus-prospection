@@ -119,3 +119,18 @@ def test_rune_pill_alone_or_above_the_banners():
     assert edge[:3] == render.ELEMENT_COLOURS["feu"] and alone.getpixel((0, 0))[3] == 0
     assert alone.width < 120  # juste l'icône : ça ne prend pas plus de place qu'il ne faut
     assert set(render.ELEMENT_ICONS) == set(render.ELEMENT_COLOURS)
+
+
+def test_confusion_pill_sits_left_of_the_rune_without_pushing_the_banners_down():
+    from dofustool.overlay import render
+
+    banner = render.View(name="Laine", quantity=1, gain="+ 5 kamas", icon=None, age=3.0, left=2.0, total=3.0, bumped=99.0)
+    with_rune = render.render([banner], rune="feu")
+    both = render.render([banner], rune="feu", confusion=90)
+    assert both.size == with_rune.size  # même ligne que la rune : rien ne bouge
+    rune = render.rune_card("feu", 1.0)
+    # la rune reste calée à droite, la pastille de confusion à sa gauche, bordée de sa couleur
+    assert both.getpixel((both.width - render.PAD - render.RUNE_WIDTH // 2, render.PAD))[:3] == render.ELEMENT_COLOURS["feu"]
+    left_edge = both.width - rune.width + render.PAD - render.GAP - render.CONFUSION_WIDTH // 2
+    assert both.getpixel((left_edge, render.PAD))[:3] == render.CONFUSION_COLOURS[90]
+    assert render.render([], confusion=180).height == rune.height
