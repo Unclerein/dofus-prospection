@@ -34,6 +34,8 @@ class Config:
     breeding_banners: bool = True  # élevage : bandeau quand il faut basculer ou couper un objet d'enclos
     breeding_sound: bool = True  # élevage : petit son avec ce bandeau
     aim_key: str = "XBUTTON2"  # touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre…
+    monster_sheets: bool = True  # en combat : la touche des fiches, sur un monstre, ouvre sa fiche (portée, déplacements, sorts)
+    sheet_key: str = "XBUTTON1"  # touche des fiches de monstres
     # Partage des relevés de marché avec quelques amis (voir dofustool/share).
     share_pseudo: str = ""
     share_hub_url: str = ""
@@ -77,6 +79,8 @@ def _from_raw(raw: dict) -> Config:
         breeding_banners=bool(launcher.get("breeding_banners", defaults.breeding_banners)),
         breeding_sound=bool(launcher.get("breeding_sound", defaults.breeding_sound)),
         aim_key=str(launcher.get("aim_key", defaults.aim_key) or defaults.aim_key),
+        monster_sheets=bool(launcher.get("monster_sheets", defaults.monster_sheets)),
+        sheet_key=str(launcher.get("sheet_key", defaults.sheet_key) or defaults.sheet_key),
         share_pseudo=str(share.get("pseudo", "")),
         share_hub_url=str(share.get("hub_url", "")),
         share_token=str(share.get("token", "")),
@@ -163,6 +167,8 @@ def from_values(values: dict) -> Config:
         breeding_banners=bool(values.get("breeding_banners", True)),
         breeding_sound=bool(values.get("breeding_sound", True)),
         aim_key=_text(values, "aim_key", "Touche de visée", 20) or "XBUTTON2",
+        monster_sheets=bool(values.get("monster_sheets", True)),
+        sheet_key=_text(values, "sheet_key", "Touche des fiches", 20) or "XBUTTON1",
         share_pseudo=_text(values, "share_pseudo", "Pseudo", 30),
         share_hub_url=hub_url,
         share_token=token,
@@ -245,6 +251,9 @@ breeding_banners = {"true" if cfg.breeding_banners else "false"}
 breeding_sound = {"true" if cfg.breeding_sound else "false"}
 # Touche de visée : XBUTTON2 (souris 5), XBUTTON1 (souris 4), F8, ALT, une lettre...
 aim_key = {_quoted(cfg.aim_key)}
+# En combat : maintenir cette touche sur un monstre ouvre sa fiche ; la même touche ou sa croix la ferme.
+monster_sheets = {"true" if cfg.monster_sheets else "false"}
+sheet_key = {_quoted(cfg.sheet_key)}
 
 [app]
 # Le tutoriel de premier démarrage a été vu.

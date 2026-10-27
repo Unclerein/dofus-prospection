@@ -117,6 +117,8 @@ VALUES = {
     "huppermage_rune": False,
     "fm_banners": True,
     "aim_key": "XBUTTON2",
+    "monster_sheets": True,
+    "sheet_key": "XBUTTON1",
 }
 
 

@@ -96,6 +96,21 @@ class Game:
         row = self.conn.execute("SELECT nameId FROM MonsterData WHERE id = ?", (monster,)).fetchone()
         return self.text(row[0]) if row else f"Monstre {monster}"
 
+    def gfx(self, monster: int) -> int:
+        """Numéro de l'image du monstre (DofusDB : img/monsters/<numéro>.png)."""
+        row = self.conn.execute("SELECT gfxId FROM MonsterData WHERE id = ?", (monster,)).fetchone()
+        return row[0] if row else 0
+
+    def dungeon_of_map(self, map_id: int | None) -> int | None:
+        if map_id is None:
+            return None
+        # Par la sous-zone de la carte : la liste des cartes d'un donjon (DungeonData) oublie des salles, dont celle du boss.
+        row = self.conn.execute(
+            "SELECT a.dungeonId FROM SubAreaData_mapIds_junction s JOIN SubAreaData a ON a.id = s.SubAreaData_id WHERE s.target_id = ? AND a.dungeonId > 0",
+            (map_id,),
+        ).fetchone()
+        return row[0] if row else None
+
     def dungeon(self, dungeon: int) -> tuple[str, list[int], list[int]]:
         """Nom d'un donjon, ses boss, et tous ses monstres (boss compris), dans l'ordre du jeu."""
         name_id, bosses = self.conn.execute("SELECT nameId, bosses FROM DungeonData WHERE id = ?", (dungeon,)).fetchone()

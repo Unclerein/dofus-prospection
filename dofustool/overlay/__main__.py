@@ -12,6 +12,7 @@ Usage : python -m dofustool.overlay [--demo] [--demo-breeding] [--anywhere] [--p
 """
 import argparse
 import ctypes
+import json
 import sqlite3
 import sys
 import threading
@@ -34,6 +35,8 @@ FORGE_POLL_S = 3.0  # atelier de forgemagie et succès du groupe
 BREEDING_POLL_S = 5.0  # enclos : le prochain geste de sérénité
 SOUND_PATH = db.MARKET_PATH.parent / "sounds" / "chime.wav"
 LOG_PATH = db.MARKET_PATH.parent / "overlay.log"
+SHEET_POSITION_PATH = db.MARKET_PATH.parent / "sheet_position.json"  # où la fiche d'un monstre a été laissée
+MONSTER_IMAGE_URL = "https://api.dofusdb.fr/img/monsters/{gfx}.png"
 FRAME_MS = 33  # pendant qu'un bandeau est à l'écran
 STALE_FIGHT_S = 180.0  # un combat sans nouvelle depuis ce temps n'est plus affiché (capture arrêtée en plein combat)
 MARGIN_X, MARGIN_Y = 10, 96  # depuis l'angle haut droit de la zone de jeu, ombre comprise
@@ -122,14 +125,18 @@ def screen_scale() -> float:
 
 
 class Layer:
-    """Fenêtre qui montre une image avec sa transparence, sans jamais prendre la main ni un clic."""
+    """Fenêtre qui montre une image avec sa transparence, sans jamais prendre la main.
 
-    def __init__(self, root: tk.Tk) -> None:
+    Par défaut la souris la traverse. `clickable` : elle prend les clics posés sur elle (le jeu ne les reçoit
+    pas, vérifié en jeu), toujours sans prendre le focus au jeu."""
+
+    def __init__(self, root: tk.Tk, clickable: bool = False) -> None:
         self.user32, self.gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
         root.update_idletasks()
         self.handle = self.user32.GetParent(root.winfo_id()) or root.winfo_id()
         style = self.user32.GetWindowLongW(self.handle, GWL_EXSTYLE)
-        self.user32.SetWindowLongW(self.handle, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+        through = 0 if clickable else WS_EX_TRANSPARENT
+        self.user32.SetWindowLongW(self.handle, GWL_EXSTYLE, style | WS_EX_LAYERED | through | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
         for function in (self.gdi32.CreateCompatibleDC, self.gdi32.CreateDIBSection, self.gdi32.SelectObject, self.user32.GetDC):
             function.restype = ctypes.c_void_p
         self.shown = False
@@ -161,6 +168,9 @@ class Layer:
             self.user32.SetWindowPos(ctypes.c_void_p(self.handle), ctypes.c_void_p(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
             self.shown = True
         return bool(done)
+
+    def move(self, x: int, y: int) -> None:
+        self.user32.SetWindowPos(ctypes.c_void_p(self.handle), ctypes.c_void_p(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE)
 
     def hide(self) -> None:
         if self.shown:
@@ -205,6 +215,46 @@ VERDICT_SHORT = {
 }  # fmt: skip
 
 
+class GridLearner:
+    """Cale la grille du combat sur mes clics : la position de la souris à chaque clic gauche, et la case que le jeu a demandée
+    pour ce clic (sort ou déplacement). Le cadrage ne dépend que de la taille de la zone de jeu : il sert à toutes les cartes.
+
+    Ne fait que lire la souris ; ne clique ni n'appuie jamais."""
+
+    def __init__(self) -> None:
+        self.presses: list[tuple[float, float, float]] = []  # (quand, x, y) de chaque clic gauche
+        self.mouse_was_down = False
+        self.points: list[tuple[int, float, float]] = []  # (case, x, y) pour la taille de zone `self.size`
+        self.size: tuple[int, int] | None = None
+        self.seen = 0.0  # dernier clic du combat déjà pris en compte
+
+    def tick(self, now: float, area, state: dict) -> None:
+        if not (area and state.get("active")):
+            return
+        left, top, right, bottom = area
+        x, y = cursor()
+        self._learn(now, (x - left, y - top), (right - left, bottom - top), state)
+
+    def _learn(self, now: float, at, size, state: dict) -> None:
+        """Cale la grille sur mes clics : la position de la souris à chaque clic gauche, et la case que le jeu a demandée."""
+        down = key_down(LEFT_BUTTON)
+        if down and not self.mouse_was_down:
+            self.presses = (self.presses + [(now, *at)])[-20:]
+        self.mouse_was_down = down
+        if size != self.size:
+            self.points, self.size = [], size
+        for when, cell in state.get("clicks") or []:
+            if when <= self.seen:
+                continue
+            self.seen = when
+            spot = aim.match(self.presses, when)
+            if spot is None:
+                continue
+            frame, self.points = aim.refit(self.points + [(cell, *spot)])
+            if frame is not None and frame != aim.load_frame(size):
+                aim.save_frame(size, frame)
+
+
 class AimHelper:
     """Visée du Comte Harebourg : touche maintenue, la case survolée, la case où cliquer et la case d'arrivée.
 
@@ -216,12 +266,6 @@ class AimHelper:
         window.withdraw()
         self.layer, self.key, self.scale = Layer(window), key, scale
         self.layout = grid.load("comte")
-        # Calage automatique : chaque clic gauche (quand, x, y), puis la case que le jeu a demandée pour lui.
-        self.presses: list[tuple[float, float, float]] = []
-        self.mouse_was_down = False
-        self.points: list[tuple[int, float, float]] = []  # (case, x, y) pour la taille de zone `self.size`
-        self.size: tuple[int, int] | None = None
-        self.seen = 0.0  # dernier clic du combat déjà pris en compte
         self.kept = None  # visée gardée à l'écran après avoir lâché la touche : (case, curseur)
         self.drawn = None
 
@@ -235,7 +279,6 @@ class AimHelper:
         size = (right - left, bottom - top)
         x, y = cursor()
         at = (x - left, y - top)
-        self._learn(now, at, size, state)
         frame = aim.load_frame(size)
         if key_down(self.key):
             if frame is None:
@@ -257,25 +300,6 @@ class AimHelper:
     def _hide(self) -> None:
         self.layer.hide()
         self.drawn = None
-
-    def _learn(self, now: float, at, size, state: dict) -> None:
-        """Cale la grille sur mes clics : la position de la souris à chaque clic gauche, et la case que le jeu a demandée."""
-        down = key_down(LEFT_BUTTON)
-        if down and not self.mouse_was_down:
-            self.presses = (self.presses + [(now, *at)])[-20:]
-        self.mouse_was_down = down
-        if size != self.size:
-            self.points, self.size = [], size
-        for when, cell in state.get("clicks") or []:
-            if when <= self.seen:
-                continue
-            self.seen = when
-            spot = aim.match(self.presses, when)
-            if spot is None:
-                continue
-            frame, self.points = aim.refit(self.points + [(cell, *spot)])
-            if frame is not None and frame != aim.load_frame(size):
-                aim.save_frame(size, frame)
 
     def _show_plan(self, frame: aim.Frame, target: int | None, at, size, state: dict, left: int, top: int) -> None:
         plan = aim.plan(state, target, self.layout) if target is not None else None
@@ -309,6 +333,152 @@ class AimHelper:
 
     def _show(self, size, cells, lines, at, left: int, top: int) -> None:
         self.layer.show(draw.aim_image(size, cells, lines, at, self.scale), left, top)
+
+
+class SheetHelper:
+    """Fiche d'un monstre en combat : la touche appuyée en survolant un monstre l'ouvre ; la même touche ou sa croix la ferme.
+
+    On la déplace en la tirant par son en-tête ; elle se rouvre ensuite au même endroit de la zone de jeu. La fenêtre
+    prend ses propres clics (le jeu ne les reçoit pas) sans jamais prendre le focus ; elle ne lit que la souris et la touche."""
+
+    def __init__(self, root: tk.Tk, key: int, scale: float, icon_dir: Path) -> None:
+        self.window = tk.Toplevel(root)
+        self.window.overrideredirect(True)
+        self.window.withdraw()
+        self.layer, self.key, self.scale = Layer(self.window, clickable=True), key, scale
+        self.icon_dir = icon_dir / "monsters"
+        self.was_down = False
+        self.game = self.notes = None  # données du jeu et notes : chargées à la première fiche
+        self.card = None
+        self.open_spells = False
+        self.regions: dict[str, tuple] = {}
+        self.at: tuple[int, int] | None = None  # coin haut gauche à l'écran
+        self.size = (0, 0)
+        self.area: tuple[int, int, int, int] | None = None
+        self.grab: tuple[int, int] | None = None  # en-tête tiré : écart entre la souris et le coin
+        self.missing: set[int] = set()  # images demandées à DofusDB, pas encore là
+        self.window.bind("<ButtonPress-1>", self._press)
+        self.window.bind("<B1-Motion>", self._drag)
+        self.window.bind("<ButtonRelease-1>", self._release)
+
+    def tick(self, now: float, area, state: dict) -> bool:
+        """Vrai tant qu'une fiche est ouverte."""
+        if not (area and state.get("active")):
+            self.close()
+            self.was_down = False
+            return False
+        self.area = area
+        down = key_down(self.key)
+        if down and not self.was_down:
+            target = self._hovered(area, state)
+            if self.card is not None and target in (None, self.card.monster):
+                self.close()
+            elif target is not None:
+                self.open(target, state)
+        self.was_down = down
+        if self.card is not None and self.missing and any(self._icon(gfx) for gfx in list(self.missing)):
+            self._draw()  # une image vient d'arriver
+        return self.card is not None
+
+    def _hovered(self, area, state: dict) -> int | None:
+        """Le monstre sous la souris, d'après la grille calée sur mes clics ; None si la grille n'est pas encore calée."""
+        left, top, right, bottom = area
+        frame = aim.load_frame((right - left, bottom - top))
+        if frame is None:
+            return None
+        x, y = cursor()
+        cell = frame.cell_at(x - left, y - top)
+        return next((f["monster"] for f in state.get("fighters", []) if f.get("cell") == cell and f.get("monster") and not f.get("dead")), None)
+
+    def open(self, monster: int, state: dict) -> None:
+        from ..bestiary import card, monster as bestiary, notes
+
+        if self.game is None:
+            self.game, self.notes = bestiary.Game(), notes.load()
+        self.card = card.build(self.game, self.notes, monster, self.game.dungeon_of_map(state.get("map")))
+        self.open_spells = False
+        if self.at is None:
+            self.at = self._saved() or self._beside_cursor()
+        self._draw()
+
+    def close(self) -> None:
+        if self.card is not None:
+            self.card, self.grab = None, None
+            self.layer.hide()
+            self.window.withdraw()
+
+    def _icon(self, gfx: int) -> Path | None:
+        """L'image du monstre si elle est là ; sinon demandée une fois à DofusDB, en arrière-plan."""
+        path = self.icon_dir / f"{gfx}.png"
+        if path.exists():
+            self.missing.discard(gfx)
+            return path
+        if gfx and gfx not in self.missing:
+            self.missing.add(gfx)
+            threading.Thread(target=self._fetch, args=(gfx,), daemon=True).start()
+        return None
+
+    def _fetch(self, gfx: int) -> None:
+        from ..web.server import fetch_icon
+
+        fetch_icon(gfx, self.icon_dir, url=MONSTER_IMAGE_URL.format(gfx=gfx))
+
+    def _draw(self) -> None:
+        card = self.card
+        icons = {card.monster: self._icon(card.gfx)} | {monster: self._icon(gfx) for monster, _, gfx in card.focus}
+        image, self.regions = draw.sheet_image(card, self.scale, icons, self.open_spells)
+        self.size = image.size
+        self.at = self._inside(*self.at)
+        self.window.geometry(f"{image.width}x{image.height}+{self.at[0]}+{self.at[1]}")
+        self.window.deiconify()
+        self.layer.show(image, *self.at)
+
+    def _inside(self, x: int, y: int) -> tuple[int, int]:
+        left, top, right, bottom = self.area or (0, 0, 10_000, 10_000)
+        return max(left, min(x, right - self.size[0])), max(top, min(y, bottom - self.size[1]))
+
+    def _beside_cursor(self) -> tuple[int, int]:
+        x, y = cursor()
+        return x + round(40 * self.scale), y - round(120 * self.scale)
+
+    def _saved(self) -> tuple[int, int] | None:
+        """Position laissée la dernière fois, rapportée au coin de la zone de jeu."""
+        try:
+            raw = json.loads(SHEET_POSITION_PATH.read_text(encoding="utf-8"))
+            left, top = (self.area or (0, 0))[:2]
+            return left + int(raw["x"]), top + int(raw["y"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def _hit(self, name: str, event) -> bool:
+        box = self.regions.get(name)
+        return box is not None and box[0] <= event.x <= box[2] and box[1] <= event.y <= box[3]
+
+    def _press(self, event) -> None:
+        if self.card is None:
+            return
+        if self._hit("close", event):
+            self.close()
+        elif self._hit("spells", event):
+            self.open_spells = not self.open_spells
+            self._draw()
+        elif self._hit("drag", event):
+            self.grab = (event.x_root - self.at[0], event.y_root - self.at[1])
+
+    def _drag(self, event) -> None:
+        if self.grab is not None and self.card is not None:
+            self.at = self._inside(event.x_root - self.grab[0], event.y_root - self.grab[1])
+            self.layer.move(*self.at)
+
+    def _release(self, _event) -> None:
+        if self.grab is None:
+            return
+        self.grab = None
+        left, top = (self.area or (0, 0))[:2]
+        try:
+            SHEET_POSITION_PATH.write_text(json.dumps({"x": self.at[0] - left, "y": self.at[1] - top}), encoding="utf-8")
+        except OSError:
+            pass
 
 
 class Items:
@@ -369,7 +539,7 @@ class Items:
 class Window:
     def __init__(self, feed: Feed | None, items: Items, demo: list[tuple[float, Sale]] | None = None, anywhere: bool = False, game: str = "Dofus",
                  aim_key: int | None = None, rune: bool = False, demo_rune: str | None = None, forge: Forge | None = None, me: str | None = None,
-                 breeding: Breeding | None = None, chime: bool = False) -> None:  # fmt: skip
+                 breeding: Breeding | None = None, chime: bool = False, sheet_key: int | None = None) -> None:  # fmt: skip
         self.feed, self.items, self.demo = feed, items, demo or []
         self.forge, self.me = forge, me  # forgemagie : mission du moment et succès du groupe
         self.forge_checked = 0.0
@@ -392,6 +562,8 @@ class Window:
         self.root.withdraw()
         self.layer = Layer(self.root)
         self.aim = AimHelper(self.root, aim_key, self.scale) if aim_key is not None else None
+        self.sheet = SheetHelper(self.root, sheet_key, self.scale, items.icon_dir) if sheet_key is not None else None
+        self.grid = GridLearner() if self.aim or self.sheet else None  # grille du combat, calée sur mes clics
         self.fight: dict = {"active": False}
         self.root.after(POLL_MS, self.tick)
 
@@ -460,11 +632,16 @@ class Window:
         else:
             self.board.expire(now)
             self.paint(now)
+        if self.grid is not None:
+            self.grid.tick(now, self.area, self.fight)
         aiming = self.aim.tick(now, self.area, self.fight) if self.aim is not None else False
+        if self.sheet is not None:
+            self.sheet.tick(now, self.area, self.fight)
         if self.is_demo and not self.demo and not self.board.banners and not getattr(self.breeding, "script", None):
             self.root.destroy()  # démonstration terminée
             return None
         fast = aiming or bool(self.board.banners and self.area) or (self.aim is not None and self.fight.get("map") == aim.COMTE_MAP)
+        fast = fast or (self.grid is not None and bool(self.fight.get("active")))  # en combat : ne rater aucun clic pour la grille
         fast = fast or (self.show_rune and self.rune and now - self.rune_changed < draw.BUMP_S + 0.2)
         return FRAME_MS if fast else POLL_MS
 
@@ -640,8 +817,12 @@ def main() -> int:
     key = key_code(cfg.aim_key) if cfg.harebourg_aim else None
     if cfg.harebourg_aim and key is None:
         print(f"Touche de visée inconnue : « {cfg.aim_key} ». Exemples : XBUTTON2 (souris 5), XBUTTON1, F8, ALT, une lettre.")
+    sheet_key = key_code(cfg.sheet_key) if cfg.monster_sheets else None
+    if cfg.monster_sheets and sheet_key is None:
+        print(f"Touche des fiches inconnue : « {cfg.sheet_key} ». Exemples : XBUTTON1 (souris 4), F8, ALT, une lettre.")
     Window(Feed(conn) if cfg.sale_notifications else None, Items(conn, icon_dir), anywhere=args.anywhere, game=game, aim_key=key,
-           rune=cfg.huppermage_rune, forge=forge, me=cfg.share_pseudo or None, breeding=breeding, chime=cfg.breeding_sound).run()  # fmt: skip
+           rune=cfg.huppermage_rune, forge=forge, me=cfg.share_pseudo or None, breeding=breeding, chime=cfg.breeding_sound,
+           sheet_key=sheet_key).run()  # fmt: skip
     return 0
 
 

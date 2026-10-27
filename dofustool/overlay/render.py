@@ -302,3 +302,160 @@ def aim_image(size: tuple[int, int], cells: list[tuple[list, tuple, int, str]], 
         for row, (text, colour) in enumerate(lines):
             draw.text((x + s(10), y + s(5) + row * s(19)), text, font=face, fill=(*colour, 255))
     return image
+
+
+# --- fiche d'un monstre : une fenêtre qu'on ouvre en survolant un monstre ---------------------------------
+
+SHEET_WIDTH, SHEET_PAD, SHEET_IMAGE = 400, 16, 64
+SHEET_WARN, SHEET_OK, SHEET_SOFT = (240, 150, 70), (92, 200, 140), (201, 210, 208)
+WEAK_COLOURS = {"Terre": ELEMENT_COLOURS["terre"], "Feu": ELEMENT_COLOURS["feu"], "Eau": ELEMENT_COLOURS["eau"], "Air": ELEMENT_COLOURS["air"], "Neutre": SHEET_SOFT}
+
+
+def wrap(draw: ImageDraw.ImageDraw, text: str, face, width: float) -> list[str]:
+    """Le texte coupé en lignes qui tiennent dans la largeur, mot à mot."""
+    lines, line = [], ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if line and draw.textlength(trial, font=face) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    return lines + [line] if line else lines
+
+
+def sheet_image(card, scale: float = 1.0, icons: dict | None = None, open_spells: bool = False) -> tuple[Image.Image, dict[str, tuple]]:
+    """La fiche dessinée, ombre comprise, et ses zones cliquables (coordonnées dans l'image) :
+    « close » la croix, « drag » l'en-tête par où on la déplace, « spells » le dépliage des sorts d'un boss."""
+    s = lambda v: round(v * scale)  # noqa: E731
+    icons = icons or {}
+    width, pad = s(SHEET_WIDTH), s(SHEET_PAD)
+    inner = width - 2 * pad
+    sheet = Image.new("RGBA", (width, s(2400)), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(sheet)
+    small, label, body, bold, title = font(s(11)), font(s(11), True), font(s(13)), font(s(13), True), font(s(20), True)
+    regions: dict[str, tuple] = {}
+
+    # En-tête : image, nom, ligne du donjon, chiffres ; la croix à droite.
+    y = pad
+    well = (pad, y, pad + s(SHEET_IMAGE), y + s(SHEET_IMAGE))
+    draw.rounded_rectangle(well, s(12), fill=(*GROUND, 255), outline=(*(ACCENT if card.boss else LINE), 255), width=max(1, s(2 if card.boss else 1)))
+    picture = icon_image(icons[card.monster], s(SHEET_IMAGE - 4)) if icons.get(card.monster) else None
+    if picture is not None:
+        sheet.alpha_composite(picture, (well[0] + s(2), well[1] + s(2)))
+    left = well[2] + s(12)
+    text_y = y + s(2)
+    if card.boss:
+        draw.text((left, text_y), "BOSS", font=label, fill=(*ACCENT, 255))
+        text_y += s(16)
+    name = fit(draw, card.name, title, inner - (left - pad) - s(44) - (s(70) if card.focus_rank else 0))
+    draw.text((left, text_y), name, font=title, fill=(*TEXT, 255))
+    if card.focus_rank:
+        badge_x = left + draw.textlength(name, font=title) + s(8)
+        tag = f"FOCUS {card.focus_rank}"
+        draw.rounded_rectangle((badge_x, text_y + s(5), badge_x + draw.textlength(tag, font=label) + s(12), text_y + s(23)), s(6), fill=(*ACCENT, 255))
+        draw.text((badge_x + s(6), text_y + s(6)), tag, font=label, fill=(*SURFACE, 255))
+    text_y += s(28)
+    if card.subtitle:
+        draw.text((left, text_y), fit(draw, card.subtitle, small, inner - (left - pad)), font=small, fill=(*MUTED, 255))
+        text_y += s(16)
+    stats = f"{card.stats} · faible "
+    draw.text((left, text_y), stats, font=small, fill=(*MUTED, 255))
+    draw.text((left + draw.textlength(stats, font=small), text_y), card.weakest, font=label, fill=(*WEAK_COLOURS.get(card.weakest, SHEET_SOFT), 255))
+    close = (width - pad - s(36), pad - s(6), width - pad + s(6), pad + s(36))
+    cx, cy = (close[0] + close[2]) / 2, (close[1] + close[3]) / 2
+    for dx, dy in ((1, 1), (1, -1)):
+        draw.line((cx - s(7) * dx, cy - s(7) * dy, cx + s(7) * dx, cy + s(7) * dy), fill=(*MUTED, 255), width=max(2, s(2)))
+    regions["close"] = close
+    y = max(well[3], text_y + s(16)) + s(12)
+    regions["drag"] = (0, 0, close[0], y)
+
+    def rule() -> None:
+        nonlocal y
+        draw.line((pad, y, width - pad, y), fill=(*LINE, 255), width=max(1, s(1)))
+        y += s(12)
+
+    def heading(text: str) -> None:
+        nonlocal y
+        draw.text((pad, y), text, font=label, fill=(*MUTED, 255))
+        y += s(18)
+
+    # Boss : l'essentiel du donjon, puis l'ordre de focus.
+    if card.essentials:
+        for kind, head, text in card.essentials:
+            colour = SHEET_OK if kind == "ok" else SHEET_WARN
+            draw.ellipse((pad, y + s(2), pad + s(14), y + s(16)), fill=(*colour, 255))
+            draw.text((pad + s(7), y + s(9)), "✓" if kind == "ok" else "!", font=label, fill=(*SURFACE, 255), anchor="mm")
+            for line in wrap(draw, f"{head}. {text}" if head else text, body, inner - s(24)):
+                draw.text((pad + s(24), y), line, font=body, fill=(*TEXT, 255))
+                y += s(18)
+            y += s(5)
+        y += s(3)
+        rule()
+    if card.focus:
+        heading("ORDRE DE FOCUS")
+        x = pad + s(5)
+        y += s(4)
+        for rank, (monster, who, _) in enumerate(card.focus, 1):
+            box = (x, y, x + s(46), y + s(46))
+            draw.rounded_rectangle(box, s(10), fill=(*GROUND, 255), outline=(*LINE, 255), width=max(1, s(1)))
+            thumb = icon_image(icons[monster], s(42)) if icons.get(monster) else None
+            if thumb is not None:
+                sheet.alpha_composite(thumb, (box[0] + s(2), box[1] + s(2)))
+            draw.ellipse((box[0] - s(5), box[1] - s(5), box[0] + s(13), box[1] + s(13)), fill=(*ACCENT, 255))
+            draw.text((box[0] + s(4), box[1] + s(4)), str(rank), font=label, fill=(*SURFACE, 255), anchor="mm")
+            draw.text((box[0] + s(23), box[3] + s(4)), fit(draw, who, small, s(70)), font=small, fill=(*TEXT, 255), anchor="ma")
+            x += s(76)
+        y += s(68)
+        rule()
+
+    # Ses trois lignes : portée, déplacements, spécial.
+    for name, text in card.rows:
+        draw.text((pad, y + s(2)), name, font=label, fill=(*MUTED, 255))
+        for line in wrap(draw, text, body, inner - s(86)):
+            draw.text((pad + s(86), y), line, font=body, fill=(*(SHEET_WARN if name == "SPÉCIAL" else TEXT), 255))
+            y += s(18)
+        y += s(6)
+
+    # Sorts : toujours pour un monstre, dépliés à la demande pour un boss (sa fiche est déjà longue).
+    if card.spells:
+        y += s(2)
+        if card.boss and not open_spells:
+            text = f"{len(card.spells)} sorts ›"
+            draw.text((pad, y), text, font=label, fill=(*ACCENT, 255))
+            regions["spells"] = (pad - s(4), y - s(8), pad + draw.textlength(text, font=label) + s(8), y + s(22))
+            y += s(20)
+        else:
+            rule()
+            heading("SORTS")
+            for spell in card.spells:
+                draw.text((pad, y), fit(draw, spell.name, bold, inner), font=bold, fill=(*TEXT, 255))
+                y += s(19)
+                for line in wrap(draw, " · ".join(part for part in (spell.reach, spell.limit) if part), small, inner):
+                    draw.text((pad, y), line, font=small, fill=(*MUTED, 255))
+                    y += s(15)
+                for line in wrap(draw, spell.effect, small, inner):
+                    draw.text((pad, y), line, font=small, fill=(*SHEET_SOFT, 255))
+                    y += s(15)
+                y += s(8)
+            if card.boss:
+                text = "replier ‹"
+                draw.text((pad, y), text, font=label, fill=(*ACCENT, 255))
+                regions["spells"] = (pad - s(4), y - s(8), pad + draw.textlength(text, font=label) + s(8), y + s(22))
+                y += s(20)
+    if card.footer:
+        y += s(2)
+        draw.text((pad, y), card.footer, font=small, fill=(*MUTED, 200))
+        y += s(16)
+    height = y + pad - s(4)
+
+    # Fond et ombre, puis le contenu par-dessus.
+    margin = s(PAD)
+    image = Image.new("RGBA", (width + 2 * margin, height + 2 * margin), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((margin, margin + s(4), margin + width - 1, margin + height - 1 + s(4)), s(14), fill=(0, 0, 0, 160))
+    image.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(s(8))))
+    ImageDraw.Draw(image).rounded_rectangle((margin, margin, margin + width - 1, margin + height - 1), s(14), fill=(*SURFACE, 250), outline=(*LINE, 255), width=max(1, s(1)))
+    image.alpha_composite(sheet.crop((0, 0, width, height)), (margin, margin))
+    shifted = {key: (box[0] + margin, box[1] + margin, box[2] + margin, box[3] + margin) for key, box in regions.items()}
+    return image, shifted

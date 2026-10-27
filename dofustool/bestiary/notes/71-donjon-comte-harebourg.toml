@@ -31,18 +31,6 @@ type = "danger"
 titre = "Rotation impossible = défaite"
 texte = "Si la case d'arrivée de la rotation est impossible, le combat se termine et tous meurent."
 
-[monstres.3384]
-nom = "Klime"
-
-[monstres.3391]
-nom = "Missiz Frizz"
-
-[monstres.3397]
-nom = "Nileza"
-
-[monstres.3409]
-nom = "Sylargh"
-
 [monstres.3410]
 nom = "Granduk"
 portee = "Hibougie : 3 à 10 cases, ligne de vue requise"

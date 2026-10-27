@@ -51,3 +51,43 @@ def test_effect_text_reads_like_the_game_tooltip(game):
     assert game.effect_text({"actionId": 6, "diceNum": 6}) == "Attire de 6 cases"
     assert game.effect_text({"actionId": 6, "diceNum": 1}) == "Attire de 1 case"
     assert game.effect_text({"actionId": 99, "diceNum": 255297}) == ""  # valeur codée, pas un nombre de dommages
+
+
+def test_every_written_note_reads_and_only_names_monsters_of_its_dungeon(game):
+    from dofustool.bestiary import notes
+
+    loaded = notes.load()
+    assert {98, 71, 75, 28, 107} <= set(loaded)
+    for dungeon, note in loaded.items():
+        _, bosses, monsters = game.dungeon(dungeon)
+        assert set(note.monsters) <= set(monsters) and set(note.focus) <= set(monsters), dungeon
+        assert all(kind in ("ok", "danger") for kind, _, _ in note.essentials)
+    assert 3384 not in loaded[71].monsters  # Klime, Frizz, Nileza, Sylargh : le Comte à deux boss est un cas à part
+
+
+def test_a_card_takes_the_note_first_and_the_game_data_where_the_note_says_nothing(game):
+    from dofustool.bestiary import card, notes
+
+    loaded = notes.load()
+    klutiste = card.build(game, loaded, 4452, 98)
+    assert klutiste.focus_rank == 1 and not klutiste.boss and klutiste.weakest == "Terre"
+    assert klutiste.subtitle == "Temple de Koutoulou · niv. 212" and [s.name for s in klutiste.spells][-1] == "Mélopée Pernicieuse"
+    larve = card.build(game, loaded, 4453, game.dungeon_of_map(None))
+    assert larve.boss and len(larve.essentials) == 5 and [name for _, name, _ in larve.focus] == ["Klûtiste", "Li-Fo", "Shokkoth"]
+    soldalia = card.build(game, loaded, 7205)  # pas de note : la fiche calculée
+    assert soldalia.rows[0] == ("PORTÉE", "Tape à 12 cases") and soldalia.footer == "Calculé depuis les données du jeu"
+    assert game.dungeon_of_map(112206595) == 71  # salle du Comte : retrouvée par sa sous-zone
+
+
+def test_the_sheet_image_marks_its_close_cross_its_header_and_the_boss_spells(game):
+    from dofustool.bestiary import card, notes
+    from dofustool.overlay import render
+
+    loaded = notes.load()
+    image, regions = render.sheet_image(card.build(game, loaded, 4453, 98))
+    assert set(regions) == {"close", "drag", "spells"} and regions["close"][0] > image.width / 2
+    opened, _ = render.sheet_image(card.build(game, loaded, 4453, 98), open_spells=True)
+    assert opened.height > image.height  # les sorts du boss se déplient
+    small, regions = render.sheet_image(card.build(game, loaded, 4452, 98), scale=1.0)
+    big, _ = render.sheet_image(card.build(game, loaded, 4452, 98), scale=1.5)
+    assert "spells" not in regions and big.width > small.width
