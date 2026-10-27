@@ -91,3 +91,15 @@ def test_the_sheet_image_marks_its_close_cross_its_header_and_the_boss_spells(ga
     small, regions = render.sheet_image(card.build(game, loaded, 4452, 98), scale=1.0)
     big, _ = render.sheet_image(card.build(game, loaded, 4452, 98), scale=1.5)
     assert "spells" not in regions and big.width > small.width
+
+
+def test_guide_pages_are_found_by_dungeon_or_boss_name(game):
+    from dofustool.bestiary import prepare
+
+    assert prepare.plain("Donjon du Comte Harebourg") == "comte harebourg" == prepare.plain("Comte  Harebourg")
+    assert prepare.plain("Canopée du Kimbo") == "canopee du kimbo"
+    links = {"comte harebourg": "https://x/comte.html", "temple de koutoulou": "https://x/kout.html"}
+    assert prepare.guide_url(game, 71, links) == "https://x/comte.html"
+    assert prepare.guide_url(game, 98, links) == "https://x/kout.html" and prepare.guide_url(game, 28, links) is None
+    text = prepare.to_text("<p>Folie&nbsp;2 :<br>reste à 3 PO</p><script>x()</script><div>fin</div>")
+    assert text == "Folie 2 :\nreste à 3 PO\nfin"
