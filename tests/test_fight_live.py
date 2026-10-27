@@ -92,6 +92,27 @@ def test_confusion_of_the_comte_fight():
     assert tracker.state() == {"active": False}
 
 
+def test_my_cell_comes_back_with_a_spell_cast_on_myself():
+    tracker = live.Tracker()
+    feed(tracker, START, me=ME)
+    # un déplacement que la capture n'a pas su lire : la case reste l'ancienne...
+    assert next(f["cell"] for f in tracker.state()["fighters"] if f["kind"] == "moi") == 300
+    # ... jusqu'au prochain sort lancé sur moi (Comtoise, en début de tour), qui dit où je suis
+    feed(tracker, f"    3.000 s2c jsq 69 | 2.2.1=20821 2.2.2=3646 2.3=1 2.5=342 2.6={ME} 22=300 36={ME}")
+    assert next(f["cell"] for f in tracker.state()["fighters"] if f["kind"] == "moi") == 342
+    feed(tracker, f"    4.000 s2c jsq 69 | 2.2.2=111 2.5=355 2.6={FOE} 22=300 36={ME}")  # sur un ennemi : c'est sa case, pas la mienne
+    assert next(f["cell"] for f in tracker.state()["fighters"] if f["kind"] == "moi") == 342
+
+
+def test_a_path_starting_on_a_multiple_of_8_is_followed():
+    from .test_protocol import ld, vi
+
+    tracker = live.Tracker()
+    feed(tracker, START, me=ME)
+    tracker.feed(5.0, "s2c", journal.MOVE, ld(1, bytes([0x90, 0x03, 0x9E, 0x03])) + vi(2, 1) + vi(4, ME))  # [400, 414]
+    assert next(f["cell"] for f in tracker.state()["fighters"] if f["kind"] == "moi") == 414
+
+
 def test_last_rune_of_the_huppermage():
     tracker = live.Tracker()
     feed(tracker, START, me=ME)

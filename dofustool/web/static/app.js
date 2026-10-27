@@ -3193,6 +3193,8 @@ async function pageConfig() {
         } }, 'Détecter'),
         h('label', { class: 'check' }, h('input', { id: 'c-dash', type: 'checkbox', checked: d.start_dashboard, onchange: (e) => { d.start_dashboard = e.target.checked; sync(); } }), 'Ouvrir Prospection avec le jeu'),
         h('label', { class: 'check' }, h('input', { id: 'c-notif', type: 'checkbox', checked: d.sale_notifications !== false, onchange: (e) => { d.sale_notifications = e.target.checked; sync(); } }), 'Afficher un bandeau par-dessus le jeu quand un objet se vend'),
+        h('label', { class: 'check' }, h('input', { id: 'c-aim', type: 'checkbox', checked: !!d.harebourg_aim, onchange: (e) => { d.harebourg_aim = e.target.checked; sync(); } }), 'Comte Harebourg : afficher sur le jeu la case à viser quand je maintiens la touche de visée'),
+        text('c-aimkey', 'Touche de visée', 'aim_key', 140, 'XBUTTON2'),
         h('label', { class: 'check' }, h('input', { id: 'c-rune', type: 'checkbox', checked: !!d.huppermage_rune, onchange: (e) => { d.huppermage_rune = e.target.checked; sync(); } }), 'Huppermage : afficher en combat l\u2019élément de ma dernière rune'),
         h('label', { class: 'check' }, h('input', { id: 'c-fm', type: 'checkbox', checked: d.fm_banners !== false, onchange: (e) => { d.fm_banners = e.target.checked; sync(); } }), 'Forgemagie : rappeler la mission du moment en ouvrant l\u2019atelier, et annoncer les succès du groupe'),
         h('label', { class: 'check' }, h('input', { id: 'c-breed', type: 'checkbox', checked: d.breeding_banners !== false, onchange: (e) => { d.breeding_banners = e.target.checked; sync(); } }), 'Élevage : prévenir quand il faut basculer ou couper un objet d\u2019enclos'),

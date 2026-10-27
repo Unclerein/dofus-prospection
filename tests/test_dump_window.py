@@ -52,3 +52,14 @@ def test_cell_lists_are_shown_and_nothing_else_is():
     assert dump_window.small_numbers(bytes([0xFF, 0xFF, 0x03])) is None  # nombre trop grand
     assert dump_window.small_numbers(bytes([0xE0, 0x02, 0xEE])) is None  # liste coupée
     assert dump_window.small_numbers(bytes(range(200, 232))) is None  # octets quelconques
+
+
+def test_a_path_is_read_as_cells_even_when_it_also_reads_as_a_message():
+    # 400 = 0x90 0x03 se lit aussi « champ 50, entier » ; 437 = 0xB5 0x03 « champ 54, flottant » : le chemin était perdu
+    for path, raw in (([400, 414], bytes([0x90, 0x03, 0x9E, 0x03])), ([437, 438, 439, 440, 441], bytes([0xB5, 0x03, 0xB6, 0x03, 0xB7, 0x03, 0xB8, 0x03, 0xB9, 0x03]))):
+        body = ld(1, raw) + vi(2, 1) + vi(4, 9)
+        assert dump_window.describe(body)[0] != f"1=[{','.join(map(str, path))}]"  # lu seul, sans savoir que c'est un chemin
+        assert dump_window.describe(body, lists=dump_window.CELL_LISTS["jnz"])[0] == f"1=[{','.join(map(str, path))}]"
+    assert dump_window.describe(ld(1, vi(1, 3)), lists=frozenset({"1"})) == ["1=[8,3]"]  # c'est bien la liste qui l'emporte
+    assert dump_window.describe(ld(1, bytes([0x30, 0x3E])), lists=frozenset({"1"})) == ["1=[48,62]"]  # cases sous 128 : octets lisibles en texte
+    assert dump_window.describe(ld(1, b"Salut")) == ["1=LEN5"]  # hors d'un chemin connu, le texte reste caché

@@ -89,11 +89,11 @@ try {
         }
     }
 
-    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, dernière rune du Huppermage,
-    #        mission de forgemagie et succès du groupe, gestes d'élevage.
+    # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, visée du Comte Harebourg,
+    #        dernière rune du Huppermage, mission de forgemagie et succès du groupe, gestes d'élevage.
     #        Une fenêtre à part, qui ne fait qu'afficher.
     Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if ($cfg.sale_notifications -or $cfg.huppermage_rune -or $cfg.fm_banners -or $cfg.breeding_banners) {
+    if ($cfg.sale_notifications -or $cfg.harebourg_aim -or $cfg.huppermage_rune -or $cfg.fm_banners -or $cfg.breeding_banners) {
         $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }

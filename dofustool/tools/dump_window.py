@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..archive import ARCHIVE_PATH
 from ..archive import connect as archive_reader
+from ..fight.journal import MOVE
 from ..protocol.wire import I32, I64, LEN, VARINT, WireError, iter_fields, to_signed
 
 HANDSHAKE_S = 30.0  # messages écartés au début de chaque connexion
@@ -42,16 +43,19 @@ def looks_like_text(chunk: bytes) -> bool:
 SMALL = 1000  # au-delà, ce n'est plus une liste de cases : on ne montre que la longueur
 
 
-def small_numbers(chunk: bytes) -> list[int] | None:
+def small_numbers(chunk: bytes, known: bool = False) -> list[int] | None:
     """Les nombres d'une liste compacte de petits entiers (les cases d'un chemin), sinon None.
 
     Rien de ce qui se lit comme du texte ne passe, quel qu'il soit, et un bloc d'octets quelconque
-    n'a aucune chance de ne donner que des nombres sous 1000."""
-    try:
-        chunk.decode("utf-8")
-        return None
-    except UnicodeDecodeError:
-        pass
+    n'a aucune chance de ne donner que des nombres sous 1000. `known` : le champ est connu pour être
+    une liste de cases (CELL_LISTS), jamais du texte ; un chemin dont toutes les cases sont sous 128
+    se lit aussi comme du texte, et passe alors quand même."""
+    if not known:
+        try:
+            chunk.decode("utf-8")
+            return None
+        except UnicodeDecodeError:
+            pass
     numbers, current, shift = [], 0, 0
     for byte in chunk:
         current |= (byte & 0x7F) << shift
@@ -66,8 +70,15 @@ def small_numbers(chunk: bytes) -> list[int] | None:
     return numbers if shift == 0 else None
 
 
-def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | None = None) -> list[str] | None:
-    """Champs d'un message, à plat : « 2.1=57 ». None si ce n'est pas un message lisible."""
+# Champs connus pour être des listes de cases : sans cela, un chemin qui commence par une case multiple de 8
+# (ou de 8 plus 5) se lit aussi comme un sous-message, et le déplacement est perdu.
+CELL_LISTS = {MOVE: frozenset({"1"})}  # déplacement à pied : le chemin
+
+
+def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | None = None, lists: frozenset[str] = frozenset()) -> list[str] | None:
+    """Champs d'un message, à plat : « 2.1=57 ». None si ce n'est pas un message lisible.
+
+    `lists` : champs à lire d'abord comme une liste de cases (voir CELL_LISTS)."""
     out = [] if out is None else out
     try:
         for number, wire_type, value in iter_fields(body):
@@ -83,6 +94,9 @@ def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | Non
             elif wire_type == LEN:
                 chunk = bytes(value)
                 inner = None
+                if name in lists and (numbers := small_numbers(chunk, known=True)):
+                    out.append(f"{name}=[{','.join(map(str, numbers))}]")
+                    continue
                 if chunk and depth < MAX_DEPTH and not looks_like_text(chunk):
                     inner = describe(chunk, depth + 1, name + ".", [])
                 numbers = None if inner else small_numbers(chunk)
@@ -113,7 +127,7 @@ def dump(archive: sqlite3.Connection, start: float, end: float) -> tuple[list[st
         if ts - started_at < HANDSHAKE_S:
             skipped += 1
             continue
-        fields = describe(bytes(body))
+        fields = describe(bytes(body), lists=CELL_LISTS.get(key, frozenset()))
         if fields is None:
             shown = f"illisible LEN{len(body)}"
         elif len(fields) > MAX_FIELDS:

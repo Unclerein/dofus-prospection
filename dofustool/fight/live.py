@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from ..tools.dump_window import describe
+from ..tools.dump_window import CELL_LISTS, describe
 from . import journal
 
 FIGHT_PATH = Path(__file__).resolve().parents[2] / "data" / "fight.json"
@@ -31,9 +31,9 @@ RUNE_STATES = {701: "feu", 702: "eau", 703: "terre", 704: "air"}
 ORDER_WINDOW_S = 5.0  # un sort annoncé par le serveur plus tard que ça après ma demande n'est pas le mien
 
 
-def flat(body: bytes) -> journal.Fields:
+def flat(body: bytes, key: str = "") -> journal.Fields:
     """Les champs d'un message sous la forme que lit le journal (« 37.6 », « 49 »)."""
-    return [tuple(pair.split("=", 1)) for pair in describe(body) or [] if "=" in pair]
+    return [tuple(pair.split("=", 1)) for pair in describe(body, lists=CELL_LISTS.get(key, frozenset())) or [] if "=" in pair]
 
 
 class Tracker:
@@ -50,7 +50,7 @@ class Tracker:
         """Prend un message de la capture ; vrai s'il concernait le combat."""
         if key not in WATCHED:
             return False
-        self.feed_fields(when, direction, key, flat(body), me)
+        self.feed_fields(when, direction, key, flat(body, key), me)
         return True
 
     def feed_fields(self, when: float, direction: str, key: str, fields: journal.Fields, me: int | None = None) -> None:

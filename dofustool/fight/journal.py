@@ -224,6 +224,9 @@ class Fight:
             self.sides = item.path
         elif kind == "end":
             self.ended = True
+        elif kind == "cast" and item.source is not None and item.source == item.target and item.cell is not None and item.cell >= 0:
+            # Un sort lancé sur soi (Comtoise à chaque début de tour) donne la case du lanceur : de quoi rattraper un déplacement manqué.
+            self.fighters[item.source].cell = item.cell
         if item.target is None or kind not in ("sheet", "summon", "damage", "heal", "shield", "death", "push", "move", "teleport"):
             return
         tally = self.fighters[item.target]
