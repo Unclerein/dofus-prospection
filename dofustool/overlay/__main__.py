@@ -178,8 +178,13 @@ def key_code(name: str) -> int | None:
     name = (name or "").strip().upper()
     if name in KEYS:
         return KEYS[name]
-    if len(name) == 1 and (name.isalpha() or name.isdigit()):
+    if len(name) == 1 and name.isascii() and (name.isalpha() or name.isdigit()):
         return ord(name)
+    if len(name) == 1:
+        # Ponctuation, lettres accentuées : la touche qui donne ce caractère sur le clavier en place (AZERTY…).
+        found = ctypes.windll.user32.VkKeyScanW(ord(name))
+        if found != -1 and found & 0xFF != 0xFF:
+            return found & 0xFF
     return None
 
 
