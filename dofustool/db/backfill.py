@@ -10,6 +10,7 @@ import time
 
 from .. import db
 from ..archive import ARCHIVE_PATH
+from ..archive import connect as archive_reader
 from ..messages import avg_prices, breeding, characters, fm, hdv_listings, market_history, sales, storage, trades
 from ..messages import exchange
 from ..messages import inventory as moves
@@ -404,7 +405,7 @@ def main() -> int:
     if not ARCHIVE_PATH.exists():
         print("data/archive.sqlite absent : rien à rejouer.")
         return 1
-    archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
+    archive = archive_reader(ARCHIVE_PATH)
     market = db.connect()
     counts = backfill(archive, market)
     # Le rejeu vient de réenregistrer d'anciens relevés de prix moyens : ne garder qu'un par jour, comme la capture.

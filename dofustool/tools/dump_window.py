@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..archive import ARCHIVE_PATH
+from ..archive import connect as archive_reader
 from ..protocol.wire import I32, I64, LEN, VARINT, WireError, iter_fields, to_signed
 
 HANDSHAKE_S = 30.0  # messages écartés au début de chaque connexion
@@ -138,7 +139,7 @@ def main() -> int:
     if not args.archive.exists():
         print(f"Archive absente : {args.archive}")
         return 1
-    archive = sqlite3.connect(f"file:{args.archive.as_posix()}?mode=ro", uri=True)
+    archive = archive_reader(args.archive)
     lines, skipped = dump(archive, start, end)
     archive.close()
     header = f"# {args.start} -> {args.end} · {len(lines)} messages · {skipped} écartés (début de connexion) · structure et nombres seulement"

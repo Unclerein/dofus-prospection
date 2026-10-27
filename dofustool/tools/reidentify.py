@@ -16,6 +16,7 @@ from datetime import datetime
 
 from .. import db, identify
 from ..archive import ARCHIVE_PATH
+from ..archive import connect as archive_reader
 from ..messages import avg_prices, runtime_keymap_path
 from ..protocol.tcp import S2C
 from ..protocol.wire import LEN, VARINT, WireError, iter_fields
@@ -95,7 +96,7 @@ def main() -> int:
     if not context.items:
         print("Aucun item en base (données statiques non importées) : rien ne peut être vérifié.")
         return 1
-    archive = sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True)
+    archive = archive_reader(ARCHIVE_PATH)
     row = archive.execute(
         "SELECT id, started_at FROM connections WHERE id = COALESCE(?, (SELECT MAX(id) FROM connections))", (args.connection,)
     ).fetchone()

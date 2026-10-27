@@ -659,7 +659,7 @@ def save_snapshot(conn: sqlite3.Connection, ts: float, prices: dict[int, int]) -
 
 # Les relevés de prix moyens sont gardés en entier pendant ce nombre de jours (les calculs regardent
 # 30 jours en arrière au plus) ; au-delà, un seul par jour suffit à tracer l'évolution d'un prix.
-SNAPSHOT_FULL_DAYS = 35
+SNAPSHOT_FULL_DAYS = 31
 
 
 def thin_snapshots(conn: sqlite3.Connection, now: float, keep_days: float = SNAPSHOT_FULL_DAYS) -> int:

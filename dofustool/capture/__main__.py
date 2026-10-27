@@ -7,12 +7,12 @@ Usage : python -m dofustool.capture [--iface NOM]
 """
 import argparse
 import logging
-import sqlite3
 import sys
 import time
 
 from .. import config, db
 from ..archive import ARCHIVE_PATH, Archive
+from ..archive import connect as archive_reader
 from ..db.backfill import backfill_breeding, backfill_fm, fm_backfill_due
 from ..messages import load_keymap, runtime_keymap_path
 from . import GAME_PORT
@@ -75,12 +75,12 @@ def main() -> int:
     try:
         if fm_backfill_due(market):
             log.info("Journal de forgemagie : rattrapage depuis l'archive, la capture écoute déjà…")
-            done = backfill_fm(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
+            done = backfill_fm(archive_reader(ARCHIVE_PATH), market)
             log.info("Journal de forgemagie complété depuis l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
     except Exception as exc:  # le rattrapage ne doit jamais empêcher la capture
         log.warning("Rattrapage du journal de forgemagie non fait : %s", exc)
     try:  # élevage vu avant que la capture sache le lire (étable, enclos, aperçus d'accouplement) : relu une fois
-        done = backfill_breeding(sqlite3.connect(f"file:{ARCHIVE_PATH.as_posix()}?mode=ro", uri=True), market)
+        done = backfill_breeding(archive_reader(ARCHIVE_PATH), market)
         if done:
             log.info("Élevage relu dans l'archive : %s.", ", ".join(f"{v} {k}" for k, v in done.items()))
     except Exception as exc:

@@ -90,10 +90,10 @@ try {
     }
 
     # 3 bis. Affichage par-dessus le jeu (optionnel) : bandeau de vente, dernière rune du Huppermage,
-    #        mission de forgemagie et succès du groupe.
+    #        mission de forgemagie et succès du groupe, gestes d'élevage.
     #        Une fenêtre à part, qui ne fait qu'afficher.
     Get-Overlays | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    if ($cfg.sale_notifications -or $cfg.huppermage_rune -or $cfg.fm_banners) {
+    if ($cfg.sale_notifications -or $cfg.huppermage_rune -or $cfg.fm_banners -or $cfg.breeding_banners) {
         $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
         if (Test-Path $pythonw) { Start-Process -FilePath $pythonw -ArgumentList '-m', 'dofustool.overlay' -WorkingDirectory $root }
     }
@@ -148,4 +148,7 @@ finally {
     try { & $python -m dofustool.staticdata.update --if-new | ForEach-Object { Say $_ } } catch { Say "Données du jeu non vérifiées (hors ligne ?) : ce sera refait à la prochaine partie." }
     # Caractéristiques de base des équipements vus à l'HDV (DofusDB) : après la capture, jamais pendant.
     try { & $python -m dofustool.staticdata.effects | ForEach-Object { Say $_ } } catch { Say "DofusDB injoignable : à relancer plus tard." }
+    # Allègement des données locales : archive compressée, langues inutiles, place rendue au disque. Rapide
+    # quand il n'y a rien à faire ; la première fois, une à trois minutes.
+    try { & $python -m dofustool.tools.slim | ForEach-Object { Say $_ } } catch { Say "Allègement des données non fait : ce sera refait à la prochaine partie." }
 }
