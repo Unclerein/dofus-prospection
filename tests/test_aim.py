@@ -76,3 +76,17 @@ def test_plain_cell_and_when_nothing_is_shown():
     assert aim.plan({**state(me, cell(15, 4), None, 2)}, cell(12, 12), LAYOUT) is None  # pas de confusion
     assert aim.plan({**state(me, cell(15, 4), 90, 2), "map": 1}, cell(12, 12), LAYOUT) is None  # autre carte
     assert aim.plan({"active": False}, cell(12, 12), LAYOUT) is None
+
+
+def test_grid_learnt_from_my_clicks():
+    presses = [(9.0, 1.0, 1.0), (10.0, *FRAME.centre(300))]  # un clic sur la barre de sorts, puis sur la case
+    assert aim.match(presses, 10.1) == FRAME.centre(300) and aim.match(presses, 20.0) is None
+    points = [(300, *FRAME.centre(300))]
+    assert aim.refit(points)[0] is None  # une seule case : pas assez
+    frame, points = aim.refit(points + [(355, *FRAME.centre(355))])
+    assert frame is not None and frame.cell_at(*FRAME.centre(412)) == 412
+    # zoom changé : les deux derniers clics, d'accord entre eux, remplacent les anciens
+    zoomed = aim.Frame(ox=100.0, oy=400.0, width=120.0)
+    frame, points = aim.refit(points + [(412, *zoomed.centre(412))])
+    frame, points = aim.refit(points + [(250, *zoomed.centre(250))])
+    assert frame is not None and abs(frame.width - 120.0) < 0.01 and len(points) == 2

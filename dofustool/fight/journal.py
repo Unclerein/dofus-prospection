@@ -17,6 +17,7 @@ MOVE = "jnz"  # déplacement à pied : le chemin, case par case ; absent pour un
 # Cases de départ des deux équipes : à l'entrée en combat, et avant le combat quand le joueur demande l'aperçu (touche L).
 START_CELLS, PREVIEW = "jxk", "jvk"
 ORDER = "jsr"  # du client vers le serveur : le joueur lance un sort (1 : sort, 2 : case)
+MOVE_REQUEST = "jok"  # du client vers le serveur : le joueur demande à se déplacer (1 : chemin, direction × 4096 + case ; 2 : carte)
 PLACEMENT = "kjl"  # cases des combattants pendant le placement et à son terme (2.2 : combattant, 2.3 : case, répétés)
 SHIELD_STAT = 96
 

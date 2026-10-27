@@ -170,7 +170,7 @@ class Layer:
 
 KEYS = {"XBUTTON1": 0x05, "XBUTTON2": 0x06, "MBUTTON": 0x04, "SHIFT": 0x10, "CTRL": 0x11, "ALT": 0x12, "CAPSLOCK": 0x14, "TAB": 0x09}
 KEYS |= {f"F{n}": 0x6F + n for n in range(1, 25)}
-RECALIBRATE_S = 6.0  # touche maintenue sur son propre personnage : on refait le calibrage
+LEFT_BUTTON = 0x01
 
 
 def key_code(name: str) -> int | None:
@@ -216,70 +216,70 @@ class AimHelper:
         window.withdraw()
         self.layer, self.key, self.scale = Layer(window), key, scale
         self.layout = grid.load("comte")
-        self.points: list[tuple[int, float, float]] = []  # calibrage en cours : (case, x, y)
-        self.was_down = False
-        self.down_since = 0.0
+        # Calage automatique : chaque clic gauche (quand, x, y), puis la case que le jeu a demandée pour lui.
+        self.presses: list[tuple[float, float, float]] = []
+        self.mouse_was_down = False
+        self.points: list[tuple[int, float, float]] = []  # (case, x, y) pour la taille de zone `self.size`
+        self.size: tuple[int, int] | None = None
+        self.seen = 0.0  # dernier clic du combat déjà pris en compte
+        self.kept = None  # visée gardée à l'écran après avoir lâché la touche : (case, curseur, dernier clic, tour)
         self.drawn = None
-        self.message = ""
 
     def tick(self, now: float, area, state: dict) -> bool:
         """Vrai tant que la touche est enfoncée (la fenêtre se redessine alors souvent)."""
-        in_fight = state.get("active") and state.get("map") == aim.COMTE_MAP
-        down = bool(area) and in_fight and key_down(self.key)
-        pressed = down and not self.was_down
-        self.was_down = down
-        if not down:
-            self.layer.hide()
-            self.drawn = None
+        if not (area and state.get("active") and state.get("map") == aim.COMTE_MAP):
+            self.kept = None
+            self._hide()
             return False
-        if pressed:
-            self.down_since = now
         left, top, right, bottom = area
         size = (right - left, bottom - top)
         x, y = cursor()
         at = (x - left, y - top)
+        self._learn(now, at, size, state)
         frame = aim.load_frame(size)
-        me = next((f.get("cell") for f in state.get("fighters", []) if f.get("kind") == "moi"), None)
-        comte = next((f.get("cell") for f in state.get("fighters", []) if f.get("monster") == aim.COMTE_MONSTER), None)
-        if frame is not None and me is not None and frame.cell_at(*at) == me and now - self.down_since >= RECALIBRATE_S:
-            frame, self.points, self.message = None, [], "Calibrage recommencé."
-            aim.save_frame(size, aim.Frame(0, 0, 0))  # efface l'ancien : il sera remplacé au prochain calibrage
-        if frame is None or frame.width <= 0:
-            self._calibrate(pressed, at, size, me, comte)
-            self._show(size, [], self._calibration_lines(), at, left, top)
+        clicks = state.get("clicks") or []
+        last_click = clicks[-1][0] if clicks else 0.0
+        if key_down(self.key):
+            if frame is None:
+                self.kept = None
+                self._show(size, [], [("Grille pas encore calée : lance un sort ou déplace-toi, elle se cale toute seule.", draw.TEXT)], at, left, top)
+                return True
+            target = frame.cell_at(*at)
+            self.kept = (target, at, last_click, state.get("round"))
+            self._show_plan(frame, target, at, size, state, left, top)
             return True
-        self._show_plan(frame, at, size, state, left, top)
-        return True
+        # Touche lâchée : la visée reste affichée jusqu'au prochain clic en combat, ou au tour suivant.
+        if self.kept is not None and frame is not None and self.kept[2] == last_click and self.kept[3] == state.get("round"):
+            self._show_plan(frame, self.kept[0], self.kept[1], size, state, left, top)
+            return False
+        self.kept = None
+        self._hide()
+        return False
 
-    def _calibrate(self, pressed: bool, at, size, me, comte) -> None:
-        if not pressed:
-            return
-        wanted = me if not self.points else comte
-        if wanted is None:
-            self.message = "Position inconnue : attends le début du combat."
-            return
-        self.points.append((wanted, *at))
-        if len(self.points) < 2:
-            return
-        try:
-            frame, error = aim.calibrate(self.points)
-        except ValueError:
-            frame, error = None, 1.0
-        if frame is None or error > aim.MAX_RESIDUAL or frame.width < 20:
-            self.points, self.message = [], "Calibrage raté : recommence, bien au centre des cases."
-            return
-        aim.save_frame(size, frame)
-        self.points, self.message = [], "Calibrage enregistré."
+    def _hide(self) -> None:
+        self.layer.hide()
+        self.drawn = None
 
-    def _calibration_lines(self) -> list[tuple[str, tuple]]:
-        step = "survole le centre de TON personnage et appuie" if not self.points else "survole le centre du COMTE et appuie"
-        lines = [(f"Calibrage {len(self.points) + 1}/2 : {step}", draw.TEXT)]
-        if self.message:
-            lines.append((self.message, draw.MUTED))
-        return lines
+    def _learn(self, now: float, at, size, state: dict) -> None:
+        """Cale la grille sur mes clics : la position de la souris à chaque clic gauche, et la case que le jeu a demandée."""
+        down = key_down(LEFT_BUTTON)
+        if down and not self.mouse_was_down:
+            self.presses = (self.presses + [(now, *at)])[-20:]
+        self.mouse_was_down = down
+        if size != self.size:
+            self.points, self.size = [], size
+        for when, cell in state.get("clicks") or []:
+            if when <= self.seen:
+                continue
+            self.seen = when
+            spot = aim.match(self.presses, when)
+            if spot is None:
+                continue
+            frame, self.points = aim.refit(self.points + [(cell, *spot)])
+            if frame is not None and frame != aim.load_frame(size):
+                aim.save_frame(size, frame)
 
-    def _show_plan(self, frame: aim.Frame, at, size, state: dict, left: int, top: int) -> None:
-        target = frame.cell_at(*at)
+    def _show_plan(self, frame: aim.Frame, target: int | None, at, size, state: dict, left: int, top: int) -> None:
         plan = aim.plan(state, target, self.layout) if target is not None else None
         key = (target, plan, state.get("confusion"), state.get("round"), size)
         if key == self.drawn:

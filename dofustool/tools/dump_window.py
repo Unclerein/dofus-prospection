@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..archive import ARCHIVE_PATH
 from ..archive import connect as archive_reader
-from ..fight.journal import MOVE
+from ..fight.journal import MOVE, MOVE_REQUEST
 from ..protocol.wire import I32, I64, LEN, VARINT, WireError, iter_fields, to_signed
 
 HANDSHAKE_S = 30.0  # messages écartés au début de chaque connexion
@@ -41,6 +41,7 @@ def looks_like_text(chunk: bytes) -> bool:
 
 
 SMALL = 1000  # au-delà, ce n'est plus une liste de cases : on ne montre que la longueur
+KNOWN_LIMIT = 1 << 15  # chemin demandé par le client : la direction (0 à 7) y est ajoutée à la case, × 4096
 
 
 def small_numbers(chunk: bytes, known: bool = False) -> list[int] | None:
@@ -61,7 +62,7 @@ def small_numbers(chunk: bytes, known: bool = False) -> list[int] | None:
         current |= (byte & 0x7F) << shift
         shift += 7
         if not byte & 0x80:
-            if current >= SMALL:
+            if current >= (KNOWN_LIMIT if known else SMALL):
                 return None
             numbers.append(current)
             current = shift = 0
@@ -72,7 +73,7 @@ def small_numbers(chunk: bytes, known: bool = False) -> list[int] | None:
 
 # Champs connus pour être des listes de cases : sans cela, un chemin qui commence par une case multiple de 8
 # (ou de 8 plus 5) se lit aussi comme un sous-message, et le déplacement est perdu.
-CELL_LISTS = {MOVE: frozenset({"1"})}  # déplacement à pied : le chemin
+CELL_LISTS = {MOVE: frozenset({"1"}), MOVE_REQUEST: frozenset({"1"})}  # déplacement à pied : le chemin
 
 
 def describe(body: bytes, depth: int = 0, prefix: str = "", out: list[str] | None = None, lists: frozenset[str] = frozenset()) -> list[str] | None:

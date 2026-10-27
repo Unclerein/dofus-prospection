@@ -144,3 +144,18 @@ def test_fight_left_without_its_end_is_closed():
     assert tracker.state() == {"active": False}
     tracker.close()  # sans combat : rien à faire
     assert not tracker.dirty
+
+
+def test_my_clicks_on_cells_are_kept_for_the_overlay_grid():
+    from .test_protocol import ld, vi
+
+    tracker = live.Tracker()
+    tracker.feed(1.0, "c2s", journal.ORDER, vi(1, 111) + vi(2, 355))  # hors combat : rien
+    feed(tracker, START, me=ME)
+    tracker.feed(5.0, "c2s", journal.ORDER, vi(1, 111) + vi(2, 355))
+    tracker.feed(6.0, "c2s", journal.ORDER, vi(1, 111) + vi(2, 300))  # sur un combattant (moi) : pas pris
+    # déplacement demandé : direction × 4096 + case, en varints ; le bout du chemin est la case cliquée
+    path = [3 * 4096 + 400, 3 * 4096 + 427]
+    raw = b"".join(bytes([v & 0x7F | 0x80, v >> 7 & 0x7F | 0x80, v >> 14]) for v in path)
+    tracker.feed(7.0, "c2s", journal.MOVE_REQUEST, ld(1, raw) + vi(2, 112206595))
+    assert tracker.state()["clicks"] == [(5.0, 355), (7.0, 427)]

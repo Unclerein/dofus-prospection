@@ -19,6 +19,9 @@ COMTE_PLACEMENT = grid.Placement(7, 6)  # décalage entre la salle dessinée (ma
 
 CALIBRATION_PATH = Path(__file__).resolve().parents[2] / "data" / "aim_calibration.json"
 MAX_RESIDUAL = 0.25  # écart toléré entre les points de calibrage et la grille calculée, en largeurs de case
+CLICK_BEFORE_S = 1.5  # la demande part juste après le clic
+CLICK_AFTER_S = 0.25  # l'overlay voit l'appui à son passage suivant, donc parfois un peu après la demande
+POINTS_KEPT = 8
 
 
 # --- géométrie --------------------------------------------------------------------
@@ -79,6 +82,32 @@ def calibrate(points: list[tuple[int, float, float]]) -> tuple[Frame, float]:
         raise ValueError("calibrage impossible : les points ne forment pas une grille")
     error = sum(math.dist(frame.centre(cell), (px, py)) for cell, px, py in points) / len(points) / width
     return frame, error
+
+
+def match(presses: list[tuple[float, float, float]], when: float) -> tuple[float, float] | None:
+    """Où était la souris au clic qui a fait partir une demande à ce moment : le dernier appui (quand, x, y) juste avant."""
+    spot = None
+    for ts, x, y in presses:
+        if when - CLICK_BEFORE_S <= ts <= when + CLICK_AFTER_S:
+            spot = (x, y)
+    return spot
+
+
+def refit(points: list[tuple[int, float, float]]) -> tuple[Frame | None, list[tuple[int, float, float]]]:
+    """Cadrage tiré des derniers clics (case, x, y), et les clics à garder pour la suite.
+
+    Tous s'ils s'accordent ; sinon les deux derniers seuls (zoom ou fenêtre changés : les anciens ne valent plus)."""
+    points = points[-POINTS_KEPT:]
+    for kept in (points, points[-2:]):
+        if len({cell for cell, _, _ in kept}) < 2:
+            continue
+        try:
+            frame, error = calibrate(kept)
+        except ValueError:
+            continue
+        if error <= MAX_RESIDUAL and frame.width >= 20:
+            return frame, kept
+    return None, points[-2:]
 
 
 def _solve3(a: list[list[float]], b: list[float]) -> tuple[float, float, float]:

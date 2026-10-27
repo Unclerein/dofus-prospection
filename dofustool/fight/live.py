@@ -19,7 +19,7 @@ MAP_CHANGE = "jow"  # le joueur arrive sur une carte ; à l'entrée en combat, c
 EFFECT = "juh"  # un effet est posé sur un combattant (1.2 : code, 1.1.8 : cible, 1.1.10 : valeur, 1.1.16 : sort)
 WATCHED = frozenset({
     journal.FIGHT_START, journal.FIGHT_END, journal.TURN, journal.ACTION, journal.SHEET, journal.MY_LIFE,
-    journal.STAT, journal.MOVE, journal.START_CELLS, journal.ORDER, journal.PLACEMENT, MAP_CHANGE, EFFECT,
+    journal.STAT, journal.MOVE, journal.START_CELLS, journal.ORDER, journal.MOVE_REQUEST, journal.PLACEMENT, MAP_CHANGE, EFFECT,
 })  # fmt: skip
 # Confusion (combat du Comte Harebourg) : code d'effet -> degrés par unité, horaire positif.
 # 770 à 772 : horaire en degrés, en quarts de tour, en huitièmes de tour ; 773 à 775 : de même, contre horaire.
@@ -29,6 +29,7 @@ ADD_STATE = 950  # code d'effet : pose un état (1.1.1 : numéro de l'état)
 # Huppermage : le jeu pose lui-même sur le lanceur l'état « Dernière rune : Feu » (et Eau, Terre, Air) à chaque rune.
 RUNE_STATES = {701: "feu", 702: "eau", 703: "terre", 704: "air"}
 ORDER_WINDOW_S = 5.0  # un sort annoncé par le serveur plus tard que ça après ma demande n'est pas le mien
+CLICKS_KEPT = 8  # dernières cases cliquées (sort ou déplacement), pour caler la grille de l'overlay
 
 
 def flat(body: bytes, key: str = "") -> journal.Fields:
@@ -45,6 +46,7 @@ class Tracker:
         self.map_id: int | None = None  # carte où se trouve le joueur, donc celle du combat en cours
         self.confusion: int | None = None  # ma confusion en degrés horaires (0, 90, 180, 270), si j'en ai une
         self.rune: str | None = None  # élément de ma dernière rune (Huppermage)
+        self.clicks: list[tuple[float, int]] = []  # (quand, case) de mes derniers clics en combat
 
     def feed(self, when: float, direction: str, key: str, body: bytes, me: int | None = None) -> bool:
         """Prend un message de la capture ; vrai s'il concernait le combat."""
@@ -59,6 +61,7 @@ class Tracker:
         if direction == "c2s":
             if key == journal.ORDER and (spell := journal.number(fields, "1")) is not None:
                 self._ordered = (spell, when)
+            self._click(when, key, fields)
             return
         if key == MAP_CHANGE:
             # On ne change pas de carte en plein combat : un combat encore ouvert a fini sans qu'on voie sa fin.
@@ -73,11 +76,30 @@ class Tracker:
         if item is None:
             return
         if item.kind == "start":
-            self.confusion, self.rune = None, None
+            self.confusion, self.rune, self.clicks = None, None, []
         elif item.kind == "cast":
             self._cast(item, when)
         if fighting or self.reader.current is not None:
             self.dirty = True
+
+    def _click(self, when: float, key: str, fields: journal.Fields) -> None:
+        """Une case que je viens de cliquer en combat : celle d'un sort, ou le bout du chemin demandé."""
+        if self.reader.current is None:
+            return
+        if key == journal.ORDER:
+            cell = journal.number(fields, "2")
+            if any(t.cell == cell and not t.dead for t in self.reader.current.fighters.values()):
+                return  # sort sur un combattant : la souris était sur son dessin, au-dessus de sa case
+        elif key == journal.MOVE_REQUEST:
+            path = dict(fields).get("1", "")
+            steps = [int(v) for v in path.strip("[]").split(",")] if path.startswith("[") else []
+            cell = steps[-1] % 4096 if steps else None
+        else:
+            return
+        if cell is None or not 0 <= cell < 560:
+            return
+        self.clicks = (self.clicks + [(when, cell)])[-CLICKS_KEPT:]
+        self.dirty = True
 
     def close(self) -> None:
         """Termine le combat en cours, s'il y en a un : plus rien ne doit s'afficher hors combat."""
@@ -126,7 +148,7 @@ class Tracker:
             })  # fmt: skip
         return {
             "active": True, "round": fight.rounds, "fighters": fighters,
-            "map": self.map_id, "confusion": self.confusion, "rune": self.rune,
+            "map": self.map_id, "confusion": self.confusion, "rune": self.rune, "clicks": self.clicks,
         }  # fmt: skip
 
 
