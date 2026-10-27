@@ -3351,6 +3351,10 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 26, date: '27 octobre 2026', title: 'Comte Harebourg : ta confusion par-dessus le jeu', points: [
+    ['Confusion :', 'en combat contre le Comte, une petite pastille en haut à droite montre ta confusion du moment, en degrés horaires (doré 90°, orange 180°, rouge 270°). Rien à régler : elle s’affiche dès que l’overlay tourne.'],
+    ['Discrète :', 'elle se pose à gauche du carré de la rune du Huppermage, sur la même ligne : les autres bandeaux ne bougent pas.'],
+  ] },
   { id: 25, date: '27 octobre 2026', title: 'Élevage : la génétique, avec les vraies chances du jeu', hash: '#/breeding/genetics', go: 'Ouvrir la génétique', points: [
     ['Génétique :', 'choisis une couleur parmi les 66 dragodindes : l’app trace le chemin depuis ton étable, génération par génération, avec ce qu’il faut produire, prendre dans l’étable ou capturer.'],
     ['Chances :', 'la formule des couleurs, retrouvée sur 40 aperçus d’accouplement (exacte au centième) : chaque étape montre la chance du meilleur couple de ton étable, et l’aperçu complet du bébé pour le couple que tu choisis. Case Optimakina comprise.'],

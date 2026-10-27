@@ -217,19 +217,47 @@ def rune_card(element: str, scale: float, icon: Path | None = None, changed: flo
     return image
 
 
-def render(views: list[View], scale: float = 1.0, rune: str | None = None, rune_icon: Path | None = None, rune_changed: float = 99.0) -> Image.Image | None:
-    """La pastille de la dernière rune s'il y en a une, puis les bandeaux, le plus récent en haut. None s'il n'y a rien à montrer."""
-    if not views and not rune:
+CONFUSION_WIDTH = 92  # pastille de la confusion (Comte Harebourg), à gauche du carré de la rune
+CONFUSION_COLOURS = {0: MUTED, 90: ACCENT, 180: (240, 150, 70), 270: (232, 72, 64)}
+
+
+def confusion_card(degrees: int, scale: float) -> Image.Image:
+    """Ma confusion du moment, en degrés horaires : une petite pastille de la hauteur du carré de la rune."""
+    s = lambda v: round(v * scale)  # noqa: E731
+    colour = CONFUSION_COLOURS.get(degrees % 360, ACCENT)
+    size = (s(CONFUSION_WIDTH + 2 * PAD), s(RUNE_SIZE + 2 * PAD))
+    box = (s(PAD), s(PAD), s(PAD + CONFUSION_WIDTH) - 1, s(PAD + RUNE_SIZE) - 1)
+    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((box[0], box[1] + s(3), box[2], box[3] + s(3)), s(12), fill=(0, 0, 0, 150))
+    image = shadow.filter(ImageFilter.GaussianBlur(s(6)))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(box, s(12), fill=(*SURFACE, 245), outline=(*colour, 255), width=max(2, s(2)))
+    centre = s(PAD + CONFUSION_WIDTH / 2)
+    draw.text((centre, s(PAD + 20)), f"{degrees % 360}°", font=font(s(20), bold=True), fill=(*colour, 255), anchor="mm")
+    draw.text((centre, s(PAD + 38)), "CONFUSION" if degrees % 360 else "AUCUNE", font=font(s(9), bold=True), fill=(*MUTED, 255), anchor="mm")
+    return image
+
+
+def render(views: list[View], scale: float = 1.0, rune: str | None = None, rune_icon: Path | None = None, rune_changed: float = 99.0,
+           confusion: int | None = None) -> Image.Image | None:  # fmt: skip
+    """Les pastilles (confusion, puis dernière rune à droite) s'il y en a, puis les bandeaux, le plus récent en haut.
+    None s'il n'y a rien à montrer."""
+    pills = [p for p in (confusion_card(confusion, scale) if confusion is not None else None,
+                         rune_card(rune, scale, rune_icon, rune_changed) if rune else None) if p is not None]  # fmt: skip
+    if not views and not pills:
         return None
     s = lambda v: round(v * scale)  # noqa: E731
     step = s(HEIGHT + GAP)
-    pill = rune_card(rune, scale, rune_icon, rune_changed) if rune else None
-    offset = pill.height - s(2 * PAD) + s(GAP) if pill is not None else 0
+    row = sum(p.width for p in pills) - (len(pills) - 1) * (s(2 * PAD) - s(GAP))  # ombres l'une sur l'autre, un écart entre
+    offset = max(p.height for p in pills) - s(2 * PAD) + s(GAP) if pills else 0
     height = offset + (s(2 * PAD + HEIGHT) + step * (len(views) - 1) if views else s(2 * PAD) - s(GAP))
-    canvas = Image.new("RGBA", (s(WIDTH + 2 * PAD), height), (0, 0, 0, 0))
-    if pill is not None:
-        canvas.alpha_composite(pill, (canvas.width - pill.width, 0))
-    for row, view in enumerate(reversed(views)):
+    canvas = Image.new("RGBA", (max(s(WIDTH + 2 * PAD), row), height), (0, 0, 0, 0))
+    x = canvas.width
+    for pill in reversed(pills):
+        x -= pill.width
+        canvas.alpha_composite(pill, (x, 0))
+        x += s(2 * PAD) - s(GAP)
+    for row_index, view in enumerate(reversed(views)):
         shown = visibility(view)
         if shown <= 0:
             continue
@@ -237,5 +265,5 @@ def render(views: list[View], scale: float = 1.0, rune: str | None = None, rune_
         if shown < 1:
             image.putalpha(image.getchannel("A").point(lambda a: round(a * shown)))
         slide = s(18 * (1 - shown))  # glisse depuis la droite en apparaissant
-        canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, offset + row * step))
+        canvas.alpha_composite(image.crop((0, 0, image.width - slide, image.height)), (slide, offset + row_index * step))
     return canvas

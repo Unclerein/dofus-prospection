@@ -123,3 +123,12 @@ def test_fight_left_without_its_end_is_closed():
     assert tracker.state() == {"active": False}
     tracker.close()  # sans combat : rien à faire
     assert not tracker.dirty
+
+
+def test_confusion_set_before_i_am_known_counts_once_i_am():
+    tracker = live.Tracker()
+    feed(tracker, START)  # capture lancée en pleine partie : on ne sait pas encore qui je suis
+    feed(tracker, f"    2.000 s2c juh 78 | 1.1.8={ME} 1.1.10=1 1.1.16=3646 1.2=771")
+    assert tracker.state()["confusion"] is None
+    tracker.me = ME  # mon premier sort me fait reconnaître
+    assert tracker.state()["confusion"] == 90
