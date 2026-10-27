@@ -447,7 +447,7 @@ class Window:
                         self.board.dismiss(gesture, now)
                 except sqlite3.Error:
                     pass  # base occupée, ou d'avant l'élevage : au prochain passage
-            if (self.aim is not None or self.show_rune) and not self.is_demo:
+            if not self.is_demo:  # combat en cours : rune du Huppermage, confusion au Comte
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
                 self.fight = fight if fight.get("active") and fresh else {"active": False}
@@ -504,8 +504,7 @@ class Window:
             for banner in self.board.banners
         ]  # fmt: skip
         rune = self.rune if self.show_rune else None
-        comte = self.aim is not None and self.fight.get("active") and self.fight.get("map") == aim.COMTE_MAP
-        confusion = self.fight.get("confusion") if comte else None
+        confusion = self.fight.get("confusion") if self.fight.get("active") and self.fight.get("map") == live.COMTE_MAP else None
         image = draw.render(views, self.scale, rune, self.items.effect_icon(draw.ELEMENT_ICONS.get(rune)), now - self.rune_changed, confusion)
         if image is None:
             self.layer.hide()

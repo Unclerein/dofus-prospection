@@ -25,6 +25,7 @@ WATCHED = frozenset({
 # 770 à 772 : horaire en degrés, en quarts de tour, en huitièmes de tour ; 773 à 775 : de même, contre horaire.
 CONFUSION = {770: 1, 771: 90, 772: 45, 773: -1, 774: -90, 775: -45}
 COMTOISE = 3646  # sort de début de tour qui fixe la confusion ; les autres (Pendultimatum) s'y ajoutent
+COMTE_MAP = 112206595  # salle du Comte Harebourg
 ADD_STATE = 950  # code d'effet : pose un état (1.1.1 : numéro de l'état)
 # Huppermage : le jeu pose lui-même sur le lanceur l'état « Dernière rune : Feu » (et Eau, Terre, Air) à chaque rune.
 RUNE_STATES = {701: "feu", 702: "eau", 703: "terre", 704: "air"}
