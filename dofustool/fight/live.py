@@ -44,8 +44,10 @@ class Tracker:
         self.dirty = False  # l'état a changé depuis le dernier `state`
         self._ordered: tuple[int, float] | None = None  # sort que je viens de demander, et quand
         self.map_id: int | None = None  # carte où se trouve le joueur, donc celle du combat en cours
-        self.confusion: int | None = None  # ma confusion en degrés horaires (0, 90, 180, 270), si j'en ai une
-        self.rune: str | None = None  # élément de ma dernière rune (Huppermage)
+        # Confusion en degrés horaires (0, 90, 180, 270) et élément de la dernière rune (Huppermage), par combattant :
+        # au début d'une capture lancée en pleine partie, on ne sait qui je suis qu'à mon premier sort.
+        self.confusions: dict[int, int] = {}
+        self.runes: dict[int, str] = {}
         self.clicks: list[tuple[float, int]] = []  # (quand, case) de mes derniers clics en combat
 
     def feed(self, when: float, direction: str, key: str, body: bytes, me: int | None = None) -> bool:
@@ -76,7 +78,7 @@ class Tracker:
         if item is None:
             return
         if item.kind == "start":
-            self.confusion, self.rune, self.clicks = None, None, []
+            self.confusions, self.runes, self.clicks = {}, {}, []
         elif item.kind == "cast":
             self._cast(item, when)
         if fighting or self.reader.current is not None:
@@ -105,7 +107,7 @@ class Tracker:
         """Termine le combat en cours, s'il y en a un : plus rien ne doit s'afficher hors combat."""
         if self.reader.current is not None:
             self.reader.close()
-            self.confusion, self.rune, self.dirty = None, None, True
+            self.confusions, self.runes, self.dirty = {}, {}, True
 
     def _cast(self, item: journal.Event, when: float) -> None:
         """À défaut de connaître mon personnage : c'est lui qui lance le sort que je viens de demander."""
@@ -116,20 +118,30 @@ class Tracker:
         if self.me is None:
             self.me = item.source
 
+    @property
+    def confusion(self) -> int | None:
+        return self.confusions.get(self.me) if self.me is not None else None
+
+    @property
+    def rune(self) -> str | None:
+        return self.runes.get(self.me) if self.me is not None else None
+
     def _effect(self, fields: journal.Fields) -> None:
-        """Un effet posé sur moi : ma dernière rune, ou une confusion (celle de début de tour remplace, les suivantes s'ajoutent)."""
-        if self.reader.current is None or journal.number(fields, "1.1.8") != self.me:
+        """Un effet posé sur un combattant : sa dernière rune, ou une confusion (celle de début de tour remplace, les suivantes s'ajoutent)."""
+        target = journal.number(fields, "1.1.8")
+        if self.reader.current is None or target is None:
             return
         action = journal.number(fields, "1.2")
         if action == ADD_STATE and journal.number(fields, "1.1.1") in RUNE_STATES:
-            self.rune, self.dirty = RUNE_STATES[journal.number(fields, "1.1.1")], True
+            self.runes[target], self.dirty = RUNE_STATES[journal.number(fields, "1.1.1")], True
             return
         unit = CONFUSION.get(action)
         if unit is None:
             return
         degrees = unit * (journal.number(fields, "1.1.10") or 0)
-        base = 0 if journal.number(fields, "1.1.16") == COMTOISE or self.confusion is None else self.confusion
-        self.confusion = (base + degrees) % 360
+        before = self.confusions.get(target)
+        base = 0 if journal.number(fields, "1.1.16") == COMTOISE or before is None else before
+        self.confusions[target] = (base + degrees) % 360
         self.dirty = True
 
     def state(self) -> dict:

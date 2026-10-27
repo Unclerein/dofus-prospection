@@ -159,3 +159,12 @@ def test_my_clicks_on_cells_are_kept_for_the_overlay_grid():
     raw = b"".join(bytes([v & 0x7F | 0x80, v >> 7 & 0x7F | 0x80, v >> 14]) for v in path)
     tracker.feed(7.0, "c2s", journal.MOVE_REQUEST, ld(1, raw) + vi(2, 112206595))
     assert tracker.state()["clicks"] == [(5.0, 355), (7.0, 427)]
+
+
+def test_confusion_set_before_i_am_known_counts_once_i_am():
+    tracker = live.Tracker()
+    feed(tracker, START)  # capture lancée en pleine partie : on ne sait pas encore qui je suis
+    feed(tracker, f"    2.000 s2c juh 78 | 1.1.8={ME} 1.1.10=1 1.1.16=3646 1.2=771")
+    assert tracker.state()["confusion"] is None
+    tracker.me = ME  # mon premier sort me fait reconnaître
+    assert tracker.state()["confusion"] == 90

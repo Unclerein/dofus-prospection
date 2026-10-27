@@ -222,7 +222,7 @@ class AimHelper:
         self.points: list[tuple[int, float, float]] = []  # (case, x, y) pour la taille de zone `self.size`
         self.size: tuple[int, int] | None = None
         self.seen = 0.0  # dernier clic du combat déjà pris en compte
-        self.kept = None  # visée gardée à l'écran après avoir lâché la touche : (case, curseur, dernier clic, tour)
+        self.kept = None  # visée gardée à l'écran après avoir lâché la touche : (case, curseur)
         self.drawn = None
 
     def tick(self, now: float, area, state: dict) -> bool:
@@ -237,19 +237,17 @@ class AimHelper:
         at = (x - left, y - top)
         self._learn(now, at, size, state)
         frame = aim.load_frame(size)
-        clicks = state.get("clicks") or []
-        last_click = clicks[-1][0] if clicks else 0.0
         if key_down(self.key):
             if frame is None:
                 self.kept = None
                 self._show(size, [], [("Grille pas encore calée : lance un sort ou déplace-toi, elle se cale toute seule.", draw.TEXT)], at, left, top)
                 return True
             target = frame.cell_at(*at)
-            self.kept = (target, at, last_click, state.get("round"))
+            self.kept = (target, at)
             self._show_plan(frame, target, at, size, state, left, top)
             return True
-        # Touche lâchée : la visée reste affichée jusqu'au prochain clic en combat, ou au tour suivant.
-        if self.kept is not None and frame is not None and self.kept[2] == last_click and self.kept[3] == state.get("round"):
+        # Touche lâchée : la visée reste affichée jusqu'au prochain appui sur la touche.
+        if self.kept is not None and frame is not None:
             self._show_plan(frame, self.kept[0], self.kept[1], size, state, left, top)
             return False
         self.kept = None
