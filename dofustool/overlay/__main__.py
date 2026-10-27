@@ -348,7 +348,7 @@ class SheetHelper:
         self.layer, self.key, self.scale = Layer(self.window, clickable=True), key, scale
         self.icon_dir = icon_dir / "monsters"
         self.was_down = False
-        self.game = self.notes = None  # données du jeu et notes : chargées à la première fiche
+        self.game = self.notes = self.wanted = None  # données du jeu et notes : chargées à la première fiche
         self.card = None
         self.open_spells = False
         self.regions: dict[str, tuple] = {}
@@ -394,8 +394,8 @@ class SheetHelper:
         from ..bestiary import card, monster as bestiary, notes
 
         if self.game is None:
-            self.game, self.notes = bestiary.Game(), notes.load()
-        self.card = card.build(self.game, self.notes, monster, self.game.dungeon_of_map(state.get("map")))
+            self.game, self.notes, self.wanted = bestiary.Game(), notes.load(), notes.load_wanted()
+        self.card = card.build(self.game, self.notes, monster, self.game.dungeon_of_map(state.get("map")), self.wanted)
         self.open_spells = False
         if self.at is None:
             self.at = self._saved() or self._beside_cursor()

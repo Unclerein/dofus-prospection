@@ -346,7 +346,7 @@ def sheet_image(card, scale: float = 1.0, icons: dict | None = None, open_spells
     left = well[2] + s(12)
     text_y = y + s(2)
     if card.boss:
-        draw.text((left, text_y), "BOSS", font=label, fill=(*ACCENT, 255))
+        draw.text((left, text_y), card.label or "BOSS", font=label, fill=(*ACCENT, 255))
         text_y += s(16)
     name = fit(draw, card.name, title, inner - (left - pad) - s(44) - (s(70) if card.focus_rank else 0))
     draw.text((left, text_y), name, font=title, fill=(*TEXT, 255))

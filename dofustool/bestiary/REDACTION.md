@@ -47,7 +47,7 @@ Même procédure, avec trois différences :
   pour le recherché et pour chaque monstre qui l'accompagne selon le guide.
 
 Pour la consigne de l'agent, reprendre celle des donjons en remplaçant « note de donjon » par « note d'avis de
-recherche », `donjon = {ID}` par `avis = {ID}`, le chemin de sortie par `notesvis\{FICHIER}`, et les chemins des
+recherche », `donjon = {ID}` par `avis = {ID}`, le chemin de sortie par `notes\avis\{FICHIER}`, et les chemins des
 fichiers par `avis-{ID}-guide.txt` et `avis-{ID}-jeu.txt`.
 
 ## Cas particuliers déjà tranchés
