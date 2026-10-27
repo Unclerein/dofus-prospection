@@ -3351,6 +3351,13 @@ document.getElementById('search-open').addEventListener('click', () => openSearc
 
 // Une entrée par mise à jour qui change quelque chose à l'écran, la plus récente d'abord. Le numéro ne fait que monter.
 const NOTES = [
+  { id: 25, date: '27 octobre 2026', title: 'Élevage : la génétique, avec les vraies chances du jeu', hash: '#/breeding/genetics', go: 'Ouvrir la génétique', points: [
+    ['Génétique :', 'choisis une couleur parmi les 66 dragodindes : l’app trace le chemin depuis ton étable, génération par génération, avec ce qu’il faut produire, prendre dans l’étable ou capturer.'],
+    ['Chances :', 'la formule des couleurs, retrouvée sur 40 aperçus d’accouplement (exacte au centième) : chaque étape montre la chance du meilleur couple de ton étable, et l’aperçu complet du bébé pour le couple que tu choisis. Case Optimakina comprise.'],
+    ['Enclos de bébés :', 'quand amour et endurance manquent toutes les deux, l’enclos vise le côté où sont ses DD (−2 000 à −1 pour un enclos négatif) : la bascule baffeur → caresseur est de nouveau annoncée.'],
+    ['Par-dessus le jeu :', 'l’overlay démarre aussi quand seul le bandeau d’élevage est activé, et une erreur imprévue ne l’arrête plus.'],
+    ['Moins de place :', 'l’archive est compressée et gardée 30 jours, les données du jeu ne gardent que le français : environ 300 Mo de moins. Fait une fois en fin de partie (une à trois minutes), puis en quelques secondes.'],
+  ] },
   { id: 24, date: '26 octobre 2026', title: 'Élevage : chaque jauge a sa couleur et son symbole', hash: '#/breeding', go: 'Ouvrir l’élevage', points: [
     ['Couleurs :', 'amour en rouge (cœur), endurance en jaune (éclair), maturité en bleu clair (goutte). Sur les jauges, les objets d’enclos, les gestes à venir et la Génétique.'],
     ['Sérénité :', 'sous l’échelle, la zone de chaque jauge : endurance de −5 000 à −1, maturité de −2 000 à 2 000, amour de 1 à 5 000.'],
