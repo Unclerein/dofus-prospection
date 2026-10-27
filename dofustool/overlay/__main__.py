@@ -170,7 +170,7 @@ class Layer:
 
 KEYS = {"XBUTTON1": 0x05, "XBUTTON2": 0x06, "MBUTTON": 0x04, "SHIFT": 0x10, "CTRL": 0x11, "ALT": 0x12, "CAPSLOCK": 0x14, "TAB": 0x09}
 KEYS |= {f"F{n}": 0x6F + n for n in range(1, 25)}
-RECALIBRATE_S = 3.0  # touche maintenue sur son propre personnage : on refait le calibrage
+RECALIBRATE_S = 6.0  # touche maintenue sur son propre personnage : on refait le calibrage
 
 
 def key_code(name: str) -> int | None:

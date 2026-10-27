@@ -41,6 +41,8 @@ def test_calibration_file(tmp_path):
     aim.save_frame((1920, 1080), FRAME, path)
     aim.save_frame((1280, 720), aim.Frame(1, 2, 3), path)
     assert aim.load_frame((1920, 1080), path) == FRAME and aim.load_frame((800, 600), path) is None
+    aim.save_frame((1920, 1080), aim.Frame(0, 0, 0), path)  # calibrage effacé (recommencé)
+    assert aim.load_frame((1920, 1080), path) is None
 
 
 def state(me, comte, confusion, round_number, others=()):

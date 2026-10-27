@@ -97,12 +97,13 @@ def _solve3(a: list[list[float]], b: list[float]) -> tuple[float, float, float]:
 
 
 def load_frame(size: tuple[int, int], path: Path = CALIBRATION_PATH) -> Frame | None:
-    """Cadrage enregistré pour cette taille de zone de jeu."""
+    """Cadrage enregistré pour cette taille de zone de jeu ; None s'il n'y en a pas, ou s'il a été effacé."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8")).get(f"{size[0]}x{size[1]}")
-        return Frame(float(raw["ox"]), float(raw["oy"]), float(raw["width"])) if raw else None
+        frame = Frame(float(raw["ox"]), float(raw["oy"]), float(raw["width"])) if raw else None
     except (OSError, ValueError, AttributeError, KeyError, TypeError):
         return None
+    return frame if frame is not None and frame.width > 0 else None
 
 
 def save_frame(size: tuple[int, int], frame: Frame, path: Path = CALIBRATION_PATH) -> None:
