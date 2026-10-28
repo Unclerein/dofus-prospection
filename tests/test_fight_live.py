@@ -168,3 +168,22 @@ def test_confusion_set_before_i_am_known_counts_once_i_am():
     assert tracker.state()["confusion"] is None
     tracker.me = ME  # mon premier sort me fait reconnaître
     assert tracker.state()["confusion"] == 90
+
+
+def test_monsters_are_known_from_the_placement():
+    # Avant le début du combat : les fiches et les cases du placement suffisent à ouvrir celle d'un monstre.
+    tracker = live.Tracker()
+    feed(tracker, "\n".join(START.strip().splitlines()[:3]), me=ME)
+    assert tracker.dirty
+    state = tracker.state()
+    assert not state["active"] and state["placement"]
+    assert [(f["monster"], f["cell"]) for f in state["fighters"] if f["kind"] == "monstre"] == [(489, 310)]
+    feed(tracker, f"    0.500 s2c kjl 20 | 2.2={FOE} 2.3=320")  # le monstre change de case
+    assert tracker.dirty and [f["cell"] for f in tracker.state()["fighters"] if f["monster"]] == [320]
+    feed(tracker, "    1.000 s2c jxr 0 |")
+    assert tracker.state()["active"]
+    feed(tracker, "    5.000 s2c jow 5 | 1=212601347")
+    assert tracker.state() == {"active": False}
+    feed(tracker, "\n".join(START.strip().splitlines()[:3]), me=ME)
+    feed(tracker, "    6.000 s2c jow 5 | 1=212601347")  # placement quitté : plus de fiche
+    assert tracker.state() == {"active": False}

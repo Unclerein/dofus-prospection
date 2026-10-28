@@ -263,6 +263,11 @@ class Reader:
         self._my_life: int | None = None
         self._sides: Event | None = None
 
+    @property
+    def placing(self) -> list[Event]:
+        """Les fiches des combattants pendant le placement, avant le début du combat."""
+        return list(self._sheets.values()) if self.current is None else []
+
     def close(self) -> None:
         """Le combat en cours est fini sans que sa fin ait été vue (changement de carte, reconnexion)."""
         if self.current is not None:

@@ -336,7 +336,7 @@ class AimHelper:
 
 
 class SheetHelper:
-    """Fiche d'un monstre en combat : la touche appuyée en survolant un monstre l'ouvre ; la même touche ou sa croix la ferme.
+    """Fiche d'un monstre en combat, dès le placement : la touche appuyée en survolant un monstre l'ouvre ; la même touche ou sa croix la ferme.
 
     On la déplace en la tirant par son en-tête ; elle se rouvre ensuite au même endroit de la zone de jeu. La fenêtre
     prend ses propres clics (le jeu ne les reçoit pas) sans jamais prendre le focus ; elle ne lit que la souris et la touche."""
@@ -363,7 +363,7 @@ class SheetHelper:
 
     def tick(self, now: float, area, state: dict) -> bool:
         """Vrai tant qu'une fiche est ouverte."""
-        if not (area and state.get("active")):
+        if not (area and (state.get("active") or state.get("placement"))):  # en combat et dès le placement
             self.close()
             self.was_down = False
             return False
@@ -622,7 +622,7 @@ class Window:
             if not self.is_demo:  # combat en cours : rune du Huppermage, confusion au Comte
                 fight = live.read()
                 fresh = now - float(fight.get("updated") or 0) <= STALE_FIGHT_S
-                self.fight = fight if fight.get("active") and fresh else {"active": False}
+                self.fight = fight if (fight.get("active") or fight.get("placement")) and fresh else {"active": False}
                 if self.show_rune and self.fight.get("rune") != self.rune:
                     self.rune, self.rune_changed = self.fight.get("rune"), now
             self.area = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()) if self.anywhere else game_area(self.game)

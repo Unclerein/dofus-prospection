@@ -385,7 +385,11 @@ def sheet_image(card, scale: float = 1.0, icons: dict | None = None, open_spells
         for kind, head, text in card.essentials:
             colour = SHEET_OK if kind == "ok" else SHEET_WARN
             draw.ellipse((pad, y + s(2), pad + s(14), y + s(16)), fill=(*colour, 255))
-            draw.text((pad + s(7), y + s(9)), "✓" if kind == "ok" else "!", font=label, fill=(*SURFACE, 255), anchor="mm")
+            if kind == "ok":  # tracée : toutes les polices n'ont pas le ✓
+                draw.line([(pad + s(3.5), y + s(9)), (pad + s(6), y + s(11.5)), (pad + s(10.5), y + s(6.5))],
+                          fill=(*SURFACE, 255), width=max(2, s(2)), joint="curve")  # fmt: skip
+            else:
+                draw.text((pad + s(7), y + s(9)), "!", font=label, fill=(*SURFACE, 255), anchor="mm")
             for line in wrap(draw, f"{head}. {text}" if head else text, body, inner - s(24)):
                 draw.text((pad + s(24), y), line, font=body, fill=(*TEXT, 255))
                 y += s(18)

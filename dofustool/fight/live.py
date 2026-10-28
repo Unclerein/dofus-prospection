@@ -82,7 +82,7 @@ class Tracker:
             self.confusions, self.runes, self.clicks = {}, {}, []
         elif item.kind == "cast":
             self._cast(item, when)
-        if fighting or self.reader.current is not None:
+        if fighting or self.reader.current is not None or item.kind in ("sheet", "placed"):
             self.dirty = True
 
     def _click(self, when: float, key: str, fields: journal.Fields) -> None:
@@ -106,7 +106,7 @@ class Tracker:
 
     def close(self) -> None:
         """Termine le combat en cours, s'il y en a un : plus rien ne doit s'afficher hors combat."""
-        if self.reader.current is not None:
+        if self.reader.current is not None or self.reader.placing:
             self.reader.close()
             self.confusions, self.runes, self.dirty = {}, {}, True
 
@@ -150,7 +150,13 @@ class Tracker:
         self.dirty = False
         fight = self.reader.current
         if fight is None:
-            return {"active": False}
+            placing = self.reader.placing
+            if not placing:
+                return {"active": False}
+            # Placement : les monstres et leurs cases sont déjà connus, de quoi ouvrir leur fiche.
+            fighters = [{"kind": "monstre" if s.target < 0 else "joueur", "monster": s.spell if s.target < 0 else None,
+                         "cell": s.cell, "dead": False} for s in placing]  # fmt: skip
+            return {"active": False, "placement": True, "fighters": fighters, "map": self.map_id}
         fighters = []
         for fighter_id, tally in fight.fighters.items():
             kind = "moi" if fighter_id == self.me else "invocation" if tally.summoner is not None else "monstre" if fighter_id < 0 else "joueur"
