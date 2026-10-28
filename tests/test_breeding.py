@@ -40,8 +40,8 @@ HERD = [
 ]
 
 
-def herd_of(st, herd=None) -> list[bytes]:
-    return [mount(n, st, **kw) for n, kw in enumerate(HERD if herd is None else herd, 1)]
+def herd_of(st, herd=None, first=1) -> list[bytes]:
+    return [mount(n, st, **kw) for n, kw in enumerate(HERD if herd is None else herd, first)]
 
 
 def stable_body(herd=None, st=None, extra=3) -> bytes:
@@ -50,11 +50,11 @@ def stable_body(herd=None, st=None, extra=3) -> bytes:
     return ld(st["wrap"], b"".join(ld(st["mounts"], m) for m in herd_of(st, herd)) + ld(extra, vi(1, 1) + vi(2, 10)))
 
 
-def content(f, st, active=(0, 4), objects=(24470, 30000, 9210, 20000, 39980, 0), herd=HERD[:2]) -> bytes:
+def content(f, st, active=(0, 4), objects=(24470, 30000, 9210, 20000, 39980, 0), herd=HERD[:2], first=1) -> bytes:
     body = ld(f["active"], bytes(active)) if active else b""
     for index, points in enumerate(objects):
         body += ld(f["objects"], (vi(f["object_value"], points) if points else b"") + (vi(f["object_index"], index) if index else b""))
-    return body + b"".join(ld(f["mounts"], m) for m in herd_of(st, herd))
+    return body + b"".join(ld(f["mounts"], m) for m in herd_of(st, herd, first))
 
 
 def paddock_body(paddock_id=1, f=None, st=None, **kw) -> bytes:
@@ -102,16 +102,22 @@ def test_mounts_are_saved_by_place():
     assert c.execute("SELECT COUNT(*) FROM mounts WHERE place = ?", (db.STABLE,)).fetchone() == (1,)
 
 
-def test_paddock_number_zero_is_not_the_stable():
-    # Le jeu n'envoie pas un champ à 0 : l'enclos n° 0 arrive sans son numéro.
+def test_paddock_opened_in_person_is_recognized():
+    # Ouvert sur place, l'enclos arrive sans son numéro : on le reconnaît parmi ceux vus à distance.
     f = PADDOCK.fields
-    body = ld(f["wrap"], ld(f["content"], content(f, STABLE.fields, herd=HERD[2:3])))
-    paddock = breeding.parse_paddock(body, PADDOCK, STABLE)
-    assert paddock.paddock_id == 0 and len(paddock.mounts) == 1
+    here = lambda **kw: ld(f["wrap"], ld(f["content"], content(f, STABLE.fields, **kw)))  # noqa: E731
+    assert breeding.parse_paddock(here(), PADDOCK, STABLE).paddock_id is None
     c = db.connect(":memory:")
-    db.save_stable(c, breeding.parse_stable(stable_body(), STABLE), NOW)
-    db.save_paddock(c, 0, paddock, NOW + 5)
-    assert c.execute("SELECT place, COUNT(*) FROM mounts GROUP BY place").fetchall() == [(db.STABLE, 4), (0, 1)]
+    assert sim.which_paddock(c, (0,) * 6, [], NOW) == (None, False)  # aucun enclos connu
+    db.save_paddock(c, 1, breeding.parse_paddock(paddock_body(1, herd=HERD[:1]), PADDOCK, STABLE), NOW)
+    db.save_paddock(c, 2, breeding.parse_paddock(paddock_body(2, herd=HERD[1:2], first=2, active=()), PADDOCK, STABLE), NOW)
+    seen = breeding.parse_paddock(here(herd=HERD[1:2], first=2), PADDOCK, STABLE)
+    assert sim.paddock_here(c, seen, NOW + 60, map_id=77) == 2  # ses montures y sont : sûr, sa carte est retenue
+    seen = breeding.parse_paddock(here(herd=HERD[3:4], first=9, active=()), PADDOCK, STABLE)
+    assert sim.which_paddock(c, seen.objects, [m.uid for m in seen.mounts], NOW + 3600) == (2, False)  # montures changées : ses objets, arrêtés
+    assert sim.which_paddock(c, (0,) * 6, [], NOW, map_id=77) == (2, True)  # sur sa carte, plus besoin du reste
+    assert sim.paddock_here(c, breeding.parse_paddock(paddock_body(1), PADDOCK, STABLE), NOW, map_id=77) == 1  # à distance : son numéro
+
 
 
 def test_breeding_messages_are_found_again_after_a_game_update():

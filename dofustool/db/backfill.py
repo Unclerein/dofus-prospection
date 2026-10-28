@@ -9,7 +9,9 @@ import sys
 import time
 
 from .. import db
+from ..analysis import breeding as breeding_analysis
 from ..archive import ARCHIVE_PATH
+from ..fight import journal, live
 from ..archive import connect as archive_reader
 from ..messages import avg_prices, breeding, characters, fm, hdv_listings, market_history, sales, storage, trades
 from ..messages import exchange
@@ -92,7 +94,7 @@ def fm_backfill_due(market: sqlite3.Connection) -> bool:
     return False
 
 
-BREEDING_BACKFILL = "breeding_backfill_2"  # marque dans status : l'élevage a été relu dans l'archive (2 : enclos n° 0 lisible)
+BREEDING_BACKFILL = "breeding_backfill_3"  # marque dans status : l'élevage a été relu dans l'archive (3 : enclos ouverts sur place)
 
 
 def backfill_breeding(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int] | None:
@@ -100,6 +102,9 @@ def backfill_breeding(archive: sqlite3.Connection, market: sqlite3.Connection) -
     avant que la capture sache le lire. None si c'est déjà fait."""
     if db.get_status(market).get(BREEDING_BACKFILL):
         return None
+    with market:  # relu comme un enclos n° 0 avant de savoir reconnaître un enclos ouvert sur place
+        market.execute("DELETE FROM paddocks WHERE paddock_id = 0")
+        market.execute("DELETE FROM paddock_toggles WHERE paddock_id = 0")
     counts = _breeding(archive, market, load_keymap())
     if counts:  # sans table des clés de l'élevage (mise à jour du jeu pas encore rattrapée), on réessaiera
         db.set_status(market, **{BREEDING_BACKFILL: "1"})
@@ -287,19 +292,27 @@ def _breeding(archive: sqlite3.Connection, market: sqlite3.Connection, keymap) -
     if stable is None:
         return {}
     counts = {"étables lues": 0, "enclos lus": 0, "aperçus d'accouplement": 0, "naissances": 0}
-    keys = [m.key for m in (stable, paddock, update, start, stop, request, confirm, preview, birth) if m is not None]
+    keys = [m.key for m in (stable, paddock, update, start, stop, request, confirm, preview, birth) if m is not None] + [live.MAP_CHANGE]
     opened: dict[int, int] = {}
+    maps: dict[int, int] = {}  # carte où se trouve le joueur, sur chaque connexion
     pairs: dict[int, tuple[str, str]] = {}  # dernier couple choisi sur chaque connexion
     rows = archive.execute(
         f"SELECT connection_id, ts, key, body FROM messages WHERE key IN ({','.join('?' * len(keys))}) ORDER BY ts", keys
     )
     for connection_id, ts, key, body in rows:
-        if key == stable.key and (mounts := breeding.parse_stable(body, stable)) is not None:
+        if key == live.MAP_CHANGE:
+            if (map_id := journal.number(live.flat(body, key), "1")) is not None:
+                maps[connection_id] = map_id
+        elif key == stable.key and (mounts := breeding.parse_stable(body, stable)) is not None:
             db.save_stable(market, mounts, ts)
             counts["étables lues"] += 1
         elif paddock is not None and key == paddock.key and (seen := breeding.parse_paddock(body, paddock, stable)) is not None:
-            opened[connection_id] = seen.paddock_id
-            db.save_paddock(market, seen.paddock_id, seen, ts)
+            number = breeding_analysis.paddock_here(market, seen, ts, maps.get(connection_id))
+            if number is None:
+                opened.pop(connection_id, None)
+                continue
+            opened[connection_id] = number
+            db.save_paddock(market, number, seen, ts)
             counts["enclos lus"] += 1
         elif any(m is not None and key == m.key for m in (request, confirm)):
             mapping = request if request is not None and key == request.key else confirm

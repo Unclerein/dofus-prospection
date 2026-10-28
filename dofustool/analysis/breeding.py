@@ -281,6 +281,40 @@ def load(conn: sqlite3.Connection) -> list[Paddock]:
     return out
 
 
+def which_paddock(conn: sqlite3.Connection, objects, uids, at: float, map_id: int | None = None) -> tuple[int | None, bool]:
+    """L'enclos connu qu'on vient d'ouvrir sur place (le jeu ne dit pas lequel), et si c'est sûr.
+
+    La carte d'un enclos ne change pas : une fois apprise, elle suffit. Sinon, celui où sont déjà le plus de ces
+    montures (sûr), ou celui dont les objets, projetés à cette heure, sont les plus proches (un objet arrêté garde
+    ses points ; sûr seulement s'il n'y a qu'un enclos connu)."""
+    known = load(conn)
+    if map_id is not None:
+        row = conn.execute("SELECT paddock_id FROM paddock_maps WHERE map_id = ?", (map_id,)).fetchone()
+        if row is not None and any(p.paddock_id == row[0] for p in known):
+            return row[0], True
+    if not known:
+        return None, False
+    uids = list(uids)
+    placed: dict[int, int] = {}
+    for (place,) in conn.execute(f"SELECT place FROM mounts WHERE uid IN ({','.join('?' * len(uids))})", uids):
+        placed[place] = placed.get(place, 0) + 1
+    gap = lambda p: sum(abs(a - b) for a, b in zip(project(p, at).objects, objects))  # noqa: E731
+    best = min(known, key=lambda p: (-placed.get(p.paddock_id, 0), gap(p))).paddock_id
+    return best, placed.get(best, 0) > 0 or len(known) == 1
+
+
+def paddock_here(conn: sqlite3.Connection, seen, at: float, map_id: int | None) -> int | None:
+    """Le numéro d'un enclos lu (messages.breeding.Paddock) : le sien, ou celui reconnu s'il a été ouvert sur place,
+    dont la carte est alors retenue quand c'est sûr."""
+    if seen.paddock_id is not None:
+        return seen.paddock_id
+    number, sure = which_paddock(conn, seen.objects, (m.uid for m in seen.mounts), at, map_id)
+    if sure and map_id is not None:
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO paddock_maps VALUES (?, ?)", (map_id, number))
+    return number
+
+
 def project(p: Paddock, until: float, tiers=TIERS) -> Paddock:
     """L'enclos tel qu'il sera à cette heure-là, clics compris ; au plus HORIZON_S après sa dernière vue."""
     state = p.copy()

@@ -54,7 +54,7 @@ class Mount:
 
 @dataclass(frozen=True, slots=True)
 class Paddock:
-    paddock_id: int | None  # absent d'une mise à jour : c'est l'enclos ouvert
+    paddock_id: int | None  # absent d'une mise à jour (c'est l'enclos ouvert) et d'un enclos ouvert sur place
     active: tuple[int, ...]  # objets d'élevage en marche
     objects: tuple[int, ...]  # points de chacun des 6 objets
     mounts: tuple[Mount, ...]
@@ -260,7 +260,7 @@ def _content(content: bytes, f: dict[str, int], stable: Mapping) -> tuple[tuple[
 
 
 def parse_paddock(body: bytes, mapping: Mapping, stable: Mapping | None) -> Paddock | None:
-    """Un enclos à son ouverture ; stable : la table de l'étable, pour lire les montures."""
+    """Un enclos à son ouverture, à distance ou sur place ; stable : la table de l'étable, pour lire les montures."""
     if stable is None:
         return None
     f = mapping.fields
@@ -268,7 +268,7 @@ def parse_paddock(body: bytes, mapping: Mapping, stable: Mapping | None) -> Padd
         top = list(iter_fields(body))
         if len(top) != 1 or top[0][0] != f["wrap"] or top[0][1] != LEN:
             return None
-        paddock_id, content = 0, None  # l'enclos n° 0 arrive sans son numéro : un champ à 0 n'est pas envoyé
+        paddock_id = content = None  # ouvert sur place, l'enclos arrive sans son numéro (analysis.breeding.which_paddock)
         for number, wire_type, value in iter_fields(top[0][2]):
             if number == f["paddock_id"] and wire_type == VARINT:
                 paddock_id = value

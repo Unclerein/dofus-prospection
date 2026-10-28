@@ -208,6 +208,11 @@ CREATE TABLE IF NOT EXISTS mounts (
     sterile   INTEGER NOT NULL,
     seen_at   REAL NOT NULL
 ) WITHOUT ROWID;
+-- La carte de chaque enclos, apprise en l'ouvrant sur place : le jeu ne dit alors pas lequel c'est.
+CREATE TABLE IF NOT EXISTS paddock_maps (
+    map_id     INTEGER PRIMARY KEY,
+    paddock_id INTEGER NOT NULL
+);
 -- Le joueur lance (active 1) ou coupe (0) un objet de l'enclos : rejoué après la dernière vue de l'enclos.
 CREATE TABLE IF NOT EXISTS paddock_toggles (
     paddock_id INTEGER NOT NULL,
@@ -601,7 +606,7 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
             if have and column.split()[0] not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
-    # L'étable était la place 0, jusqu'à ce qu'un enclos n° 0 apparaisse : tant qu'il n'est pas enregistré, 0 veut dire l'étable.
+    # L'étable était la place 0 : -1 laisse tous les numéros aux enclos. Sans enclos n° 0 enregistré, 0 veut dire l'étable.
     stale = "FROM mounts WHERE place = 0 AND NOT EXISTS (SELECT 1 FROM paddocks WHERE paddock_id = 0)"
     if conn.execute(f"SELECT 1 {stale}").fetchone() is not None:
         try:
@@ -775,7 +780,7 @@ def _save_mounts(conn: sqlite3.Connection, mounts, place: int, at: float) -> Non
     )
 
 
-STABLE = -1  # la place des montures de l'étable ; les enclos sont numérotés à partir de 0
+STABLE = -1  # la place des montures de l'étable, hors des numéros d'enclos
 
 
 def save_stable(conn: sqlite3.Connection, mounts, at: float) -> None:

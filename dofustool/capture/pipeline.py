@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import db, identify
+from ..analysis import breeding as breeding_analysis
 from ..archive import Archive
 from ..fight import live
 from ..messages import Mapping, avg_prices, breeding, characters, exchange, fm, hdv_listings, inventory, load_keymap, market_history, sales, storage, trades
@@ -331,9 +332,14 @@ class Pipeline:
         if mapping is not None and msg.key == mapping.key:
             paddock = breeding.parse_paddock(msg.body, mapping, stable)
             if paddock is not None:
-                watch.paddock = paddock.paddock_id
-                db.save_paddock(self.market, paddock.paddock_id, paddock, msg.ts)
-                log.info("Enclos %d enregistré : %d montures.", paddock.paddock_id, len(paddock.mounts))
+                here = self.fight.map_id if self.fight is not None else None
+                number = breeding_analysis.paddock_here(self.market, paddock, msg.ts, here)
+                watch.paddock = number
+                if number is None:
+                    log.info("Enclos ouvert sur place, pas encore reconnu : ouvre-le une fois à distance.")
+                    return
+                db.save_paddock(self.market, number, paddock, msg.ts)
+                log.info("Enclos %d enregistré : %d montures.", number, len(paddock.mounts))
             return
 
         for name in ("mating_preview_request", "mating_confirm"):
