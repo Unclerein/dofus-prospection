@@ -25,12 +25,18 @@ prêtées au mauvais monstre. Depuis, les notes suivent les règles ci-dessous, 
    `data/bestiary/<id>-guide.txt` (texte brut du guide), `<id>-jeu.txt` (fiche calculée) et `data/bestiary/lot.json`.
    Un donjon sans guide est signalé dans `lot.json` : on le passe.
 3. **Un agent par donjon, en parallèle** : outil Agent, `subagent_type` « general-purpose », `model` « sonnet »,
-   `run_in_background` vrai, avec la consigne ci-dessous remplie.
+   avec la consigne ci-dessous remplie (les agents tournent d'eux-mêmes en arrière-plan). Pour économiser, écrire la
+   consigne une fois dans un fichier et n'envoyer à chaque agent que `{ID}`, `{NOM}`, `{URL}` et le chemin du fichier.
+   Une session ouverte dans une worktree ne peut pas écrire dans `C:\dofus-test` : les agents écrivent alors dans le
+   dossier temporaire de la session, et on déplace les 5 notes dans `data/bestiary/notes` à la fin du lot.
 4. **Vérifier chaque note à son retour**, contre `<id>-guide.txt` :
    - chaque point essentiel ;
    - l'ordre de focus : il doit être dans le guide, sinon `focus = []` ;
    - chaque mécanique de monstre ;
-   - quelques sorts tirés au hasard.
+   - quelques sorts tirés au hasard ;
+   - les erreurs qui reviennent à chaque lot malgré la consigne (règle 8 de la consigne) : chiffres de dégâts ou de PV,
+     focus tiré d'un succès ou de la composition de l'équipe, conseil absent du guide, ligne tirée de l'expédition de
+     guilde, section pour une invocation hors du donjon (le test la refuse).
 
    Chercher les passages avec grep, ne pas lire le guide en entier. Corriger soi-même ce qui est faux ou supprimer la
    ligne. Lire le rapport de l'agent : il signale les contradictions et les trous du guide.
@@ -88,7 +94,10 @@ fausse.
 1. Rien d'inventé, rien de déduit.
    - Chaque affirmation correspond à ce que le guide dit explicitement, ou à un chiffre de la base ou de la fiche
      calculée.
-   - focus = seulement les monstres que le guide classe, dans son ordre, sinon [].
+   - N'ajoute pas de conseil (« tue-le vite », « évite-le ») que le guide ne donne pas.
+   - focus = seulement les monstres que le guide classe, dans son ordre, dans sa stratégie générale. Pas l'ordre
+     d'un succès, pas un ordre qui dépend de la composition de l'équipe (dans ce cas, ne garde que la partie qui ne
+     dépend de rien, ou []).
    - Une mécanique n'est rattachée à un monstre que si le guide le fait clairement. Si le guide met les sorts sans nom
      de monstre, recoupe avec MonsterData.spells et n'attribue que ce qui est sûr.
 2. Si le guide et la base se contredisent : pour un chiffre, la base gagne ; pour une mécanique, écris celle du guide
@@ -98,16 +107,32 @@ fausse.
 4. Pour chaque monstre, le résumé : portee (jusqu'où il frappe, avec ou sans ligne de vue), deplacement (ce qui le
    déplace ou te déplace), mecanique (invisibilité et sa durée, invulnérabilité et comment elle vient et part, autre
    mécanique). Plus la liste de ses sorts que le guide décrit.
-5. Ne fais pas de section pour un monstre qui n'apparaît que dans une variante spéciale du combat (combat à deux boss,
-   expédition).
-6. Passe de vérification : relis le guide, retrouve pour chaque ligne le passage qui la justifie, et supprime ce que tu
+5. EXPÉDITION DE GUILDE : ignore-la COMPLÈTEMENT. N'utilise rien de cette partie du guide (ni ses sorts, ni ses
+   portées, ni ses mécaniques, ni ses ordres de focus, ni ses onglets « Sorts »), même pour un monstre que le reste du
+   guide décrit mal : dans ce cas, laisse le champ vide. Même règle pour toute autre variante spéciale (combat à deux
+   boss). Les tactiques de succès ne servent ni à l'essentiel ni au focus. Pas de section pour un monstre qui
+   n'apparaît que dans une variante.
+6. Sections [monstres.<id>] UNIQUEMENT pour les ids listés dans la fiche calculée ({ID}-jeu.txt). Une invocation
+   absente de cette fiche n'a pas de section : mets ce qui compte sur elle dans l'essentiel ou dans la section du
+   monstre qui l'invoque.
+7. Passe de vérification : relis le guide, retrouve pour chaque ligne le passage qui la justifie, et supprime ce que tu
    ne peux pas justifier.
+8. Erreurs que les notes précédentes ont TOUTES faites, corrigées à la main ensuite. Avant de rendre, relis ta note
+   une fois pour chacune :
+   - un chiffre de dégâts, de PV, de soin ou de pourcentage de résistance → supprime-le ;
+   - un focus tiré d'un succès (Duo, Zombie, Premier, Hardi…) ou d'un ordre « si tu as un Iop / un Sacrieur… » →
+     garde seulement la partie qui ne dépend de rien, sinon [] ;
+   - un conseil que le guide ne donne pas dans son sens (« tue-le en premier », « reste loin ») → supprime-le ;
+   - une ligne prise dans l'expédition de guilde ou dans une tactique de succès → supprime-la ;
+   - une section pour une invocation absente de {ID}-jeu.txt → supprime la section ;
+   - une précision ajoutée « pour faire complet » (durée, nombre de tours, élément) que le guide ne donne pas →
+     supprime-la.
 
 ## Format : écris C:\dofus-test\data\bestiary\notes\{FICHIER}
 donjon = {ID}
 nom = "{NOM}"
 source = "Dofus pour les Noobs — {URL}"
-date_source = "AAAA-MM-JJ"   # dernière mise à jour affichée dans le guide, sinon date de mise en ligne
+date_source = "AAAA-MM-JJ"   # dernière mise à jour affichée dans le guide, sinon date de mise en ligne, sinon ""
 statut = "à confirmer"
 bandeau = "≤ 70 caractères"
 focus = [ids]
@@ -117,7 +142,7 @@ type = "ok" ou "danger"
 titre = "≤ 40 caractères"
 texte = "≤ 110 caractères"
 
-[monstres.<id>]   # un par monstre du donjon, boss compris ; nom exact du jeu toujours présent
+[monstres.<id>]   # un par monstre de la fiche calculée, boss compris ; nom exact du jeu toujours présent
 nom = "…"
 portee = "≤ 90"
 deplacement = "≤ 90"
@@ -129,13 +154,15 @@ portee = "PO min à max, ligne de vue oui/non, en ligne si c'est le cas"   # chi
 effet = "≤ 110 caractères : élément, effet, en tes mots ; pas de valeurs de dégâts"
 limite = "≤ 60 : relance, x par tour/par cible, dès le tour N"   # seulement si connu
 
-Vérifie avec tomllib que le fichier se lit, et que les ids existent et appartiennent au donjon. Ne touche à AUCUN autre
+Vérifie avec tomllib que le fichier se lit, que TOUTES les longueurs maximales sont respectées (mesure-les en
+Python à la fin), et que les ids sont dans la fiche calculée. Ne touche à AUCUN autre
 fichier du dépôt. Ni commit, ni push.
 
 ## Rendu final (court)
 1. Ce que le guide ne dit pas, et que tu as laissé vide.
 2. Les contradictions entre le guide et la base.
 3. La date du guide.
+4. Ce que la relecture de la règle 8 t'a fait retirer.
 
 Pas de recopie de la note.
 ```
