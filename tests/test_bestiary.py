@@ -170,19 +170,20 @@ def test_a_wanted_poster_note_makes_its_monster_the_star_of_the_card(game, tmp_p
     assert ("SPÉCIAL", "Se soigne") in sheet.rows and sheet.essentials == (("danger", "Seule", "Elle frappe fort."),)
 
 
-def test_the_dungeons_page_lists_and_shows_a_dungeon_and_marks_a_note_verified(game, sample, tmp_path):
+def test_the_bestiary_lists_dungeons_monsters_and_wanted_posters_and_shows_each(game, sample):
     from collections import Counter
 
-    from dofustool.bestiary import notes, pages
+    from dofustool.bestiary import pages
 
     listing = pages.index(game, sample, {}, Counter({98: 12}))
     assert listing["dungeons"][0]["id"] == 98 and listing["dungeons"][0]["status"] == "note"  # le plus joué d'abord
     assert "Klûtiste" in listing["dungeons"][0]["monsters"] and len(listing["wanted"]) > 50
+    klutiste = next(m for m in listing["monsters"] if m["id"] == 4452)
+    assert klutiste["where"] == "Temple de Koutoulou" and klutiste["status"] == "note" and len(listing["monsters"]) > 3000
     page = pages.dungeon_page(game, sample, 98)
     assert [m["name"] for m in page["monsters"]][:2] == ["Larve de Koutoulou", "Klûtiste"]  # le boss, puis l'ordre de focus
-    assert page["note_key"] == "donjon-98" and page["source"] == "https://exemple" and len(page["essentials"]) == 5
+    assert page["source"] == "https://exemple" and len(page["essentials"]) == 5
     assert pages.dungeon_page(game, sample, 140)["status"] == "calculé" and pages.dungeon_page(game, sample, 999999) is None
-    assert pages.set_verified("donjon-98", True, tmp_path)
-    assert notes.load(tmp_path)[98].status == pages.VERIFIED
-    assert pages.set_verified("donjon-98", False, tmp_path) and notes.load(tmp_path)[98].status == pages.PENDING
-    assert not pages.set_verified("../config", True, tmp_path) and not pages.set_verified("donjon-1", True, tmp_path)
+    alone = pages.monster_page(game, sample, {}, 4452)
+    assert alone["kind"] == "monstre" and alone["dungeons"][0] == {"id": 98, "name": "Temple de Koutoulou"}  # puis les expéditions
+    assert alone["monsters"][0]["focus_rank"] == 1 and pages.monster_page(game, sample, {}, 99999999) is None

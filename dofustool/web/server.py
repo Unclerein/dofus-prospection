@@ -123,6 +123,9 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                 if match := re.fullmatch(r"/api/dungeons/(\d{1,7})", path):
                     page = api.dungeon(int(match[1]))
                     return self._json(page) if page else self._not_found()
+                if match := re.fullmatch(r"/api/monsters/(\d{1,7})", path):
+                    page = api.monster(int(match[1]))
+                    return self._json(page) if page else self._not_found()
                 if match := re.fullmatch(r"/api/wanted/(\d{1,7})", path):
                     page = api.wanted(int(match[1]))
                     return self._json(page) if page else self._not_found()
@@ -243,12 +246,6 @@ def make_handler(api: Api, icon_dir: Path = ICON_DIR) -> type[BaseHTTPRequestHan
                     if not isinstance(payload, dict) or not isinstance(payload.get("mode"), str):
                         raise ValueError("mode attendu")
                     return self._json(api.set_equipment_price(payload["mode"]))
-                if path == "/api/dungeons/verify":
-                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
-                    payload = json.loads(self.rfile.read(length) or b"{}")
-                    if not isinstance(payload, dict) or not isinstance(payload.get("key"), str):
-                        raise ValueError("note attendue")
-                    return self._json(api.verify_note(payload["key"], bool(payload.get("verified", True))))
                 if path == "/api/config":
                     length = min(int(self.headers.get("Content-Length") or 0), 65536)
                     payload = json.loads(self.rfile.read(length) or b"{}")

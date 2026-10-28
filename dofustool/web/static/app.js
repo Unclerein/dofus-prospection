@@ -290,7 +290,7 @@ const NAV = [
   ['sales', 'Mes ventes', 'M2.5 5.5h13l-1.2 8a1.5 1.5 0 01-1.500 1.300H5.2a1.5 1.5 0 01-1.500-1.300zM6 5.5V4.500a3 3 0 016 0v1', 'Mon compte'],
   ['workshop', 'Atelier', 'M3 4.500h12M3 9h12M3 13.500h7M13 12l1.500 1.500 3-3', 'Mon compte'],
   ['breeding', 'Élevage', 'M3 13a6 6 0 0112 0M9 13l2.600-3.400M2.500 15.500h13', 'Mon compte'],
-  ['dungeons', 'Donjons', 'M9 2l6 2.5v4c0 3.5-2.6 6.2-6 7.5-3.4-1.3-6-4-6-7.5v-4zM9 6v5M6.5 8.5h5', 'Outils'],
+  ['bestiary', 'Bestiaire', 'M9 2l6 2.5v4c0 3.5-2.6 6.2-6 7.5-3.4-1.3-6-4-6-7.5v-4zM9 6v5M6.5 8.5h5', 'Outils'],
   ['jobs', 'Métiers', 'M3 15.5h12M5 15.5V8.5l4-5.5 4 5.5v7M7.5 15.5v-3.500h3v3.500', 'Outils'],
   ['ignored', 'Ignorés', 'M3 3l12 12M7.4 7.5a2.2 2.2 0 003.1 3.1M5 5.3C3.4 6.4 2.3 7.9 1.8 9c1 2.3 3.7 5 7.2 5 1.1 0 2.1-.3 3-.7M8 4.1c.3 0 .7-.1 1-.1 3.5 0 6.200 2.700 7.200 5-.3.7-.8 1.500-1.500 2.300', 'Outils'],
   ['status', 'État', 'M9 15.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM9 5.5V9l2.5 1.5', 'pied'],
@@ -340,7 +340,7 @@ async function render() {
   const token = ++renderToken;
   renderNav();
   const r = route();
-  const pages = { today: pageToday, workshop: pageWorkshop, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, dungeons: pageDungeons, breeding: pageBreeding, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
+  const pages = { today: pageToday, workshop: pageWorkshop, crafts: pageCrafts, stock: pageStock, sales: pageSales, ignored: pageIgnored, jobs: pageJobs, bestiary: pageBestiary, breeding: pageBreeding, forge: pageForge, trends: pageTrends, item: pageItem, status: pageStatus, config: pageConfig, welcome: pageWelcome };
   try {
     const nodes = await (pages[r.page] || pageCrafts)(r);
     if (token !== renderToken) return; // une navigation plus récente a pris le relais
@@ -806,82 +806,97 @@ async function setTypeIgnored(type, ignored) {
   toastTimer = setTimeout(() => { $toast.hidden = true; }, 7000);
 }
 
-// ---------------------------------------------------------------- Donjons : fiches de monstres
+// ---------------------------------------------------------------- Bestiaire : fiches de monstres
 
-const DJ_STATUS = { 'vérifié': ['ok', 'vérifié'], note: ['note', 'note'], 'calculé': ['calc', 'calculé'] };
+const BESTIARY_SHOWN = 80; // monstres listés sans recherche ; 5 000 lignes d'un coup alourdiraient la page
+const BESTIARY_FOUND = 200;
 const monsterImage = (gfx, size, boss) => h('span', { class: 'dj-well' + (boss ? ' boss' : ''), style: `width: ${size}px; height: ${size}px` },
   gfx ? h('img', { src: `/icons/monsters/${gfx}.png`, alt: '', loading: 'lazy', style: `width: ${size - 6}px; height: ${size - 6}px` }) : null);
 
-async function pageDungeons(r) {
-  const data = await cached('dungeons', '/api/dungeons');
-  const ui = S.ui.dungeons || (S.ui.dungeons = { q: '', tab: data.dungeons.some((d) => d.visits) ? 'played' : 'all' });
-  const wantedView = r.sub === 'avis';
-  if (wantedView) ui.tab = 'wanted';
-  else if (r.id && ui.tab === 'wanted') ui.tab = 'all';
+/** Ouvre une fiche sans repartir en haut de la page ni perdre la position de la liste. */
+function openSheet(event, href) {
+  event.preventDefault();
+  const list = document.querySelector('.dj-rows');
+  const listY = list ? list.scrollTop : 0;
+  history.pushState(null, '', href);
+  refresh().then(() => { const again = document.querySelector('.dj-rows'); if (again) again.scrollTop = listY; });
+}
+
+async function pageBestiary(r) {
+  const data = await cached('bestiary', '/api/dungeons');
+  const ui = S.ui.bestiary || (S.ui.bestiary = { q: '', tab: 'dungeons' });
+  const kind = r.sub === 'avis' ? 'avis' : r.sub === 'monstre' ? 'monstre' : r.id ? 'donjon' : null;
+  if (kind) ui.tab = { avis: 'wanted', monstre: 'monsters', donjon: 'dungeons' }[kind];
   const query = norm(ui.q.trim());
   const matches = (entry) => !query || norm(entry.name).includes(query) || norm(entry.boss || '').includes(query)
-    || (entry.monsters || []).some((m) => norm(m).includes(query));
-  const rows = (ui.tab === 'wanted' ? data.wanted : ui.tab === 'played' ? data.dungeons.filter((d) => d.visits) : data.dungeons).filter(matches);
-  const kind = ui.tab === 'wanted' ? 'avis' : 'donjon';
-  // Rien de choisi : le premier de la liste.
-  const pick = r.id || (rows[0] && rows[0].id);
-  const detail = pick ? await cached(`dj:${kind}:${pick}`, kind === 'avis' ? `/api/wanted/${pick}` : `/api/dungeons/${pick}`) : null;
+    || norm(entry.where || '').includes(query) || (entry.monsters || []).some((m) => norm(m).includes(query));
+  const source = { dungeons: data.dungeons, monsters: data.monsters, wanted: data.wanted }[ui.tab];
+  const found = source.filter(matches);
+  const limit = ui.tab === 'monsters' ? (query ? BESTIARY_FOUND : BESTIARY_SHOWN) : found.length;
+  const rows = found.slice(0, limit);
+  const rowKind = { dungeons: 'donjon', monsters: 'monstre', wanted: 'avis' }[ui.tab];
+  const pick = kind ? r.id : rows[0] && rows[0].id; // rien de choisi : le premier de la liste
+  const pickKind = kind || rowKind;
+  const paths = { donjon: (id) => `/api/dungeons/${id}`, monstre: (id) => `/api/monsters/${id}`, avis: (id) => `/api/wanted/${id}` };
+  const detail = pick ? await cached(`bestiary:${pickKind}:${pick}`, paths[pickKind](pick)) : null;
+  const href = (k, id) => (k === 'donjon' ? `#/bestiary/${id}` : `#/bestiary/${k}/${id}`);
 
   let typing = null;
   const head = h('header', { class: 'head' },
-    h('div', {}, h('h1', {}, 'Donjons'),
+    h('div', {}, h('h1', {}, 'Bestiaire'),
       h('div', { class: 'lead' }, `Ce qu'il faut savoir de chaque monstre avant d'entrer. ${data.notes} fiches écrites d'après les guides, les autres calculées depuis les données du jeu.`)),
     h('div', { class: 'field', style: 'width: 300px; max-width: 100%' }, h('label', { for: 'dj-q' }, 'Chercher un donjon ou un monstre'),
       h('input', { id: 'dj-q', type: 'search', value: ui.q, placeholder: 'Koutoulou, Klûtiste…', autocomplete: 'off',
         oninput: (e) => { clearTimeout(typing); const value = e.target.value; typing = setTimeout(() => { ui.q = value; refresh(); }, 200); } })));
 
-  const tab = (id, label) => h('button', { 'aria-pressed': String(ui.tab === id), onclick: () => { ui.tab = id; location.hash = '#/dungeons'; refresh(); } }, label);
-  const href = (entry) => (kind === 'avis' ? `#/dungeons/avis/${entry.id}` : `#/dungeons/${entry.id}`);
-  const list = h('nav', { class: 'dj-list', 'aria-label': 'Liste des donjons' },
-    h('div', { class: 'dj-tabs' }, tab('played', 'Joués'), tab('all', 'Tous'), tab('wanted', 'Avis de recherche')),
-    h('div', { class: 'dj-rows' }, rows.length
-      ? rows.map((entry) => {
-        const [css, label] = DJ_STATUS[entry.status];
-        const sub = kind === 'avis' ? `niv. ${entry.level}` : `niv. ${entry.level} · ${entry.boss}${entry.visits ? ` · ${entry.visits} passages` : ''}`;
-        return h('a', { class: 'dj-row', href: href(entry), 'aria-current': entry.id === pick ? 'page' : null },
-          monsterImage(entry.gfx, 44),
-          h('span', { style: 'flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px' },
-            h('span', { class: 'name' }, entry.name), h('span', { class: 'muted small' }, sub)),
-          h('span', { class: `dj-tag ${css}` }, label));
-      })
-      : h('div', { class: 'empty' }, ui.tab === 'played' && !query ? 'Aucun donjon joué dans les 30 derniers jours.' : 'Rien ne correspond.')));
+  const tab = (id, label) => h('button', { 'aria-pressed': String(ui.tab === id), onclick: (e) => { ui.tab = id; openSheet(e, '#/bestiary'); } }, label);
+  const subtitle = (entry) => (ui.tab === 'dungeons'
+    ? `niv. ${entry.level} · ${entry.boss}${entry.visits ? ` · ${entry.visits} passages` : ''}`
+    : `niv. ${entry.level}${entry.where ? ` · ${entry.where}` : ''}`);
+  const more = found.length - rows.length;
+  const list = h('nav', { class: 'dj-list', 'aria-label': 'Bestiaire' },
+    h('div', { class: 'dj-tabs' }, tab('dungeons', 'Donjons'), tab('monsters', 'Monstres'), tab('wanted', 'Avis de recherche')),
+    h('div', { class: 'dj-rows' },
+      rows.length
+        ? rows.map((entry) => {
+          const link = href(rowKind, entry.id);
+          return h('a', { class: 'dj-row', href: link, 'aria-current': entry.id === pick && rowKind === pickKind ? 'page' : null, onclick: (e) => openSheet(e, link) },
+            monsterImage(entry.gfx, 44),
+            h('span', { style: 'flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px' },
+              h('span', { class: 'name' }, entry.name), h('span', { class: 'muted small' }, subtitle(entry))),
+            entry.status === 'note' && h('span', { class: 'dj-tag note' }, 'note'));
+        })
+        : h('div', { class: 'empty' }, 'Rien ne correspond.'),
+      more > 0 && h('div', { class: 'muted small', style: 'padding: 12px 14px' },
+        query ? `Et ${fmt(more)} autres : précise la recherche.` : `Tape un nom pour chercher parmi les ${fmt(found.length)} monstres.`)));
 
-  return [head, h('div', { class: 'dj' }, list, h('div', { class: 'dj-main' }, detail ? dungeonDetail(detail) : h('div', { class: 'panel empty' }, 'Choisis un donjon.')))];
+  return [head, h('div', { class: 'dj' }, list, h('div', { class: 'dj-main' }, detail ? bestiaryDetail(detail) : h('div', { class: 'panel empty' }, 'Choisis une fiche.')))];
 }
 
-function dungeonDetail(d) {
-  const [css] = DJ_STATUS[d.status];
-  const verified = d.status === 'vérifié';
+function bestiaryDetail(d) {
   const day = d.date ? d.date.split('-').reverse().join('/') : '';
-  const toggle = async () => {
-    await api('/api/dungeons/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: d.note_key, verified: !verified }) });
-    delete S.cache.dungeons;
-    delete S.cache[`dj:${d.kind}:${d.id}`];
-    refresh();
-  };
-  const source = d.note_key
-    ? h('span', { class: 'muted small' }, `Boss : ${d.boss} · ${d.monsters.length} monstre${d.monsters.length > 1 ? 's' : ''} · d'après `,
-      h('a', { href: d.source, target: '_blank', rel: 'noopener' }, 'Dofus pour les Noobs'), day ? `, mis à jour le ${day}` : '')
-    : h('span', { class: 'muted small' }, `Boss : ${d.boss} · pas encore de fiche écrite : ce qui suit est calculé depuis les données du jeu.`);
+  const kicker = { donjon: 'DONJON', avis: 'AVIS DE RECHERCHE', monstre: 'MONSTRE' }[d.kind];
+  let source;
+  if (d.kind === 'monstre') {
+    source = h('span', { class: 'muted small' }, d.dungeons.length ? 'Croisé dans : ' : "Dans aucun donjon.",
+      d.dungeons.flatMap((g, i) => [i ? ', ' : '', h('a', { href: `#/bestiary/${g.id}`, onclick: (e) => openSheet(e, `#/bestiary/${g.id}`) }, g.name)]));
+  } else if (d.status === 'note') {
+    source = h('span', { class: 'muted small' }, `Boss : ${d.boss} · ${d.monsters.length} monstre${d.monsters.length > 1 ? 's' : ''} · d'après `,
+      h('a', { href: d.source, target: '_blank', rel: 'noopener' }, 'Dofus pour les Noobs'), day ? `, mis à jour le ${day}` : '');
+  } else {
+    source = h('span', { class: 'muted small' }, `Boss : ${d.boss} · pas encore de fiche écrite : ce qui suit est calculé depuis les données du jeu.`);
+  }
   const header = h('section', { class: 'panel dj-head' },
-    monsterImage(d.gfx, 84, true),
+    monsterImage(d.gfx, 84, d.kind !== 'monstre'),
     h('div', { style: 'flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px' },
-      h('span', { class: 'dj-kicker' }, `${d.kind === 'avis' ? 'AVIS DE RECHERCHE' : 'DONJON'} · NIVEAU ${d.level}`), h('h2', {}, d.name), source),
-    d.note_key && h('div', { style: 'display: flex; flex-direction: column; align-items: flex-end; gap: 8px' },
-      h('span', { class: `dj-tag ${css}` }, verified ? 'Vérifié en jeu' : 'À confirmer en jeu'),
-      h('button', { class: 'btn', onclick: toggle }, verified ? 'Remettre « à confirmer »' : '✓ Vérifié en jeu')));
+      h('span', { class: 'dj-kicker' }, `${kicker} · NIVEAU ${d.level}`), h('h2', {}, d.name), source));
 
   const blocks = [header];
   const points = d.essentials.length > 0 && h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, "L'essentiel")),
     h('div', { class: 'dj-points' }, d.essentials.map(([type, title, text]) => h('div', { class: 'dj-point' },
       h('span', { class: 'dj-sign', style: `background: ${type === 'ok' ? 'var(--gain)' : '#F09646'}`, 'aria-label': type === 'ok' ? 'À faire' : 'Danger' }, type === 'ok' ? '✓' : '!'),
       h('span', {}, h('b', {}, `${title}. `), h('span', { style: 'color: var(--soft)' }, text))))));
-  const focus = d.note_key && h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Ordre de focus')),
+  const focus = d.kind === 'donjon' && d.status === 'note' && h('section', { class: 'panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Ordre de focus')),
     d.focus.length
       ? h('div', { class: 'dj-focus' }, d.focus.map((f, i) => h('figure', {},
         h('span', { style: 'position: relative' }, monsterImage(f.gfx, 64), h('span', { class: 'rank' }, i + 1)), h('figcaption', {}, f.name))))
@@ -3380,7 +3395,7 @@ const DESTINATIONS = [
   ['#/sales', 'Mes ventes', 'lots hdv vendre sous-encheri'],
   ['#/workshop', 'Atelier', 'liste de courses ingredients objectifs stuff almanax'],
   ['#/jobs', 'Métiers', 'xp niveau monter paysan'],
-  ['#/dungeons', 'Donjons', 'monstres boss fiche focus mecanique sorts avis de recherche'],
+  ['#/bestiary', 'Bestiaire', 'donjons monstres boss fiche focus mecanique sorts avis de recherche'],
   ['#/breeding', 'Élevage › Enclos', 'dragodinde enclos serenite amour endurance maturite baffeur caresseur'],
   ['#/breeding/genetics', 'Élevage › Génétique', 'dragodinde couleur generation accouplement chemin arbre'],
   ['#/forge', 'Forgemagie › Par objet', 'fm exo over jets criteres annonces'],

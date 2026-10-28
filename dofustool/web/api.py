@@ -713,7 +713,7 @@ class Api:
         finally:
             conn.close()
 
-    # --- Donjons : fiches de monstres ---------------------------------------------------------------
+    # --- Bestiaire : fiches de monstres ---------------------------------------------------------------
 
     VISITS_S = 600.0  # donjons joués (archive) : recomptés au plus toutes les 10 minutes
 
@@ -754,12 +754,12 @@ class Api:
         with self._bestiary_lock:
             return pages.wanted_page(self._bestiary(), notes.load(), notes.load_wanted(), monster)
 
-    def verify_note(self, key: str, verified: bool) -> dict:
-        from ..bestiary import pages
+    def monster(self, monster: int) -> dict | None:
+        from ..bestiary import notes, pages
 
-        if not pages.set_verified(key, verified):
-            raise ValueError("note inconnue")
-        return {"ok": True}
+        self._bestiary_lock = getattr(self, "_bestiary_lock", threading.Lock())
+        with self._bestiary_lock:
+            return pages.monster_page(self._bestiary(), notes.load(), notes.load_wanted(), monster)
 
     def genetics(self, target: int | None, optimakina: bool = False) -> dict:
         """Les couleurs de dragodindes avec ce qu'on en possède, et le chemin vers la couleur visée."""
