@@ -96,10 +96,22 @@ def test_mounts_are_saved_by_place():
     db.save_stable(c, breeding.parse_stable(stable_body(), STABLE), NOW)
     paddock = breeding.parse_paddock(paddock_body(herd=HERD[2:3]), PADDOCK, STABLE)
     db.save_paddock(c, 1, paddock, NOW + 5)
-    assert c.execute("SELECT place, COUNT(*) FROM mounts GROUP BY place").fetchall() == [(0, 4), (1, 1)]  # la DD n° 3 est sortie de l'étable
+    assert c.execute("SELECT place, COUNT(*) FROM mounts GROUP BY place").fetchall() == [(db.STABLE, 4), (1, 1)]  # la DD n° 3 est sortie de l'étable
     assert c.execute("SELECT objects, active FROM paddocks").fetchone() == ("[24470, 30000, 9210, 20000, 39980, 0]", "[0, 4]")
     db.save_stable(c, breeding.parse_stable(stable_body(HERD[:1]), STABLE), NOW + 10)  # les autres ont quitté l'étable
-    assert c.execute("SELECT COUNT(*) FROM mounts WHERE place = 0").fetchone() == (1,)
+    assert c.execute("SELECT COUNT(*) FROM mounts WHERE place = ?", (db.STABLE,)).fetchone() == (1,)
+
+
+def test_paddock_number_zero_is_not_the_stable():
+    # Le jeu n'envoie pas un champ à 0 : l'enclos n° 0 arrive sans son numéro.
+    f = PADDOCK.fields
+    body = ld(f["wrap"], ld(f["content"], content(f, STABLE.fields, herd=HERD[2:3])))
+    paddock = breeding.parse_paddock(body, PADDOCK, STABLE)
+    assert paddock.paddock_id == 0 and len(paddock.mounts) == 1
+    c = db.connect(":memory:")
+    db.save_stable(c, breeding.parse_stable(stable_body(), STABLE), NOW)
+    db.save_paddock(c, 0, paddock, NOW + 5)
+    assert c.execute("SELECT place, COUNT(*) FROM mounts GROUP BY place").fetchall() == [(db.STABLE, 4), (0, 1)]
 
 
 def test_breeding_messages_are_found_again_after_a_game_update():

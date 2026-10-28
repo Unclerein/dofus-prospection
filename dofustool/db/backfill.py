@@ -92,7 +92,7 @@ def fm_backfill_due(market: sqlite3.Connection) -> bool:
     return False
 
 
-BREEDING_BACKFILL = "breeding_backfill"  # marque dans status : l'élevage a été relu dans l'archive une fois
+BREEDING_BACKFILL = "breeding_backfill_2"  # marque dans status : l'élevage a été relu dans l'archive (2 : enclos n° 0 lisible)
 
 
 def backfill_breeding(archive: sqlite3.Connection, market: sqlite3.Connection) -> dict[str, int] | None:

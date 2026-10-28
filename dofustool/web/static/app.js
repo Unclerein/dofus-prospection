@@ -1662,7 +1662,7 @@ function pathDiagram(plan, byId) {
 }
 
 function mountChoice(m, picked, byId, onPick, disabled) {
-  const where = m.place ? `Enclos ${m.place}` : 'Étable';
+  const where = m.place >= 0 ? `Enclos ${m.place}` : 'Étable';
   const state = m.fecund ? h('span', { class: 'tag good' }, 'Féconde')
     : h('span', { class: 'tag gauge-tag', title: Object.entries(m.missing).map(([gauge, n]) => `${gauge} : il manque ${fmt(n)}`).join(' · ') },
       Object.keys(m.missing).map((gauge) => gaugeIcon(gauge, 12)),

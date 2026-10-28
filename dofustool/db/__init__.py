@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS hdv_replaced (
 CREATE INDEX IF NOT EXISTS hdv_replaced_old ON hdv_replaced (item_id, replaced_uid);
 -- Rattrapage des liens entre annonces sur l'historique déjà en base : fait une fois.
 CREATE TABLE IF NOT EXISTS hdv_relinked (version INTEGER NOT NULL);
--- Élevage : chaque monture telle qu'elle a été vue en dernier, et où (place 0 : l'étable, sinon le numéro de l'enclos).
+-- Élevage : chaque monture telle qu'elle a été vue en dernier, et où (place -1 : l'étable, sinon le numéro de l'enclos).
 -- Les jauges et la sérénité sont celles du moment seen_at : l'enclos les fait bouger ensuite (voir analysis.breeding).
 CREATE TABLE IF NOT EXISTS mounts (
     uid       TEXT PRIMARY KEY,
@@ -601,6 +601,14 @@ def connect(path: Path | str = MARKET_PATH) -> sqlite3.Connection:
             if have and column.split()[0] not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
     conn.executescript(STATIC_SCHEMA + MARKET_SCHEMA)
+    # L'étable était la place 0, jusqu'à ce qu'un enclos n° 0 apparaisse : tant qu'il n'est pas enregistré, 0 veut dire l'étable.
+    stale = "FROM mounts WHERE place = 0 AND NOT EXISTS (SELECT 1 FROM paddocks WHERE paddock_id = 0)"
+    if conn.execute(f"SELECT 1 {stale}").fetchone() is not None:
+        try:
+            with conn:
+                conn.execute(f"UPDATE mounts SET place = {STABLE} WHERE uid IN (SELECT uid {stale})")
+        except sqlite3.OperationalError:
+            pass  # base occupée : ce sera fait à la prochaine ouverture
     if conn.execute("SELECT 1 FROM hdv_relinked").fetchone() is None:
         try:
             relink_history(conn)
@@ -767,10 +775,13 @@ def _save_mounts(conn: sqlite3.Connection, mounts, place: int, at: float) -> Non
     )
 
 
+STABLE = -1  # la place des montures de l'étable ; les enclos sont numérotés à partir de 0
+
+
 def save_stable(conn: sqlite3.Connection, mounts, at: float) -> None:
     """L'étable entière (messages.breeding.parse_stable)."""
     with conn:
-        _save_mounts(conn, mounts, 0, at)
+        _save_mounts(conn, mounts, STABLE, at)
 
 
 def save_paddock(conn: sqlite3.Connection, paddock_id: int, paddock, at: float) -> None:
@@ -831,7 +842,7 @@ def _save_mounts_keep(conn: sqlite3.Connection, mounts, at: float) -> None:
                 "male = excluded.male, color = excluded.color, parents = excluded.parents, serenity = excluded.serenity, "
                 "love = excluded.love, maturity = excluded.maturity, stamina = excluded.stamina, level = excluded.level, "
                 "xp = excluded.xp, sterile = excluded.sterile, seen_at = excluded.seen_at WHERE excluded.seen_at >= mounts.seen_at",
-                (m.uid, place[0] if place else 0, int(m.male), m.color, json.dumps(list(m.parents)), m.serenity, m.love, m.maturity,
+                (m.uid, place[0] if place else STABLE, int(m.male), m.color, json.dumps(list(m.parents)), m.serenity, m.love, m.maturity,
                  m.stamina, m.level, m.xp, int(m.sterile), at),
             )  # fmt: skip
 

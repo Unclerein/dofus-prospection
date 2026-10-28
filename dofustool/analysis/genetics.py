@@ -118,7 +118,7 @@ class Owned:
     level: int
     sterile: bool
     gauges: tuple[int, int, int]  # amour, maturité, endurance
-    place: int  # 0 : étable, sinon numéro de l'enclos
+    place: int  # -1 : étable, sinon numéro de l'enclos
     parents: tuple[int, ...] = ()  # couleurs de ses parents (vide : capturée)
 
     @property

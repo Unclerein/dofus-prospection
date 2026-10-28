@@ -268,7 +268,7 @@ def parse_paddock(body: bytes, mapping: Mapping, stable: Mapping | None) -> Padd
         top = list(iter_fields(body))
         if len(top) != 1 or top[0][0] != f["wrap"] or top[0][1] != LEN:
             return None
-        paddock_id = content = None
+        paddock_id, content = 0, None  # l'enclos n° 0 arrive sans son numéro : un champ à 0 n'est pas envoyé
         for number, wire_type, value in iter_fields(top[0][2]):
             if number == f["paddock_id"] and wire_type == VARINT:
                 paddock_id = value
@@ -279,7 +279,7 @@ def parse_paddock(body: bytes, mapping: Mapping, stable: Mapping | None) -> Padd
         parsed = _content(content, f, stable) if content is not None else None
     except WireError:
         return None
-    if paddock_id is None or parsed is None:
+    if parsed is None:
         return None
     return Paddock(paddock_id, *parsed)
 
