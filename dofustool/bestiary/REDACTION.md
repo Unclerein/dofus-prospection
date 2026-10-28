@@ -169,3 +169,52 @@ Pas de recopie de la note.
 
 `{FICHIER}` : `donjon-{ID}.toml` pour un donjon, par exemple `donjon-67.toml` ; `avis-{ID}.toml` pour un avis de
 recherche.
+
+## Compléter avec Huzounet
+
+[Huzounet](https://huzounet.fr/monsters) a, pour les boss et quelques monstres, une fiche courte : passif, actif,
+stratégie, notes. Elle sert de **deuxième source** pour trouver ce qui manque aux notes déjà écrites. Mêmes interdits
+que pour le guide : ses mentions légales interdisent la reproduction, donc son texte brut reste dans `data/` et on
+n'écrit qu'avec nos mots.
+
+1. **Préparer** : `.venv/Scripts/python -m dofustool.bestiary.prepare --huzounet`. Pour chaque note écrite, il
+   télécharge la fiche de chacun de ses monstres dans `data/bestiary/huz/<monstre>.txt` (`<monstre>.aucune` quand le
+   site n'en a pas ; une page déjà téléchargée ne l'est plus) et écrit `data/bestiary/huz-lot.json` : note, monstres,
+   fichier Huzounet de chacun, et s'il a déjà une section dans la note.
+2. **Comparer, par lots** : un agent Sonnet pour 8 notes (une fiche Huzounet est courte), plusieurs agents en
+   parallèle, avec la consigne ci-dessous. Seules les notes dont au moins un monstre a une fiche Huzounet sont à faire
+   (193 sur 201 le 28/10). Regarder l'usage (`get_usage`) entre deux vagues, comme pour la rédaction.
+3. **Vérifier chaque ajout** contre le fichier Huzounet (grep), comme pour une note neuve. Puis
+   `pytest -q tests/test_bestiary.py`. Une note modifiée part toute seule au hub, la plus récente l'emporte.
+4. **Rapport** : `data/bestiary/huz-rapport.md` (local), une ligne par note : ajouts, contradictions laissées en l'état,
+   rien à ajouter.
+
+### Consigne pour l'agent (répéter le premier paragraphe pour chacune de ses notes)
+
+```
+Tu complètes des notes Dofus 3 déjà écrites et vérifiées, une à une. Pour chacune : la note {NOTE}. Une deuxième source, Huzounet, décrit certains de
+ses monstres : {FICHIERS}. Le guide d'origine (Dofus pour les Noobs) est en texte brut dans {GUIDE}. Fiabilité avant
+tout : n'ajoute rien de douteux.
+
+N'utilise PAS internet. Lis la note, puis chaque fichier Huzounet en entier.
+
+Règles :
+1. Tu AJOUTES seulement ce que Huzounet dit clairement et que la note n'a pas : une mécanique (invulnérabilité et
+   comment elle part, invisibilité, renvoi, état, passif), un déplacement, un point essentiel du combat. Rien de
+   déduit, aucun conseil que Huzounet ne donne pas.
+2. Tu ne SUPPRIMES rien et tu ne réécris pas ce qui est juste. Tu peux préciser une ligne si Huzounet est plus précis
+   ET ne la contredit pas.
+3. Si Huzounet contredit la note : regarde le guide (grep). Si le guide confirme la note, ne touche à rien. Sinon,
+   ne touche à rien non plus : signale la contradiction dans ton rendu, avec les deux versions.
+4. Tes propres mots, très court, mêmes longueurs maximales que la note (texte ≤ 110, mecanique ≤ 90, titre ≤ 40,
+   3 à 5 [[essentiel]] au plus : si c'est plein, remplace seulement un point moins important et dis lequel).
+   Pas de PV, de résistances ni de valeurs de dégâts.
+5. Pas de nouvelle section [monstres.<id>] pour un monstre absent du donjon de la note. Pas de focus tiré de
+   Huzounet si la note a déjà le sien ; si la note a focus = [] et que Huzounet en donne un clairement, mets-le et
+   dis-le.
+6. Ne change ni `source`, ni `statut`, ni `date_source`. Rien d'autre que tes notes n'est modifié. Ni commit, ni push.
+7. Vérifie avec tomllib que le fichier se lit et mesure les longueurs en Python.
+
+Rendu (court), note par note : ce que tu as ajouté ou précisé (une ligne chacun), les contradictions trouvées, et « rien à
+ajouter » le cas échéant. Pas de recopie de la note.
+```
